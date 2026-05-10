@@ -1,0 +1,35 @@
+namespace IBrainChrom2018;
+
+public enum IntegOprtStyle
+{
+	None,
+	DtecDelay,
+	PeakWidth,
+	Threshold,
+	PkSlope,
+	VtVSlope,
+	ResetDtecNeg,
+	ClampNeg,
+	PkWidth,
+	PkThreshold,
+	PkAddPosi,
+	PkAddNeg,
+	PkCut,
+	PkHalfWidth,
+	PkArea,
+	PkVale,
+	SolventPeak,
+	FlowMarker,
+	GroupAdd,
+	GroupDelete,
+	BsTgnt,
+	BsVtV,
+	BsValley,
+	BsTogether,
+	BsForwHorz,
+	BsBackHorz,
+	BsFrontTgnt,
+	BsTailTgnt,
+	Noise,
+	Drift
+}
