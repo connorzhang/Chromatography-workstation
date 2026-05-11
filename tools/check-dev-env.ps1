@@ -12,7 +12,8 @@ function Test-PathReport([string]$path) {
 "User:    $env:USERNAME"
 ""
 
-$vsWhere = "$env:ProgramFiles(x86)\Microsoft Visual Studio\Installer\vswhere.exe"
+$programFilesX86 = ${env:ProgramFiles(x86)}
+$vsWhere = Join-Path $programFilesX86 'Microsoft Visual Studio\Installer\vswhere.exe'
 if (Test-Path $vsWhere) {
   "vswhere: OK"
   & $vsWhere -latest -products * -format json | Out-String

@@ -5,7 +5,7 @@ $src = Join-Path $repoRoot 'bin\Debug\net48'
 $dst = Join-Path $repoRoot 'SF-G'
 
 if (-not (Test-Path $src)) {
-  throw "Source directory not found: $src"
+  throw "Source directory not found: ${src}"
 }
 
 New-Item -ItemType Directory -Force -Path $dst | Out-Null
@@ -37,7 +37,7 @@ foreach ($f in $files) {
 
 if ($missing.Count -gt 0) {
   $missingText = ($missing | Sort-Object) -join ', '
-  throw "Missing files in $src: $missingText"
+  throw "Missing files in ${src}: $missingText"
 }
 
 Get-ChildItem -LiteralPath $dst -File | Sort-Object Name | Select-Object Name, Length

@@ -1,6 +1,4 @@
 <Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
-  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
-
   <PropertyGroup>
     <AssemblyName>IBrainChrom</AssemblyName>
     <GenerateAssemblyInfo>False</GenerateAssemblyInfo>
