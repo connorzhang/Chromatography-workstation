@@ -15,6 +15,7 @@
 
 - 开发环境配置（VS2022）：`docs/DEV_SETUP.md`
 - 参考机 VS2022 信息：`docs/vs2022.txt`
+- 变更记录：`docs/CHANGELOG.md`
 
 ## 依赖说明
 
