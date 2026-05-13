@@ -15,6 +15,7 @@ This repository contains a WinForms desktop application targeting `.NET Framewor
 
 - VS2022 dev environment: `docs/DEV_SETUP.md`
 - Reference machine VS2022 info: `docs/vs2022.txt`
+- Changelog: `docs/CHANGELOG.md`
 
 ## Dependencies
 
