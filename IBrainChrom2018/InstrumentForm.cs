@@ -278,6 +278,16 @@ public class InstrumentForm : LclGnlForm
 		LoadLanguage();
 	}
 
+	public TcpServerSocket GetCurrentTcpSocket()
+	{
+		return ChromDeviceListMgr.Create().CurrentTcpServerSocket;
+	}
+
+	public Instrument GetInstrument()
+	{
+		return instrument;
+	}
+
 	public void btnCaliWindow_Click(object sender, EventArgs e)
 	{
 		LclForm lclForm = caliGnlForm;

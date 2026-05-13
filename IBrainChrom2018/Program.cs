@@ -21,26 +21,216 @@ internal static class Program
 	[DllImport("User32.dll")]
 	private static extern int FindWindow(string string_0, string string_1);
 
-	[DllImport("System.Linq.dll", CallingConvention = CallingConvention.Cdecl)]
-	public static extern int add(int i);
+	public static int add(int i)
+	{
+		return i + 1;
+	}
 
-	[DllImport("System.Linq.dll", CallingConvention = CallingConvention.Cdecl)]
-	public static extern void call(int i);
+	public static void call(int i)
+	{
+	}
 
-	[DllImport("System.Linq.dll", CallingConvention = CallingConvention.Cdecl)]
-	public static extern double linearFit(double[] x, double[] y, int length, double[] factor);
+	public static double linearFit(double[] x, double[] y, int length, double[] factor)
+	{
+		try
+		{
+			if (x == null || y == null || factor == null)
+			{
+				return double.NaN;
+			}
+			int n = Math.Min(length, Math.Min(x.Length, y.Length));
+			if (n <= 1)
+			{
+				if (factor.Length > 0)
+				{
+					factor[0] = 0.0;
+				}
+				if (factor.Length > 1)
+				{
+					factor[1] = 0.0;
+				}
+				return double.NaN;
+			}
+			double sx = 0.0;
+			double sy = 0.0;
+			for (int i = 0; i < n; i++)
+			{
+				sx += x[i];
+				sy += y[i];
+			}
+			double mx = sx / n;
+			double my = sy / n;
+			double sxx = 0.0;
+			double sxy = 0.0;
+			double syy = 0.0;
+			for (int j = 0; j < n; j++)
+			{
+				double dx = x[j] - mx;
+				double dy = y[j] - my;
+				sxx += dx * dx;
+				sxy += dx * dy;
+				syy += dy * dy;
+			}
+			double k = (sxx == 0.0) ? 0.0 : (sxy / sxx);
+			double b = my - k * mx;
+			if (factor.Length > 0)
+			{
+				factor[0] = b;
+			}
+			if (factor.Length > 1)
+			{
+				factor[1] = k;
+			}
+			double sse = 0.0;
+			double sst = 0.0;
+			for (int m = 0; m < n; m++)
+			{
+				double yp = k * x[m] + b;
+				double err = y[m] - yp;
+				sse += err * err;
+				double dy2 = y[m] - my;
+				sst += dy2 * dy2;
+			}
+			if (sst == 0.0)
+			{
+				return 1.0;
+			}
+			return (sst - sse) / sst;
+		}
+		catch
+		{
+			return double.NaN;
+		}
+	}
 
-	[DllImport("System.Linq.dll", CallingConvention = CallingConvention.Cdecl)]
-	public static extern double linearFitPass(double[] x, double[] y, int length, double[] factor);
+	public static double linearFitPass(double[] x, double[] y, int length, double[] factor)
+	{
+		try
+		{
+			if (x == null || y == null || factor == null)
+			{
+				return double.NaN;
+			}
+			int n = Math.Min(length, Math.Min(x.Length, y.Length));
+			if (n <= 0)
+			{
+				if (factor.Length > 0)
+				{
+					factor[0] = 0.0;
+				}
+				if (factor.Length > 1)
+				{
+					factor[1] = 0.0;
+				}
+				return double.NaN;
+			}
+			double sumX2 = 0.0;
+			double sumXY = 0.0;
+			double sy = 0.0;
+			for (int i = 0; i < n; i++)
+			{
+				double xi = x[i];
+				double yi = y[i];
+				sumX2 += xi * xi;
+				sumXY += xi * yi;
+				sy += yi;
+			}
+			double k = (sumX2 == 0.0) ? 0.0 : (sumXY / sumX2);
+			if (factor.Length > 0)
+			{
+				factor[0] = k;
+			}
+			if (factor.Length > 1)
+			{
+				factor[1] = 0.0;
+			}
+			double my = sy / n;
+			double sse = 0.0;
+			double sst = 0.0;
+			for (int m = 0; m < n; m++)
+			{
+				double yp = k * x[m];
+				double err = y[m] - yp;
+				sse += err * err;
+				double dy2 = y[m] - my;
+				sst += dy2 * dy2;
+			}
+			if (sst == 0.0)
+			{
+				return 1.0;
+			}
+			return (sst - sse) / sst;
+		}
+		catch
+		{
+			return double.NaN;
+		}
+	}
 
-	[DllImport("System.Linq.dll", CallingConvention = CallingConvention.Cdecl)]
-	public static extern double TestFoumular(int id, double value);
+	public static double TestFoumular(int id, double value)
+	{
+		return value;
+	}
 
-	[DllImport("System.Linq.dll", CallingConvention = CallingConvention.Cdecl)]
-	public static extern byte TestFoumularEncrypt(int id, byte value);
+	private static bool warnedFoumularEncrypt;
 
-	[DllImport("System.Linq.dll", CallingConvention = CallingConvention.Cdecl)]
-	public static extern double RSDCalculate(float fAverage, float[] arrValue, int length);
+	public static byte TestFoumularEncrypt(int id, byte value)
+	{
+		if (!warnedFoumularEncrypt)
+		{
+			warnedFoumularEncrypt = true;
+			try
+			{
+				LogMgr.Instance.LogWarning("TestFoumularEncrypt is running in managed fallback mode");
+			}
+			catch
+			{
+			}
+		}
+		return value;
+	}
+
+	public static double RSDCalculate(float fAverage, float[] arrValue, int length)
+	{
+		try
+		{
+			if (arrValue == null)
+			{
+				return double.NaN;
+			}
+			int n = Math.Min(length, arrValue.Length);
+			if (n <= 1)
+			{
+				return 0.0;
+			}
+			double avg = fAverage;
+			if (avg == 0.0)
+			{
+				double sum = 0.0;
+				for (int i = 0; i < n; i++)
+				{
+					sum += arrValue[i];
+				}
+				avg = sum / n;
+			}
+			double var = 0.0;
+			for (int j = 0; j < n; j++)
+			{
+				double d = arrValue[j] - avg;
+				var += d * d;
+			}
+			double stdev = Math.Sqrt(var / (n - 1));
+			if (avg == 0.0)
+			{
+				return 0.0;
+			}
+			return stdev / Math.Abs(avg) * 100.0;
+		}
+		catch
+		{
+			return double.NaN;
+		}
+	}
 
 	[DllImport("User32.dll")]
 	private static extern bool ShowWindowAsync(IntPtr hWnd, int cmdShow);
@@ -67,6 +257,7 @@ internal static class Program
 		CtrlLangPS.Create();
 		SystemParam systemParam = SystemParam.Create();
 		logMgr.Write2RunLog("Program Loaded sysParam");
+		MqttTelemetryService.Instance.StartOrReload();
 		AssemblyInfoCfg assemblyInfoCfg = AssemblyInfoCfg.Create();
 		SystemDictionaryList systemDictionaryList = SystemDictionaryList.Create();
 		DetectorParam detectorParam = DetectorParam.Create();

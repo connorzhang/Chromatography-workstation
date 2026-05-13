@@ -156,6 +156,8 @@ public class SystemParamProperty
 
 	private const string strDetectorOption = "5.检测器设置";
 
+	private const string strCloudOption = "6.云端设置";
+
 	private SystemParam sysParam = SystemParam.Create();
 
 	private string strPsdNewCfg = "";
@@ -949,6 +951,22 @@ public class SystemParamProperty
 		set
 		{
 			sysParam.iComModbusType = value;
+		}
+	}
+
+	[EditorBrowsable(EditorBrowsableState.Always)]
+	[PropertyCategory("6.云端设置")]
+	[PropertyDisplayName("设备标识(24位ASCII)")]
+	[PropertyDescription("Modbus寄存器801-812输出的设备标识(24位ASCII)")]
+	public string strStationId
+	{
+		get
+		{
+			return sysParam.strStationId;
+		}
+		set
+		{
+			sysParam.strStationId = SystemParam.NormalizeStationId24Ascii(value);
 		}
 	}
 

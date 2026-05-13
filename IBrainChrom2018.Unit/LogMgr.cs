@@ -20,6 +20,19 @@ public class LogMgr
 
 	private Mutex docMutex = new Mutex();
 
+	private System.Threading.Timer aggTimer;
+
+	private readonly System.Collections.Concurrent.ConcurrentDictionary<string, AggEntry> agg = new System.Collections.Concurrent.ConcurrentDictionary<string, AggEntry>();
+
+	private sealed class AggEntry
+	{
+		public string Severity;
+		public string Message;
+		public int Count;
+		public DateTime First;
+		public DateTime Last;
+	}
+
 	public static LogMgr Instance => myself;
 
 	public static LogMgr Create()
@@ -47,6 +60,7 @@ public class LogMgr
 			systemParam.SaveParam();
 			ClearErrLogFile();
 		}
+		aggTimer = new System.Threading.Timer(_ => FlushAgg(), null, TimeSpan.FromMinutes(1.0), TimeSpan.FromMinutes(1.0));
 	}
 
 	private void ThreadExceptHandler(object sender, ThreadExceptionEventArgs args)
@@ -76,14 +90,107 @@ public class LogMgr
 
 	public void LogError(string strMsg)
 	{
-		string strMsg2 = "Error: " + strMsg + " Time:" + DateTime.Now.ToString();
-		Write2ErrorLog(strMsg2);
+		if (TryAgg("E", strMsg))
+		{
+			string strMsg2 = "Error: " + strMsg + " Time:" + DateTime.Now.ToString();
+			Write2ErrorLog(strMsg2);
+		}
+		TryPublishSystem("E", strMsg);
 	}
 
 	public void LogWarning(string strMsg)
 	{
-		string strMsg2 = "Warning: " + strMsg + " Time:" + DateTime.Now.ToString();
-		Write2ErrorLog(strMsg2);
+		if (TryAgg("W", strMsg))
+		{
+			string strMsg2 = "Warning: " + strMsg + " Time:" + DateTime.Now.ToString();
+			Write2ErrorLog(strMsg2);
+		}
+		TryPublishSystem("W", strMsg);
+	}
+
+	private bool TryAgg(string severity, string message)
+	{
+		try
+		{
+			string key = severity + "|" + (message ?? "");
+			AggEntry value = agg.GetOrAdd(key, _ => new AggEntry
+			{
+				Severity = severity,
+				Message = message,
+				Count = 0,
+				First = DateTime.Now,
+				Last = DateTime.Now
+			});
+			lock (value)
+			{
+				if (value.Count == 0)
+				{
+					value.First = DateTime.Now;
+					value.Last = value.First;
+					value.Count = 1;
+					return true;
+				}
+				value.Last = DateTime.Now;
+				value.Count++;
+				return false;
+			}
+		}
+		catch
+		{
+			return true;
+		}
+	}
+
+	private void FlushAgg()
+	{
+		try
+		{
+			foreach (var pair in agg)
+			{
+				AggEntry entry = pair.Value;
+				int count;
+				DateTime first;
+				DateTime last;
+				string sev;
+				string msg;
+				lock (entry)
+				{
+					count = entry.Count;
+					first = entry.First;
+					last = entry.Last;
+					sev = entry.Severity;
+					msg = entry.Message;
+					entry.Count = 0;
+				}
+				if (count > 1)
+				{
+					Write2ErrorLog("Agg " + sev + ": " + msg + " Count:" + count + " First:" + first.ToString("yyyy-MM-dd HH:mm:ss") + " Last:" + last.ToString("yyyy-MM-dd HH:mm:ss"));
+				}
+				if (count == 0)
+				{
+					agg.TryRemove(pair.Key, out _);
+				}
+			}
+		}
+		catch
+		{
+		}
+	}
+
+	private void TryPublishSystem(string severity, string message)
+	{
+		try
+		{
+			SystemParam systemParam = SystemParam.Create();
+			if (!systemParam.bMqttEnable)
+			{
+				return;
+			}
+			IBrainChrom2018.MqttTelemetryService.Instance.EnqueueSystem(severity, message);
+		}
+		catch
+		{
+		}
 	}
 
 	private void Write2ErrorLog(string strMsg)
