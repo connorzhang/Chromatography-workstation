@@ -150,6 +150,28 @@ public class SystemParam
 
 	public string strShowColumn_GvPerformStatic;
 
+	public string strStationId;
+
+	public bool bMqttEnable;
+
+	public string strMqttHost;
+
+	public int iMqttPort;
+
+	public bool bMqttTls;
+
+	public bool bMqttTlsAllowUntrusted;
+
+	public string strMqttUser;
+
+	public string strMqttPassword;
+
+	public string strMqttClientId;
+
+	public string strMqttTopicPrefix;
+
+	public int iMqttHeartbeatSec;
+
 	public string Language
 	{
 		get
@@ -279,6 +301,17 @@ public class SystemParam
 		strShowColumn_GvSummary = dbBase.GetValue("SystemParam", "strShowColumn_GvSummary", "", strShowColumn_GvSummary);
 		strShowColumn_GvSummaryGeneral = dbBase.GetValue("SystemParam", "strShowColumn_GvSummaryGeneral", "", strShowColumn_GvSummaryGeneral);
 		strShowColumn_GvPerformStatic = dbBase.GetValue("SystemParam", "strShowColumn_GvPerformStatic", "", strShowColumn_GvPerformStatic);
+		strStationId = NormalizeStationId24Ascii(dbBase.GetValue("SystemParam", "strStationId", "69000000001ABCDEFG123456"));
+		bMqttEnable = dbBase.GetValue("SystemParam", "bMqttEnable", "0") == "1";
+		strMqttHost = dbBase.GetValue("SystemParam", "strMqttHost", "");
+		iMqttPort = int.Parse(dbBase.GetValue("SystemParam", "iMqttPort", "1883"));
+		bMqttTls = dbBase.GetValue("SystemParam", "bMqttTls", "0") == "1";
+		bMqttTlsAllowUntrusted = dbBase.GetValue("SystemParam", "bMqttTlsAllowUntrusted", "0") == "1";
+		strMqttUser = dbBase.GetValue("SystemParam", "strMqttUser", "");
+		strMqttPassword = dbBase.GetValue("SystemParam", "strMqttPassword", "");
+		strMqttClientId = dbBase.GetValue("SystemParam", "strMqttClientId", "");
+		strMqttTopicPrefix = dbBase.GetValue("SystemParam", "strMqttTopicPrefix", "chrom/v1/default/default/{stationId}");
+		iMqttHeartbeatSec = int.Parse(dbBase.GetValue("SystemParam", "iMqttHeartbeatSec", "60"));
 		if (dbBase.NeedConfigUpgrade)
 		{
 			corChrgColoAcq = Color.FromArgb(int.Parse("-16777216"));
@@ -287,6 +320,29 @@ public class SystemParam
 			dbBase.SetValue("SystemParam", "corChrgColoCurve1", corChrgColoCurve1);
 			dbBase.Save();
 		}
+	}
+
+	public static string NormalizeStationId24Ascii(string value)
+	{
+		string text = value ?? "";
+		if (text.Length > 24)
+		{
+			text = text.Substring(0, 24);
+		}
+		if (text.Length < 24)
+		{
+			text = text.PadRight(24, ' ');
+		}
+		char[] array = text.ToCharArray();
+		for (int i = 0; i < array.Length; i++)
+		{
+			char c = array[i];
+			if (c < ' ' || c > '~')
+			{
+				array[i] = '?';
+			}
+		}
+		return new string(array);
 	}
 
 	public void SaveParam()
@@ -357,6 +413,17 @@ public class SystemParam
 		dbBase.SetValue("SystemParam", "strShowColumn_GvSummary", strShowColumn_GvSummary);
 		dbBase.SetValue("SystemParam", "strShowColumn_GvSummaryGeneral", strShowColumn_GvSummaryGeneral);
 		dbBase.SetValue("SystemParam", "strShowColumn_GvPerformStatic", strShowColumn_GvPerformStatic);
+		dbBase.SetValue("SystemParam", "strStationId", NormalizeStationId24Ascii(strStationId));
+		dbBase.SetValue("SystemParam", "bMqttEnable", bMqttEnable);
+		dbBase.SetValue("SystemParam", "strMqttHost", strMqttHost);
+		dbBase.SetValue("SystemParam", "iMqttPort", iMqttPort.ToString());
+		dbBase.SetValue("SystemParam", "bMqttTls", bMqttTls);
+		dbBase.SetValue("SystemParam", "bMqttTlsAllowUntrusted", bMqttTlsAllowUntrusted);
+		dbBase.SetValue("SystemParam", "strMqttUser", strMqttUser);
+		dbBase.SetValue("SystemParam", "strMqttPassword", strMqttPassword);
+		dbBase.SetValue("SystemParam", "strMqttClientId", strMqttClientId);
+		dbBase.SetValue("SystemParam", "strMqttTopicPrefix", strMqttTopicPrefix);
+		dbBase.SetValue("SystemParam", "iMqttHeartbeatSec", iMqttHeartbeatSec.ToString());
 		dbBase.Save();
 	}
 

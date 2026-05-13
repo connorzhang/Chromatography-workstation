@@ -4,6 +4,7 @@ using System.Drawing;
 using System.IO;
 using System.Threading;
 using System.Windows.Forms;
+using IBrainChrom2018.Unit;
 
 namespace IBrainChrom2018;
 
@@ -77,11 +78,78 @@ public class Instrument
 
 	public bool sampling;
 
+	public bool isAutoRestarting;
+
 	public bool setuped;
 
 	public Signal[] sglsSampling = new Signal[0];
 
 	public string tmrFileName = "";
+
+	private readonly object autoInjSync = new object();
+
+	private System.Threading.Timer autoInjTimer;
+
+	// 为了在软件重启后依然能记住之前的进样次数，将其改为静态变量或持久化存储
+	// 静态变量可以在“软重启”（即不关闭整个进程而是重新 New Form）时保留记忆
+	public static int globalAutoInjDone = 0;
+	public static int globalAutoInjMax = 0;
+	public static bool globalAutoInjRunning = false;
+
+	public static void SaveAutoInjState(bool running, int done, int max, float cycleMin)
+	{
+		try {
+			string path = System.IO.Path.Combine(System.Windows.Forms.Application.StartupPath, "AutoInjState.ini");
+			System.IO.File.WriteAllText(path, $"{running},{done},{max},{cycleMin}");
+		} catch {}
+	}
+
+	public static void LoadAutoInjState(out bool running, out int done, out int max, out float cycleMin)
+	{
+		running = false; done = 0; max = 0; cycleMin = 0f;
+		try {
+			string path = System.IO.Path.Combine(System.Windows.Forms.Application.StartupPath, "AutoInjState.ini");
+			if (System.IO.File.Exists(path)) {
+				string[] parts = System.IO.File.ReadAllText(path).Split(',');
+				if (parts.Length >= 4) {
+					bool.TryParse(parts[0], out running);
+					int.TryParse(parts[1], out done);
+					int.TryParse(parts[2], out max);
+					float.TryParse(parts[3], out cycleMin);
+				}
+			}
+		} catch {}
+	}
+
+	public void RestoreCycleMin(float val)
+	{
+		autoInjCycleMin = val;
+		try {
+			ChromFormInterface mainForm = GetMainFormInterface();
+			if (mainForm != null && mainForm.insDeviceCtrl != null)
+			{
+				mainForm.insDeviceCtrl.Invoke((MethodInvoker)delegate {
+					mainForm.insDeviceCtrl.maskedTextBox20.Text = val.ToString("0.0");
+				});
+			}
+		} catch {}
+	}
+
+	public int autoInjDone
+	{
+		get { return globalAutoInjDone; }
+		set { globalAutoInjDone = value; }
+	}
+
+	public int autoInjMax
+	{
+		get { return globalAutoInjMax; }
+		set { globalAutoInjMax = value; }
+	}
+
+	private float autoInjCycleMin;
+
+	private long autoInjToken;
 
 	public User user;
 
@@ -313,8 +381,22 @@ public class Instrument
 		}
 	}
 
+	private void DebugLog(string msg)
+	{
+		try
+		{
+			string logPath = System.IO.Path.Combine(System.Windows.Forms.Application.StartupPath, "AutoInjDebug.txt");
+			string content = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {msg}{Environment.NewLine}";
+			System.IO.File.AppendAllText(logPath, content);
+			
+			LogMgr.Instance.Write2RunLog("DEBUG: " + msg);
+		}
+		catch { }
+	}
+
 	public void daf_BeginGather(bool sample, InjectStyle injectStyle)
 	{
+		DebugLog($"daf_BeginGather start: sample={sample}, style={injectStyle}, isAuto={isAutoRestarting}");
 		if (runningInjInfo.methodFileName != "")
 		{
 			form.LoadMethodFile(runningInjInfo.methodFileName);
@@ -330,6 +412,7 @@ public class Instrument
 		if (sample)
 		{
 			ResetSglsSamplingOriDots(sample);
+			// 将重置逻辑全部移出，避免和底层 OnInstrumentStarted 冲突
 		}
 		for (int i = 0; i < dtc_Channels.Length; i++)
 		{
@@ -339,7 +422,13 @@ public class Instrument
 				(dtc_Channels[i] as DtC_Detector).hwPara.acquisition_0 = methodSetup.dtcAcquisitions[i];
 			}
 		}
+		bool wasSampling = sampling;
 		sampling = sample;
+		if (sampling && !wasSampling)
+		{
+			// 不在这里重置 isAutoRestarting，也不在这里启动定时器了
+			// 所有的自动进样核心逻辑全部交给 OnInstrumentStarted
+		}
 		for (int j = 0; j < dtc_Channels.Length; j++)
 		{
 			if (dtc_Channels[j] is DtC_Detector)
@@ -354,6 +443,54 @@ public class Instrument
 		}
 	}
 
+	private ChromFormInterface GetMainFormInterface()
+	{
+		if (FormMain.fromMain != null) return FormMain.fromMain;
+		if (FormMainCtrl.fromMain != null) return FormMainCtrl.fromMain;
+		if (FormMainPortable.fromMain != null) return FormMainPortable.fromMain;
+		if (FormMainPortableRH.fromMain != null) return FormMainPortableRH.fromMain;
+		return null;
+	}
+
+	private void ApplyAutoInjectorCycleRunTime()
+	{
+		try
+		{
+			float cycleMin = 0f;
+			ChromFormInterface mainForm = GetMainFormInterface();
+			TcpServerSocket tcp = form?.GetCurrentTcpSocket() ?? mainForm?.GetCurrentTcpSocket();
+			
+			if (tcp != null)
+			{
+				cycleMin = tcp.devManager1.injectInterval;
+				DebugLog($"[自动进样] 通讯层获取间隔: {cycleMin} min");
+			}
+
+			// 强力保障：如果通讯层没拿到，直接去 UI 抓取
+			if (cycleMin <= 0f)
+			{
+				if (mainForm != null && mainForm.insDeviceCtrl != null)
+				{
+					string uiVal = mainForm.insDeviceCtrl.maskedTextBox20.Text;
+					cycleMin = Class49.String2Float(uiVal, 0f);
+					DebugLog($"[自动进样] UI层获取间隔: {cycleMin} min (来自输入框 raw: '{uiVal}')");
+				}
+			}
+
+			if (cycleMin <= 0f)
+			{
+				DebugLog("[自动进样] 未设置有效循环间隔，跳过。");
+				return;
+			}
+			autoInjCycleMin = cycleMin;
+			LogMgr.Instance.Write2RunLog("AutoInjector: Cycle info saved. Interval=" + cycleMin.ToString("0.###") + " min");
+		}
+		catch (Exception ex)
+		{
+			DebugLog($"[自动进样] 获取参数异常: {ex.Message}");
+		}
+	}
+
 	private void method_0(bool bool_0)
 	{
 		if (bool_0 && !backgroundWorker_0.IsBusy)
@@ -362,9 +499,51 @@ public class Instrument
 		}
 	}
 
+	public void OnInstrumentStarted()
+	{
+		try {
+			string logPath = System.IO.Path.Combine(System.Windows.Forms.Application.StartupPath, "AutoInjDebug.txt");
+			System.IO.File.AppendAllText(logPath, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] Instrument.OnInstrumentStarted called for: {name}\r\n");
+		} catch {}
+
+		DebugLog($"[自动进样] 监测到仪器启动: isAuto={isAutoRestarting}, sampling={sampling}");
+		lock (autoInjSync)
+		{
+			if (!isAutoRestarting)
+			{
+				if (sampling)
+				{
+					DebugLog("[自动进样] 识别为冗余启动信号(已经在采集中)，忽略本次启动，保护当前计时器。");
+					return; // 直接返回，不要打断现有的倒计时
+				}
+				DebugLog("[自动进样] 识别为手动启动，重置计数器。");
+				autoInjDone = 0;
+			}
+			else
+			{
+				DebugLog($"[自动进样] 识别为自动重启，当前即将执行第 {autoInjDone + 1} 针");
+				isAutoRestarting = false; // 消费掉这个标志，说明本次启动已成功
+			}
+			
+			// 在状态栏后面单独增加一栏，显示进样次数状态
+			int currentInj = autoInjDone + 1;
+			GetMainFormInterface()?.UpdateAutoInjStatus($"自动进样: 正在分析第 {currentInj} 组");
+		}
+		ApplyAutoInjectorCycleRunTime();
+		StartAutoInjCycleTimer();
+	}
+
 	public void daf_StopGather()
 	{
+		DebugLog($"daf_StopGather called. sampling was {sampling}");
 		beginIdleTC = Environment.TickCount;
+		
+		// 新增：如果用户手动停止（或者某种非预期的强制停止），应终止循环倒计时
+		// 为了区分正常的方法到时停止和手动强制停止，我们可以检查 isAutoRestarting
+		// 但更简单的是：提供一个清晰的方法供外部调用，或者在这里一刀切
+		// 由于该方法在正常 2.0 min 结束时也会被调用（通过 ChangeDisLg 等链路或 AcqAutoStop），
+		// 如果我们在这里直接 Dispose Timer，就会把 2.5 min 的循环打断！
+		// 实际上，手动点击停止按钮会发送 Command 19。
 		sampling = false;
 		for (int i = 0; i < dtc_Channels.Length; i++)
 		{
@@ -449,7 +628,19 @@ public class Instrument
 
 	public void gc_StartAly()
 	{
-		form.dataAcqForm.miAlyRunSingle_Click(null, null);
+		ChromFormInterface mainForm = GetMainFormInterface();
+		TcpServerSocket currentTcpSocket = form?.GetCurrentTcpSocket() ?? mainForm?.GetCurrentTcpSocket();
+		if (currentTcpSocket != null)
+		{
+			string gcid = GetMainFormInterface()?.CurrentGCID ?? "Unknown";
+			DebugLog($"gc_StartAly: Sending Command 18 to instrument. GCID={gcid}");
+			currentTcpSocket.SendCmd(18);
+		}
+		else
+		{
+			DebugLog("gc_StartAly: TCP is null, falling back to UI click");
+			form.dataAcqForm.miAlyRunSingle_Click(null, null);
+		}
 	}
 
 	public void gc_StopAly()
@@ -549,6 +740,174 @@ public class Instrument
 					form.dataAcqForm.miAlyStopAcquisition_Click(null, null);
 				}
 			}
+		}
+	}
+
+	public void CancelAutoInjectorCycle()
+	{
+		try
+		{
+			DebugLog("[自动进样] 收到用户手动停止指令，正在取消循环倒计时...");
+			lock (autoInjSync)
+			{
+				isAutoRestarting = false;
+				autoInjDone = 0;
+				globalAutoInjRunning = false;
+				TryDisposeAutoInjTimer_NoThrow();
+				SaveAutoInjState(false, 0, 0, 0f);
+				GetMainFormInterface()?.UpdateAutoInjStatus("自动进样: 已停止");
+			}
+			DebugLog("[自动进样] 循环已被强制终止。");
+		}
+		catch (Exception ex)
+		{
+			DebugLog($"[自动进样] 取消循环失败: {ex.Message}");
+		}
+	}
+
+	private void StartAutoInjCycleTimer()
+	{
+		try
+		{
+			ChromFormInterface mainForm = GetMainFormInterface();
+			float cycleMin = autoInjCycleMin;
+			
+			// 二次强制获取，防止 ApplyAutoInjectorCycleRunTime 没拿到
+			if (cycleMin <= 0f)
+			{
+				if (mainForm != null && mainForm.insDeviceCtrl != null)
+				{
+					string uiVal = mainForm.insDeviceCtrl.maskedTextBox20.Text;
+					cycleMin = Class49.String2Float(uiVal, 0f);
+					DebugLog($"[自动进样] StartTimer中二次从UI获取间隔: {cycleMin} min");
+				}
+			}
+
+			if (cycleMin <= 0f) {
+				DebugLog("[自动进样] 循环时间为0，不启动计时器。");
+				return;
+			}
+
+			TcpServerSocket tcp = form?.GetCurrentTcpSocket() ?? mainForm?.GetCurrentTcpSocket();
+			int max = 0;
+			if (tcp != null) max = (int)tcp.devManager1.injectNTimes;
+
+			// 强力保障：从 UI 获取最大次数
+			if (max <= 0)
+			{
+				if (mainForm != null && mainForm.insDeviceCtrl != null)
+				{
+					max = (int)Class49.String2Float(mainForm.insDeviceCtrl.maskedTextBox19.Text, 0f);
+				}
+			}
+
+			if (max <= 0 || max >= 9999)
+			{
+				max = int.MaxValue;
+			}
+
+			TimeSpan delay = TimeSpan.FromMinutes(cycleMin);
+			long token = DateTime.UtcNow.Ticks;
+			DebugLog($"StartAutoInjCycleTimer: delay={delay.TotalSeconds}s, max={max}, token={token}");
+
+			lock (autoInjSync)
+			{
+				autoInjMax = max;
+				autoInjToken = token;
+				globalAutoInjRunning = true; // 标记系统正在自动循环中
+				SaveAutoInjState(true, autoInjDone, autoInjMax, autoInjCycleMin);
+				TryDisposeAutoInjTimer_NoThrow();
+				autoInjTimer = new System.Threading.Timer(_ => AutoInjectorRestartCallback(token), null, delay, Timeout.InfiniteTimeSpan);
+			}
+			LogMgr.Instance.Write2RunLog($"AutoInjector: Cycle timer started. Next injection in {cycleMin} min. (Done={autoInjDone}, Max={(max == int.MaxValue ? "Inf" : max.ToString())})");
+		}
+		catch (Exception ex)
+		{
+			DebugLog($"StartAutoInjCycleTimer Error: {ex.Message}");
+			LogMgr.Instance.Write2RunLog("AutoInjector: StartCycleTimer Error: " + ex.Message);
+		}
+	}
+
+	private void AutoInjectorRestartCallback(long token)
+	{
+		DebugLog("[自动进样] 计时到时，准备重启...");
+		try
+		{
+			lock (autoInjSync)
+			{
+				if (token != autoInjToken)
+				{
+					DebugLog("[自动进样] 计时令牌过期，忽略。");
+					return;
+				}
+				autoInjDone++;
+				if (autoInjDone >= autoInjMax)
+				{
+					DebugLog($"[自动进样] 已达到最大次数 {autoInjMax}，停止循环。");
+					SaveAutoInjState(false, 0, 0, 0f);
+					GetMainFormInterface()?.UpdateAutoInjStatus("自动进样: 已完成所有循环");
+					return;
+				}
+				SaveAutoInjState(true, autoInjDone, autoInjMax, autoInjCycleMin);
+			}
+
+			ChromFormInterface mainForm = GetMainFormInterface();
+			bool isFormValid = false;
+
+			if (form != null && !form.IsDisposed) isFormValid = true;
+			else if (mainForm != null) isFormValid = true;
+
+			if (!isFormValid)
+			{
+				DebugLog("[自动进样] 窗口已关闭，取消重启。");
+				return;
+			}
+
+			// 使用主窗体作为 Invoke 宿主，保证跨线程调用的可靠性
+			Control invokeHost = (form != null && !form.IsDisposed) ? (Control)form : (Control)mainForm;
+
+			invokeHost.Invoke((MethodInvoker)delegate
+			{
+				try
+				{
+					if (sampling)
+					{
+						DebugLog("[自动进样] 当前仍在采集，强制停止...");
+						if (form != null && form.dataAcqForm != null) {
+							form.dataAcqForm.miAlyStopAcquisition_Click(null, null);
+						}
+					}
+
+					DebugLog($"[自动进样] 正在自动触发第 {autoInjDone + 1} 针分析指令...");
+					isAutoRestarting = true;
+					gc_StartAly();
+				}
+				catch (Exception ex)
+				{
+					DebugLog($"[自动进样] 触发分析失败: {ex.Message}");
+				}
+			});
+		}
+		catch (Exception ex)
+		{
+			DebugLog($"[自动进样] 回调异常: {ex.Message}");
+		}
+	}
+
+	private void TryDisposeAutoInjTimer_NoThrow()
+	{
+		try
+		{
+			if (autoInjTimer != null)
+			{
+				DebugLog("TryDisposeAutoInjTimer_NoThrow: Disposing existing timer.");
+				autoInjTimer.Dispose();
+				autoInjTimer = null;
+			}
+		}
+		catch (Exception ex)
+		{
+			DebugLog($"TryDisposeAutoInjTimer_NoThrow Error: {ex.Message}");
 		}
 	}
 

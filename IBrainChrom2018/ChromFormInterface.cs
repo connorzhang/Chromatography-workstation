@@ -143,6 +143,8 @@ public interface ChromFormInterface
 
 	void UpdateAutoSamplerState();
 
+	Instrument GetInstrument();
+
 	void DtrTempNameSelect();
 
 	void DtrTempNameEnableSelect();
@@ -174,4 +176,8 @@ public interface ChromFormInterface
 	void DtrSelectFireLength();
 
 	void UpdateControlTempText(bool bCtrl);
+
+	void LogToMsg(string msg);
+
+	void UpdateAutoInjStatus(string status);
 }

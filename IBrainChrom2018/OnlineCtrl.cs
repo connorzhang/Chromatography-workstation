@@ -2518,16 +2518,22 @@ public class OnlineCtrl : UserControl
 		if (bAnalyse)
 		{
 			cntAnalyseTime++;
+			int num = (int)(frmParam.fInjecDelay * 60f);
+			if (num < 1)
+			{
+				num = 1;
+			}
 			if (indexChannel == 1)
 			{
 				if (cntAnalyseTime == 1)
 				{
 					cdlMgr.currentTcpServerMgrSendEPCCmd(84, 1);
 				}
-				if (cntAnalyseTime == (int)(frmParam.fInjecDelay * 60f))
+				if (cntAnalyseTime == num)
 				{
 					cdlMgr.currentTcpServerMgrSendCmd(18);
 					indexChannelStart = 1;
+					LogMgr.Instance.Write2RunLog("OnlineCtrl start analysis channel=1");
 				}
 				tbInjecTime1.BackColor = Color.Red;
 				tbInjecTime2.BackColor = SystemColors.Window;
@@ -2551,6 +2557,7 @@ public class OnlineCtrl : UserControl
 					{
 						cntAnalyseTime = 0;
 						indexChannel = 1;
+						LogMgr.Instance.Write2RunLog("OnlineCtrl restart after interval channel=1");
 						changeChannel(1);
 					}
 				}
@@ -2561,10 +2568,11 @@ public class OnlineCtrl : UserControl
 				{
 					cdlMgr.currentTcpServerMgrSendEPCCmd(84, 2);
 				}
-				if (cntAnalyseTime == (int)(frmParam.fInjecDelay * 60f))
+				if (cntAnalyseTime == num)
 				{
 					cdlMgr.currentTcpServerMgrSendCmd(18);
 					indexChannelStart = 2;
+					LogMgr.Instance.Write2RunLog("OnlineCtrl start analysis channel=2");
 				}
 				tbInjecTime2.BackColor = Color.Red;
 				tbInjecTime1.BackColor = SystemColors.Window;
@@ -2582,17 +2590,19 @@ public class OnlineCtrl : UserControl
 				}
 				else if (chbChannel1.Checked)
 				{
-					if ((float)cntAnalyseTime > frmParam.fInjecTime1 * 60f + frmParam.fInjecDelay * 60f + frmParam.fTimeInterval * 60f + 60f)
+					if ((float)cntAnalyseTime > frmParam.fInjecTime2 * 60f + frmParam.fInjecDelay * 60f + frmParam.fTimeInterval * 60f + 60f)
 					{
 						cntAnalyseTime = 0;
 						indexChannel = 1;
+						LogMgr.Instance.Write2RunLog("OnlineCtrl switch to channel=1 after interval");
 						changeChannel(1);
 					}
 				}
-				else if (chbChannel2.Checked && (float)cntAnalyseTime > frmParam.fInjecTime1 * 60f + frmParam.fInjecDelay * 60f + frmParam.fTimeInterval * 60f + 60f)
+				else if (chbChannel2.Checked && (float)cntAnalyseTime > frmParam.fInjecTime2 * 60f + frmParam.fInjecDelay * 60f + frmParam.fTimeInterval * 60f + 60f)
 				{
 					cntAnalyseTime = 0;
 					indexChannel = 2;
+					LogMgr.Instance.Write2RunLog("OnlineCtrl restart after interval channel=2");
 					changeChannel(2);
 				}
 			}
@@ -2606,10 +2616,11 @@ public class OnlineCtrl : UserControl
 				{
 					cdlMgr.currentTcpServerMgrSendEPCCmd(84, 4);
 				}
-				if (cntAnalyseTime == (int)(frmParam.fInjecDelay * 60f))
+				if (cntAnalyseTime == num)
 				{
 					cdlMgr.currentTcpServerMgrSendCmd(18);
 					indexChannelStart = 3;
+					LogMgr.Instance.Write2RunLog("OnlineCtrl start analysis channel=3");
 				}
 				tbInjecTime3.BackColor = Color.Red;
 				tbInjecTime1.BackColor = SystemColors.Window;
@@ -2621,26 +2632,29 @@ public class OnlineCtrl : UserControl
 				tbInjecTime3.BackColor = SystemColors.Window;
 				if (chbChannel1.Checked)
 				{
-					if ((float)cntAnalyseTime > frmParam.fInjecTime1 * 60f + frmParam.fInjecDelay * 60f + frmParam.fTimeInterval * 60f + 60f)
+					if ((float)cntAnalyseTime > frmParam.fInjecTime3 * 60f + frmParam.fInjecDelay * 60f + frmParam.fTimeInterval * 60f + 60f)
 					{
 						cntAnalyseTime = 0;
 						indexChannel = 1;
+						LogMgr.Instance.Write2RunLog("OnlineCtrl switch to channel=1 after interval");
 						changeChannel(1);
 					}
 				}
 				else if (chbChannel2.Checked)
 				{
-					if ((float)cntAnalyseTime > frmParam.fInjecTime1 * 60f + frmParam.fInjecDelay * 60f + frmParam.fTimeInterval * 60f + 60f)
+					if ((float)cntAnalyseTime > frmParam.fInjecTime3 * 60f + frmParam.fInjecDelay * 60f + frmParam.fTimeInterval * 60f + 60f)
 					{
 						cntAnalyseTime = 0;
 						indexChannel = 2;
+						LogMgr.Instance.Write2RunLog("OnlineCtrl switch to channel=2 after interval");
 						changeChannel(2);
 					}
 				}
-				else if (chbChannel3.Checked && (float)cntAnalyseTime > frmParam.fInjecTime1 * 60f + frmParam.fInjecDelay * 60f + frmParam.fTimeInterval * 60f + 60f)
+				else if (chbChannel3.Checked && (float)cntAnalyseTime > frmParam.fInjecTime3 * 60f + frmParam.fInjecDelay * 60f + frmParam.fTimeInterval * 60f + 60f)
 				{
 					cntAnalyseTime = 0;
 					indexChannel = 3;
+					LogMgr.Instance.Write2RunLog("OnlineCtrl restart after interval channel=3");
 					changeChannel(3);
 				}
 			}

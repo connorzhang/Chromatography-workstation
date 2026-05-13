@@ -9,6 +9,7 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Windows.Forms;
+using IBrainChrom2018.Unit;
 
 namespace IBrainChrom2018;
 
@@ -519,6 +520,17 @@ internal static class Common
 				SQLiteCommand sQLiteCommand = new SQLiteCommand(text3, sQLiteConnection);
 				sQLiteCommand.ExecuteNonQuery();
 				sQLiteConnection.Close();
+			}
+			try
+			{
+				SystemParam systemParam = SystemParam.Create();
+				if (systemParam.bMqttEnable)
+				{
+					MqttTelemetryService.Instance.EnqueueAudit(NetChromUserName, IntrumentName, Moudle, Describe);
+				}
+			}
+			catch
+			{
 			}
 		}
 		catch (Exception)

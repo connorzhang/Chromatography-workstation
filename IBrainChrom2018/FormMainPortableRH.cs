@@ -241,6 +241,8 @@ public class FormMainPortableRH : Form, FrmChromatManagerInterface, ChromFormInt
 
 	private ToolStripMenuItem 选项ToolStripMenuItem;
 
+	private ToolStripMenuItem 系统配置ToolStripMenuItem;
+
 	private ToolStripMenuItem tsmiAbout;
 
 	private System.Windows.Forms.Timer timer_1;
@@ -1940,6 +1942,12 @@ public class FormMainPortableRH : Form, FrmChromatManagerInterface, ChromFormInt
 		}
 	}
 
+	private void 系统配置ToolStripMenuItem_Click(object sender, EventArgs e)
+	{
+		StationConfigDlg stationConfigDlg = new StationConfigDlg();
+		stationConfigDlg.ShowDialog(this);
+	}
+
 	private void 谱图嫁接ToolStripMenuItem_Click(object sender, EventArgs e)
 	{
 		FrmSingialAdd frmSingialAdd = new FrmSingialAdd();
@@ -2111,6 +2119,62 @@ public class FormMainPortableRH : Form, FrmChromatManagerInterface, ChromFormInt
 		return null;
 	}
 
+	public Instrument GetInstrument()
+	{
+		for (int i = 0; i < SysCfgDlg.sysConfig.pageInstrus.Length; i++)
+		{
+			if (SysCfgDlg.sysConfig.pageInstrus[i].name == CurrentGCID)
+			{
+				return SysCfgDlg.sysConfig.pageInstrus[i];
+			}
+		}
+		return null;
+	}
+
+	public void LogToMsg(string msg)
+	{
+		if (this.IsDisposed) return;
+		try
+		{
+			if (this.InvokeRequired)
+			{
+				this.Invoke((MethodInvoker)delegate { LogToMsg(msg); });
+				return;
+			}
+			if (this.tsslMsg != null)
+			{
+				this.tsslMsg.Text = "消息: " + msg;
+			}
+		}
+		catch { }
+	}
+
+	public void UpdateAutoInjStatus(string status)
+	{
+		if (this.IsDisposed) return;
+		try
+		{
+			if (this.InvokeRequired)
+			{
+				this.Invoke((MethodInvoker)delegate { UpdateAutoInjStatus(status); });
+				return;
+			}
+			if (this.statusStrip1 != null)
+			{
+				var lbl = this.statusStrip1.Items["tsslAutoInjStatus"] as ToolStripStatusLabel;
+				if (lbl == null)
+				{
+					lbl = new ToolStripStatusLabel();
+					lbl.Name = "tsslAutoInjStatus";
+					lbl.ForeColor = System.Drawing.Color.Blue;
+					this.statusStrip1.Items.Add(lbl);
+				}
+				lbl.Text = string.IsNullOrEmpty(status) ? "" : " | " + status;
+			}
+		}
+		catch { }
+	}
+
 	public void OnTcpServer2ReceiveData(object sender, TcpServerEventArgs e)
 	{
 		if (m_bLoading)
@@ -2201,6 +2265,8 @@ public class FormMainPortableRH : Form, FrmChromatManagerInterface, ChromFormInt
 		}
 	}
 
+	private bool hasAutoConnected = false;
+
 	public void UpdateChromDevice(TcpServerEventArgs e)
 	{
 		if (!(e.ServerSocket.ID.Trim() == ""))
@@ -2210,6 +2276,84 @@ public class FormMainPortableRH : Form, FrmChromatManagerInterface, ChromFormInt
 				e.ServerSocket.ID = cdlMgr.CurrentGCID;
 			}
 			chrDeviceCtrl.UpdateChromDevice(e);
+
+			// 当底层的仪器回传数据且状态变为已连接（变绿或变蓝，ImageIndex 为 20 或 22）时，自动执行连接和恢复逻辑
+			if (!hasAutoConnected && cdlMgr != null && cdlMgr.Count > 0)
+			{
+				bool isDeviceReady = false;
+				for (int i = 0; i < chrDeviceCtrl.InstrumlistView.Items.Count; i++)
+				{
+					if (chrDeviceCtrl.InstrumlistView.Items[i].Tag.ToString() == e.ServerSocket.ID.Trim() && 
+						(chrDeviceCtrl.InstrumlistView.Items[i].ImageIndex == 20 || chrDeviceCtrl.InstrumlistView.Items[i].ImageIndex == 22))
+					{
+						isDeviceReady = true;
+						break;
+					}
+				}
+
+				if (isDeviceReady)
+				{
+					hasAutoConnected = true;
+					this.Invoke((MethodInvoker)delegate
+					{
+						try
+						{
+							string currentGCID = e.ServerSocket.ID.Trim();
+							cdlMgr.CurrentGCID = currentGCID;
+
+							SetCurrentChromDevice();
+
+							if (chrDeviceCtrl != null && chrDeviceCtrl.InstrumlistView.Items.Count > 0)
+							{
+								for (int i = 0; i < chrDeviceCtrl.InstrumlistView.Items.Count; i++)
+								{
+									if (chrDeviceCtrl.InstrumlistView.Items[i].Tag.ToString() == currentGCID)
+									{
+										chrDeviceCtrl.InstrumlistView.Items[i].Selected = true;
+										break;
+									}
+								}
+							}
+
+							LogToMsg("已自动连接到主板设备。");
+
+							var tcp = GetCurrentTcpSocket();
+							Instrument inst = null;
+							if (SysCfgDlg.sysConfig.pageInstrus != null && SysCfgDlg.sysConfig.pageInstrus.Length > 0) {
+								inst = SysCfgDlg.sysConfig.pageInstrus[0];
+							}
+
+							if (tcp != null && inst != null)
+							{
+								Instrument.LoadAutoInjState(out bool running, out int done, out int max, out float cycleMin);
+								if (running && done > 0 && done < max)
+								{
+									LogToMsg($"检测到未完成的自动进样任务 (已完成 {done} 组)，等待设备稳定后恢复分析...");
+									inst.autoInjDone = done;
+									inst.autoInjMax = max;
+									inst.RestoreCycleMin(cycleMin);
+									Instrument.globalAutoInjRunning = true;
+									inst.isAutoRestarting = true;
+
+									System.Threading.Tasks.Task.Run(async delegate {
+										// 抛弃不可靠的状态轮询，直接等待固定时间（8秒）让硬件完全初始化并稳定
+										await System.Threading.Tasks.Task.Delay(8000);
+										this.Invoke((MethodInvoker)delegate {
+											try {
+												// 检查标志位，防止等待期间用户手动操作了仪器
+												if (inst.isAutoRestarting) {
+													tcp.SendCmd(18);
+												}
+											} catch {}
+										});
+									});
+								}
+							}
+						}
+						catch { }
+					});
+				}
+			}
 		}
 	}
 
@@ -3410,6 +3554,7 @@ public class FormMainPortableRH : Form, FrmChromatManagerInterface, ChromFormInt
 		this.退出ToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
 		this.tsmiSystem = new System.Windows.Forms.ToolStripMenuItem();
 		this.选项ToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+		this.系统配置ToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
 		this.toolStripSeparator5 = new System.Windows.Forms.ToolStripSeparator();
 		this.ToolStripMenuItemClock = new System.Windows.Forms.ToolStripMenuItem();
 		this.toolStripMenuItem3 = new System.Windows.Forms.ToolStripMenuItem();
@@ -3741,9 +3886,9 @@ public class FormMainPortableRH : Form, FrmChromatManagerInterface, ChromFormInt
 		this.退出ToolStripMenuItem.Size = new System.Drawing.Size(136, 22);
 		this.退出ToolStripMenuItem.Text = "退出";
 		this.退出ToolStripMenuItem.Click += new System.EventHandler(ToolStripMenuItemExit_Click);
-		this.tsmiSystem.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[12]
+		this.tsmiSystem.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[13]
 		{
-			this.选项ToolStripMenuItem, this.toolStripSeparator5, this.ToolStripMenuItemClock, this.toolStripMenuItem3, this.toolStripMenuItem2, this.ToolStripMenuItemTempCtrl, this.toolStripSeparator8, this.气路配置ToolStripMenuItem, this.ToolStripMenuItemTime, this.toolStripSeparator9,
+			this.选项ToolStripMenuItem, this.系统配置ToolStripMenuItem, this.toolStripSeparator5, this.ToolStripMenuItemClock, this.toolStripMenuItem3, this.toolStripMenuItem2, this.ToolStripMenuItemTempCtrl, this.toolStripSeparator8, this.气路配置ToolStripMenuItem, this.ToolStripMenuItemTime, this.toolStripSeparator9,
 			this.tsmiGraphGraft, this.tmiFactorSetting
 		});
 		this.tsmiSystem.Name = "tsmiSystem";
@@ -3754,6 +3899,10 @@ public class FormMainPortableRH : Form, FrmChromatManagerInterface, ChromFormInt
 		this.选项ToolStripMenuItem.Size = new System.Drawing.Size(136, 22);
 		this.选项ToolStripMenuItem.Text = "选项";
 		this.选项ToolStripMenuItem.Click += new System.EventHandler(参数设置ToolStripMenuItem_Click);
+		this.系统配置ToolStripMenuItem.Name = "系统配置ToolStripMenuItem";
+		this.系统配置ToolStripMenuItem.Size = new System.Drawing.Size(136, 22);
+		this.系统配置ToolStripMenuItem.Text = "系统配置";
+		this.系统配置ToolStripMenuItem.Click += new System.EventHandler(系统配置ToolStripMenuItem_Click);
 		this.toolStripSeparator5.Name = "toolStripSeparator5";
 		this.toolStripSeparator5.Size = new System.Drawing.Size(133, 6);
 		this.ToolStripMenuItemClock.Image = (System.Drawing.Image)resources.GetObject("ToolStripMenuItemClock.Image");

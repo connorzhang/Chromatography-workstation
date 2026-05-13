@@ -325,9 +325,10 @@ public static class Class49
 		{
 			if (object_0 != null)
 			{
-				string s = object_0.ToString().Trim();
+				string str = object_0.ToString();
+				str = str.Replace("_", "").Replace(" ", "").Trim();
 				float result2 = 0f;
-				if (float.TryParse(s, out result2))
+				if (float.TryParse(str, out result2))
 				{
 					return result2;
 				}
@@ -703,9 +704,13 @@ public static class Class49
 			SystemParam systemParam = SystemParam.Create();
 			if (systemParam.iDbConnectType == 0 || systemParam.iDbConnectType == 2)
 			{
-				return dBBase.InsertIntoTableAccess(strType, strUserName, strIntrumentName, strMoudle, strDesc);
+				bool result = dBBase.InsertIntoTableAccess(strType, strUserName, strIntrumentName, strMoudle, strDesc);
+				TryPublishAudit(strUserName, strIntrumentName, strMoudle, strDesc);
+				return result;
 			}
-			return dBBase.InsertIntoTableSqlLite(strType, strUserName, strIntrumentName, strMoudle, strDesc);
+			bool result2 = dBBase.InsertIntoTableSqlLite(strType, strUserName, strIntrumentName, strMoudle, strDesc);
+			TryPublishAudit(strUserName, strIntrumentName, strMoudle, strDesc);
+			return result2;
 		}
 		if (DogFeturlMgr.LicencedGMP())
 		{
@@ -713,11 +718,32 @@ public static class Class49
 			SystemParam systemParam2 = SystemParam.Create();
 			if (systemParam2.iDbConnectType == 0 || systemParam2.iDbConnectType == 2)
 			{
-				return dBBase2.InsertIntoTableAccess(strType, strUserName, strIntrumentName, strMoudle, strDesc);
+				bool result3 = dBBase2.InsertIntoTableAccess(strType, strUserName, strIntrumentName, strMoudle, strDesc);
+				TryPublishAudit(strUserName, strIntrumentName, strMoudle, strDesc);
+				return result3;
 			}
-			return dBBase2.InsertIntoTableSqlLite(strType, strUserName, strIntrumentName, strMoudle, strDesc);
+			bool result4 = dBBase2.InsertIntoTableSqlLite(strType, strUserName, strIntrumentName, strMoudle, strDesc);
+			TryPublishAudit(strUserName, strIntrumentName, strMoudle, strDesc);
+			return result4;
 		}
+		TryPublishAudit(strUserName, strIntrumentName, strMoudle, strDesc);
 		return false;
+	}
+
+	private static void TryPublishAudit(string userName, string instrumentName, string module, string desc)
+	{
+		try
+		{
+			SystemParam sysParam = SystemParam.Create();
+			if (!sysParam.bMqttEnable)
+			{
+				return;
+			}
+			MqttTelemetryService.Instance.EnqueueAudit(userName, instrumentName, module, desc);
+		}
+		catch
+		{
+		}
 	}
 
 	public static bool InsertIntoHistory(int ComponentID, int dexcotID, string strFileName, float fTHC, float fCh4)

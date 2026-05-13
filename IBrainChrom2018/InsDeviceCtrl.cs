@@ -3180,19 +3180,52 @@ public class InsDeviceCtrl : UserControl
 	public void button14_Click(object sender, EventArgs e)
 	{
 		method_14();
+		try {
+			string logPath = System.IO.Path.Combine(System.Windows.Forms.Application.StartupPath, "AutoInjDebug.txt");
+			System.IO.File.AppendAllText(logPath, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] button14_Click: Button Text = '{button14.Text}', StartAll={Lang.PS("开始分析", "StartAll")}\r\n");
+		} catch {}
+
 		if (Class49.user_0.ULevel != User.Level.访问员)
 		{
 			TcpServerSocket currentTcpServerSocket = cdlMgr.CurrentTcpServerSocket;
 			if (currentTcpServerSocket != null)
 			{
-				if (button14.Text == Lang.PS("开始分析", "StartAll"))
+				// 放宽字符串匹配限制，防止中英文空格或换行等不可见字符导致不匹配
+				if (button14.Text.Contains("开始分析") || button14.Text.Contains("StartAll") || button14.Text.Contains("startAll") || button14.Text.Contains("Start All"))
 				{
+					try {
+						string logPath = System.IO.Path.Combine(System.Windows.Forms.Application.StartupPath, "AutoInjDebug.txt");
+						System.IO.File.AppendAllText(logPath, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] button14_Click: Sending Command 18\r\n");
+					} catch {}
 					currentTcpServerSocket.SendCmd(18);
 				}
 				else
 				{
+					try {
+						string logPath = System.IO.Path.Combine(System.Windows.Forms.Application.StartupPath, "AutoInjDebug.txt");
+						System.IO.File.AppendAllText(logPath, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] button14_Click: Sending Command 19 (Stop)\r\n");
+					} catch {}
 					currentTcpServerSocket.SendCmd(19);
+					
+					// 手动停止时，强制取消可能存在的自动进样循环
+					ChromFormInterface mainForm = null;
+					if (FormMain.fromMain != null) mainForm = FormMain.fromMain;
+					else if (FormMainCtrl.fromMain != null) mainForm = FormMainCtrl.fromMain;
+					else if (FormMainPortable.fromMain != null) mainForm = FormMainPortable.fromMain;
+					else if (FormMainPortableRH.fromMain != null) mainForm = FormMainPortableRH.fromMain;
+					
+					if (mainForm != null && mainForm.GetInstrument() != null)
+					{
+						mainForm.GetInstrument().CancelAutoInjectorCycle();
+					}
 				}
+			}
+			else
+			{
+				try {
+					string logPath = System.IO.Path.Combine(System.Windows.Forms.Application.StartupPath, "AutoInjDebug.txt");
+					System.IO.File.AppendAllText(logPath, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] button14_Click: CurrentTcpServerSocket is NULL!\r\n");
+				} catch {}
 			}
 		}
 		else

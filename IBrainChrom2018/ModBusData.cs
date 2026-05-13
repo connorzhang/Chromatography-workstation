@@ -81,6 +81,9 @@ public class ModBusData
 			{
 				return;
 			}
+			string text = SystemParam.NormalizeStationId24Ascii(SystemParam.Create().strStationId);
+			byte[] bytes2 = Encoding.ASCII.GetBytes(text);
+			bytes2.CopyTo(ModBusBytes, 801);
 			if (ModBustestchromatogram.chromInfo.cclDescription.Trim() == "")
 			{
 				ModBustestchromatogram.chromInfo.cclDescription = ModBustestchromatogram.userArchives[0].chromInfo.asChrom;

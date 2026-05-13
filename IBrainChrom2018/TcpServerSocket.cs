@@ -1474,6 +1474,11 @@ public class TcpServerSocket
 
 	public void Answer146(int curIdx)
 	{
+		try {
+			string logPath = System.IO.Path.Combine(System.Windows.Forms.Application.StartupPath, "AutoInjDebug.txt");
+			System.IO.File.AppendAllText(logPath, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] TcpServerSocket.Answer146 (Command 18 response) received. ID={ID}\r\n");
+		} catch {}
+
 		int myint0;
 		for (myint0 = 0; myint0 < sglsSampling.Length; myint0++)
 		{
@@ -1506,6 +1511,22 @@ public class TcpServerSocket
 		AlalyseStatus = true;
 		int_2 = mForm.FrmEquip.GetModBusDeviceIDByEquipID(string_0);
 		bgChrom.chromInfo.cclDescription = mForm.FrmEquip.GetNameByID(string_0);
+		
+		// 为了防止多个无效仪器导致定时器被启动多次（4次并发），
+		// 我们只让第一个 Instrument 实例去接管全局的自动进样倒计时。
+		if (SysCfgDlg.sysConfig.pageInstrus != null && SysCfgDlg.sysConfig.pageInstrus.Length > 0)
+		{
+			var inst = SysCfgDlg.sysConfig.pageInstrus[0];
+			if (inst != null)
+			{
+				try {
+					string logPath = System.IO.Path.Combine(System.Windows.Forms.Application.StartupPath, "AutoInjDebug.txt");
+					System.IO.File.AppendAllText(logPath, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] TcpServerSocket.Answer146 routing OnInstrumentStarted to FIRST instrument to prevent duplicates.\r\n");
+				} catch {}
+				inst.OnInstrumentStarted();
+			}
+		}
+
 		mForm.Invoke((MethodInvoker)delegate
 		{
 			if (mForm.CurrentGCID == ID)
@@ -1544,6 +1565,11 @@ public class TcpServerSocket
 
 	private void Answer150(byte[] mybyte)
 	{
+		try {
+			string logPath = System.IO.Path.Combine(System.Windows.Forms.Application.StartupPath, "AutoInjDebug.txt");
+			System.IO.File.AppendAllText(logPath, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] TcpServerSocket.Answer150 (Command 22 response) received. ID={ID}\r\n");
+		} catch {}
+
 		int myint0 = 0;
 		devManager1.SetCurSglNumberStart(mybyte);
 		if (devManager1.sglNumberStart > 3)
@@ -1588,6 +1614,7 @@ public class TcpServerSocket
 		});
 		int_2 = mForm.FrmEquip.GetModBusDeviceIDByEquipID(string_0);
 		bgChrom.chromInfo.cclDescription = mForm.FrmEquip.GetNameByID(string_0);
+		
 		mForm.Invoke((MethodInvoker)delegate
 		{
 			if (mForm.CurrentGCID == ID)
@@ -2465,10 +2492,10 @@ public class TcpServerSocket
 			Class49.InsertIntoTable(Class49.string_9[4], Class49.user_0.u_name, string_1 + string_0, "反控:关闭控温", "关闭控温");
 			return null;
 		case 18:
-			Class49.InsertIntoTable(Class49.string_9[4], Class49.user_0.u_name, string_1 + string_0, "反控:启动全部样品分析", "启动全部样品分析");
+			Class49.InsertIntoTable(Class49.string_9[0], Class49.user_0.u_name, string_1 + string_0, "开始分析(全部样品)", "启动全部样品分析");
 			return null;
 		case 19:
-			Class49.InsertIntoTable(Class49.string_9[4], Class49.user_0.u_name, string_1 + string_0, "反控:样品全部分析停止", "样品全部分析停止");
+			Class49.InsertIntoTable(Class49.string_9[0], Class49.user_0.u_name, string_1 + string_0, "停止分析(全部样品)", "样品全部分析停止");
 			return null;
 		case 20:
 			Class49.InsertIntoTable(Class49.string_9[4], Class49.user_0.u_name, string_1 + string_0, "反控:启动FID1点火", "启动FID1点火");
@@ -2478,11 +2505,11 @@ public class TcpServerSocket
 			return null;
 		case 22:
 			devManager0.sglNumberStart = (byte)num;
-			Class49.InsertIntoTable(Class49.string_9[4], Class49.user_0.u_name, string_1 + string_0, "反控:启动分析", "启动分析,通道号:" + devManager0.sglNumberStart);
+			Class49.InsertIntoTable(Class49.string_9[0], Class49.user_0.u_name, string_1 + string_0, "开始分析", "启动分析,通道号:" + devManager0.sglNumberStart);
 			return devManager0.GetCurSglNumberStart();
 		case 23:
 			devManager0.sglNumberEnd = (byte)num;
-			Class49.InsertIntoTable(Class49.string_9[4], Class49.user_0.u_name, string_1 + string_0, "反控:停止分析", "停止分析,通道号:" + devManager0.sglNumberStart);
+			Class49.InsertIntoTable(Class49.string_9[0], Class49.user_0.u_name, string_1 + string_0, "停止分析", "停止分析,通道号:" + devManager0.sglNumberStart);
 			return devManager0.GetCurSglNumberEnd();
 		case 24:
 			return null;
@@ -3253,6 +3280,12 @@ public class TcpServerSocket
 
 	public void SendCmd(byte byte_1)
 	{
+		try {
+			if (byte_1 == 18 || byte_1 == 22) {
+				string logPath = System.IO.Path.Combine(System.Windows.Forms.Application.StartupPath, "AutoInjDebug.txt");
+				System.IO.File.AppendAllText(logPath, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] TcpServerSocket.SendCmd({byte_1}) called. ID={ID}\r\n");
+			}
+		} catch {}
 		byte[] byte_2 = IBrainConvert.String2ByteArray(string_0);
 		IBrainConvert.ArrayCopy(ref byte_2, IBrainConvert.Short2ByteArray2(short_0++));
 		IBrainConvert.ArrayAdd(ref byte_2, byte_1);

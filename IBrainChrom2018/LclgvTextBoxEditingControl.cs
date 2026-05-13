@@ -11,6 +11,6 @@ public class LclgvTextBoxEditingControl : DataGridViewTextBoxEditingControl
 			EditingControlDataGridView.EndEdit();
 			return true;
 		}
-		return ProcessCmdKey(ref message_0, keyData);
+		return base.ProcessCmdKey(ref message_0, keyData);
 	}
 }
