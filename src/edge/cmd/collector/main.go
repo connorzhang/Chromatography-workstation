@@ -81,12 +81,19 @@ type telemetryEvent struct {
 	TempDet1 *float64 `json:"tempDet1,omitempty"`
 	TempInj2 *float64 `json:"tempInj2,omitempty"`
 
+	Epc []telemetryEpc `json:"epc,omitempty"`
+
 	CarrierPsi  *float64 `json:"carrierPsi,omitempty"`
 	CarrierSccm *float64 `json:"carrierSccm,omitempty"`
 	H2Psi       *float64 `json:"h2Psi,omitempty"`
 	H2Sccm      *float64 `json:"h2Sccm,omitempty"`
 	AirPsi      *float64 `json:"airPsi,omitempty"`
 	AirSccm     *float64 `json:"airSccm,omitempty"`
+}
+
+type telemetryEpc struct {
+	Psi  float64 `json:"psi"`
+	Sccm float64 `json:"sccm"`
 }
 
 func f64p(v float64) *float64 {
@@ -455,25 +462,30 @@ func processFrame(c net.Conn, f gckc.Frame, hub *realtime.Hub, states *sync.Map,
 	case 151:
 		if len(f.Payload) > 0 {
 			ch := int(f.Payload[0])
-				finalizeSession(hub, st, f.DeviceID, ch, method)
+			finalizeSession(hub, st, f.DeviceID, ch, method)
 		}
-		case 159:
-			if items, ok := parseEpc159(f.Payload); ok {
-				e := telemetryEvent{Type: "telemetry", DeviceID: f.DeviceID, At: time.Now().UTC()}
-				if len(items) > 0 {
-					e.CarrierPsi = f64p(items[0].ActualPsi)
-					e.CarrierSccm = f64p(items[0].ActualSccm)
-				}
-				if len(items) > 1 {
-					e.H2Psi = f64p(items[1].ActualPsi)
-					e.H2Sccm = f64p(items[1].ActualSccm)
-				}
-				if len(items) > 2 {
-					e.AirPsi = f64p(items[2].ActualPsi)
-					e.AirSccm = f64p(items[2].ActualSccm)
-				}
-				hub.Publish(f.DeviceID, e)
+	case 159:
+		if items, ok := parseEpc159(f.Payload); ok {
+			e := telemetryEvent{Type: "telemetry", DeviceID: f.DeviceID, At: time.Now().UTC()}
+			epc := make([]telemetryEpc, 0, len(items))
+			for i := 0; i < len(items) && i < 32; i++ {
+				epc = append(epc, telemetryEpc{Psi: items[i].ActualPsi, Sccm: items[i].ActualSccm})
 			}
+			e.Epc = epc
+			if len(items) > 0 {
+				e.CarrierPsi = f64p(items[0].ActualPsi)
+				e.CarrierSccm = f64p(items[0].ActualSccm)
+			}
+			if len(items) > 1 {
+				e.H2Psi = f64p(items[1].ActualPsi)
+				e.H2Sccm = f64p(items[1].ActualSccm)
+			}
+			if len(items) > 2 {
+				e.AirPsi = f64p(items[2].ActualPsi)
+				e.AirSccm = f64p(items[2].ActualSccm)
+			}
+			hub.Publish(f.DeviceID, e)
+		}
 	}
 
 	if f.Cmd != 143 {
@@ -827,18 +839,18 @@ var indexHTML = `<!doctype html>
     <header class="topbar">
       <div class="brand">在线监测</div>
       <nav class="tabs" id="tabs">
-        <button class="tab active" data-tab="home"><span class="tabIcon">主</span><span class="tabText">主界面</span></button>
-        <button class="tab" data-tab="chrom"><span class="tabIcon">谱</span><span class="tabText">谱图</span></button>
-        <button class="tab" data-tab="method"><span class="tabIcon">法</span><span class="tabText">仪器方法</span></button>
-        <button class="tab" data-tab="process"><span class="tabIcon">处</span><span class="tabText">谱图处理</span></button>
-        <button class="tab" data-tab="report"><span class="tabIcon">报</span><span class="tabText">记录报表</span></button>
-        <button class="tab" data-tab="settings"><span class="tabIcon">设</span><span class="tabText">系统设置</span></button>
+        <button class="tab active" data-tab="overview"><span class="tabIcon">概</span><span class="tabText">概览</span></button>
+        <button class="tab" data-tab="curve"><span class="tabIcon">曲</span><span class="tabText">曲线</span></button>
+        <button class="tab" data-tab="result"><span class="tabIcon">果</span><span class="tabText">结果</span></button>
+        <button class="tab" data-tab="events"><span class="tabIcon">事</span><span class="tabText">事件</span></button>
+        <button class="tab" data-tab="logs"><span class="tabIcon">志</span><span class="tabText">日志</span></button>
+        <button class="tab" data-tab="settings"><span class="tabIcon">设</span><span class="tabText">设置</span></button>
       </nav>
       <div class="flame" title="告警"><div class="flameInner"></div></div>
     </header>
 
     <main class="main">
-      <section id="view-home" class="view active">
+      <section id="view-overview" class="view active">
         <div class="card cardPad" style="max-width:980px">
           <div class="homeGrid">
             <div class="blueCard"><div class="blueTitle">总烃</div><div class="blueValue mono" id="kpi-thc">1.6394</div></div>
@@ -864,9 +876,16 @@ var indexHTML = `<!doctype html>
             <div class="clock mono" id="home-clock">0000-00-00 00:00:00</div>
           </div>
         </div>
+        <div class="card cardPad" style="max-width:980px;margin-top:12px">
+          <div id="tblTitle">设备列表</div>
+          <table>
+            <thead><tr><th>设备</th><th>在线</th><th>lastSeen</th><th>143</th><th>last143</th></tr></thead>
+            <tbody id="overview-devices"><tr><td class="mono" colspan="5" style="color:var(--muted)">等待 GC...</td></tr></tbody>
+          </table>
+        </div>
       </section>
 
-      <section id="view-chrom" class="view">
+      <section id="view-curve" class="view">
         <div class="card cardPad" style="max-width:1240px">
           <div class="row" style="margin-bottom:10px">
             <button class="btn dark">通道1结束</button>
@@ -941,90 +960,68 @@ var indexHTML = `<!doctype html>
         </div>
       </section>
 
-      <section id="view-method" class="view">
+      <section id="view-result" class="view">
         <div class="card cardPad" style="max-width:1240px">
           <div class="row" style="margin-bottom:10px">
-            <button class="btn dark">打开谱图</button>
-            <button class="btn dark" disabled>应用到方法</button>
-            <select class="select" style="min-width:180px"><option>非甲烷总烃</option></select>
-            <button class="btn">▧</button>
-            <button class="btn">✓</button>
+            <div class="label">NMHC 结果历史（总烃/甲烷/非甲烷总烃）</div>
             <div class="spacer"></div>
-            <button class="btn dark">重置</button>
+            <span class="label">开始</span><input id="res-from" class="input mono" style="width:220px" placeholder="YYYY-MM-DD HH:mm:ss" />
+            <span class="label">结束</span><input id="res-to" class="input mono" style="width:220px" placeholder="YYYY-MM-DD HH:mm:ss" />
+            <button class="btn dark" id="res-export">导出CSV</button>
+            <button class="btn dark" id="res-delete">删除时间段</button>
           </div>
-          <div style="display:grid;grid-template-columns:420px 1fr;gap:12px">
-            <div>
-              <div class="card" style="border-radius:10px;overflow:hidden">
-                <div id="tblTitle">组份编辑</div>
-                <table>
-                  <thead><tr><th>名称</th><th>保留时间</th><th>窗宽</th><th>面积</th><th>标气浓度</th></tr></thead>
-                  <tbody>
-                    <tr><td>总烃</td><td class="mono">0.1058</td><td class="mono">0.2</td><td class="mono">115.675</td><td class="mono">49.88</td></tr>
-                    <tr><td>甲烷</td><td class="mono">0.6158</td><td class="mono">0.2</td><td class="mono">22.0271</td><td class="mono">9.98</td></tr>
-                  </tbody>
-                </table>
-              </div>
-              <div class="card" style="margin-top:12px;border-radius:10px;overflow:hidden">
-                <div id="tblTitle">面积/峰表</div>
-                <table>
-                  <thead><tr><th>序号</th><th>保留时间</th><th>面积(pA*S)</th><th>高度(pA)</th><th>开始时间</th><th>结束时间</th></tr></thead>
-                  <tbody><tr><td class="mono" colspan="6" style="color:var(--muted)">暂无数据</td></tr></tbody>
-                </table>
-              </div>
-            </div>
-            <div class="cardPad" style="padding:10px">
-              <canvas id="cv-method" width="900" height="440"></canvas>
-            </div>
+          <div class="card" style="border-radius:10px;overflow:hidden">
+            <div id="tblTitle">记录报表</div>
+            <table>
+              <thead><tr><th>时间</th><th>总烃</th><th>甲烷</th><th>非甲烷总烃</th></tr></thead>
+              <tbody id="res-tbody"><tr><td class="mono" colspan="4" style="color:var(--muted)">暂无数据</td></tr></tbody>
+            </table>
           </div>
         </div>
       </section>
 
-      <section id="view-process" class="view">
-        <div class="card cardPad" style="max-width:1240px">
-          <div class="row"><button class="btn dark">打开谱图</button><button class="btn dark">重置</button><div class="spacer"></div><div class="label">占位：按旧版布局后续补齐</div></div>
-          <div class="cardPad" style="padding:10px;margin-top:12px">
-            <canvas id="cv-process" width="1200" height="440"></canvas>
-          </div>
-        </div>
-      </section>
-
-      <section id="view-report" class="view">
+      <section id="view-events" class="view">
         <div class="card cardPad" style="max-width:1240px">
           <div class="row" style="margin-bottom:10px">
-            <div class="label">记录报表</div>
+            <label class="modeItem"><input id="evt-only-selected" type="checkbox" checked /> 仅当前设备</label>
+            <div class="spacer"></div>
+            <button class="btn dark" id="evt-clear">清空</button>
           </div>
-          <div id="report-history">
-            <div style="display:grid;grid-template-columns:420px 1fr;gap:12px">
-              <div class="card" style="border-radius:10px;overflow:hidden">
-                <div id="tblTitle">记录报表</div>
-                <table>
-                  <thead><tr><th>时间</th><th>总烃</th><th>甲烷</th><th>非甲烷总烃</th></tr></thead>
-                  <tbody><tr><td class="mono" colspan="4" style="color:var(--muted)">暂无数据</td></tr></tbody>
-                </table>
-              </div>
-              <div class="card" style="border-radius:10px;min-height:420px"></div>
-            </div>
-            <div class="row" style="margin-top:12px;gap:10px">
-              <input class="input mono" style="width:220px" value="2020/04/18 00:00:00" />
-              <input class="input mono" style="width:220px" value="2020/04/18 00:00:00" />
-              <button class="btn dark">导出数据</button>
-              <button class="btn dark">NMHC删除选中数据</button>
-              <button class="btn dark">BTEX删除选中数据</button>
-            </div>
+          <div class="card" style="border-radius:10px;overflow:hidden">
+            <div id="tblTitle">事件流</div>
+            <table>
+              <thead><tr><th>时间</th><th>设备</th><th>类型</th><th>摘要</th></tr></thead>
+              <tbody id="evt-tbody"><tr><td class="mono" colspan="4" style="color:var(--muted)">暂无数据</td></tr></tbody>
+            </table>
           </div>
+        </div>
+      </section>
+
+      <section id="view-logs" class="view">
+        <div class="card cardPad" style="max-width:1240px">
+          <div id="tblTitle">调试日志</div>
+          <pre id="logs-pre" class="mono" style="margin:0;padding:12px;white-space:pre-wrap"></pre>
         </div>
       </section>
 
       <section id="view-settings" class="view">
         <div class="card cardPad" style="max-width:980px">
-          <div id="tblTitle">系统设置</div>
+          <div id="tblTitle">设置</div>
           <div class="row" style="margin-top:12px">
             <div><div class="label">默认满屏时间(min)</div><input id="set-fullmin" class="input mono" style="width:120px" value="2" /></div>
             <div><div class="label">默认下限</div><input id="set-ylow" class="input mono" style="width:120px" value="0" /></div>
             <div><div class="label">默认上限</div><input id="set-yhigh" class="input mono" style="width:120px" value="40" /></div>
             <div><div class="label">默认峰高自适应</div><label class="modeItem"><input id="set-autoy" type="checkbox" checked /> 启用</label></div>
+            <div><div class="label">默认采集时间(min)</div><input id="set-acqmin" class="input mono" style="width:120px" value="2" /></div>
             <div class="spacer"></div>
             <button class="btn primary" id="set-save">保存</button>
+          </div>
+          <div class="row" style="margin-top:12px">
+            <div><div class="label">载气 EPC idx</div><select id="set-epc-carrier" class="select mono" style="width:120px"></select></div>
+            <div><div class="label">氢气 EPC idx</div><select id="set-epc-h2" class="select mono" style="width:120px"></select></div>
+            <div><div class="label">空气 EPC idx</div><select id="set-epc-air" class="select mono" style="width:120px"></select></div>
+            <div class="spacer"></div>
+            <div class="label">提示：idx 来自 Cmd=159 EPC 上报的条目序号（从 0 开始）</div>
           </div>
         </div>
       </section>
@@ -1034,15 +1031,13 @@ var indexHTML = `<!doctype html>
   <script>
     const tabsEl = document.getElementById('tabs');
     const views = {
-      home: document.getElementById('view-home'),
-      chrom: document.getElementById('view-chrom'),
-      method: document.getElementById('view-method'),
-      process: document.getElementById('view-process'),
-      report: document.getElementById('view-report'),
+      overview: document.getElementById('view-overview'),
+      curve: document.getElementById('view-curve'),
+      result: document.getElementById('view-result'),
+      events: document.getElementById('view-events'),
+      logs: document.getElementById('view-logs'),
       settings: document.getElementById('view-settings'),
     };
-
-    const reportHistory = document.getElementById('report-history');
 
     function setActiveTab(tab){
       for(const b of tabsEl.querySelectorAll('.tab')){
@@ -1051,12 +1046,11 @@ var indexHTML = `<!doctype html>
       for(const k in views){
         views[k].classList.toggle('active', k === tab);
       }
-      if(tab === 'chrom') draw();
-      if(tab === 'method') drawPlaceholder(document.getElementById('cv-method'));
-      if(tab === 'process') drawPlaceholder(document.getElementById('cv-process'));
-      if(tab === 'report') {
-        if(reportHistory) reportHistory.style.display = '';
-      }
+      if(tab === 'curve') draw();
+      if(tab === 'overview') renderOverview();
+      if(tab === 'result') renderResults();
+      if(tab === 'events') renderEvents();
+      if(tab === 'logs') renderLogs();
     }
 
     tabsEl.addEventListener('click', (e)=>{
@@ -1064,8 +1058,6 @@ var indexHTML = `<!doctype html>
       if(!btn) return;
       setActiveTab(btn.dataset.tab);
     });
-
-    if(reportHistory) reportHistory.style.display = '';
 
     const statusEl = document.getElementById('status');
     const deviceEl = document.getElementById('device');
@@ -1093,6 +1085,25 @@ var indexHTML = `<!doctype html>
     const tempInj1El = document.getElementById('temp-inj1');
     const tempDet1El = document.getElementById('temp-det1');
     const tempInj2El = document.getElementById('temp-inj2');
+
+    const overviewDevicesEl = document.getElementById('overview-devices');
+
+    const resFromEl = document.getElementById('res-from');
+    const resToEl = document.getElementById('res-to');
+    const resTbodyEl = document.getElementById('res-tbody');
+    const resExportEl = document.getElementById('res-export');
+    const resDeleteEl = document.getElementById('res-delete');
+
+    const evtOnlySelectedEl = document.getElementById('evt-only-selected');
+    const evtClearEl = document.getElementById('evt-clear');
+    const evtTbodyEl = document.getElementById('evt-tbody');
+
+    const logsPreEl = document.getElementById('logs-pre');
+
+    const setAcqMinEl = document.getElementById('set-acqmin');
+    const setEpcCarrierEl = document.getElementById('set-epc-carrier');
+    const setEpcH2El = document.getElementById('set-epc-h2');
+    const setEpcAirEl = document.getElementById('set-epc-air');
 
     const acqMinStorageKey = 'chrom.acqmin';
     try {
@@ -1139,6 +1150,286 @@ var indexHTML = `<!doctype html>
     const homeStatusEl = document.getElementById('home-status');
     const homeClockEl = document.getElementById('home-clock');
     const homeInjectEl = document.getElementById('home-inject');
+
+    const nmhcHistPrefix = 'nmhc_history.';
+    const nmhcHistByDevice = new Map();
+    const evtBuf = [];
+    const evtMax = 400;
+
+    function nowStr(){
+      const d = new Date();
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth()+1).padStart(2,'0');
+      const dd = String(d.getDate()).padStart(2,'0');
+      const hh = String(d.getHours()).padStart(2,'0');
+      const mi = String(d.getMinutes()).padStart(2,'0');
+      const ss = String(d.getSeconds()).padStart(2,'0');
+      return yyyy + '-' + mm + '-' + dd + ' ' + hh + ':' + mi + ':' + ss;
+    }
+
+    function parseTimeText(s){
+      const t = String(s || '').trim();
+      if(!t) return null;
+      const t2 = t.replace('T',' ').replace(/\//g,'-');
+      const parts = t2.split(' ');
+      if(parts.length < 2) return null;
+      const d = new Date(parts[0] + 'T' + parts[1]);
+      if(!isFinite(d.getTime())) return null;
+      return d;
+    }
+
+    function nmhcEntryFromResult(deviceId, msg){
+      const at = (msg && msg.at) ? new Date(msg.at) : new Date();
+      const res = msg && msg.result ? msg.result : null;
+      if(!res || !Array.isArray(res.pollutants)) return null;
+      const by = new Map();
+      for(const p of res.pollutants){
+        if(p && (p.code || p.name)) by.set(p.code || p.name, p);
+      }
+      const thc = by.get('THC');
+      const ch4 = by.get('CH4');
+      const thcV = thc && isFinite(thc.height) ? Number(thc.height) : null;
+      const ch4V = ch4 && isFinite(ch4.height) ? Number(ch4.height) : null;
+      const nmhcV = (thcV !== null && ch4V !== null) ? (thcV - ch4V) : null;
+      return { t: at.toISOString(), deviceId, traceId: (res.traceId || ''), thc: thcV, ch4: ch4V, nmhc: nmhcV };
+    }
+
+    function loadNmchHistory(deviceId){
+      if(nmhcHistByDevice.has(deviceId)) return nmhcHistByDevice.get(deviceId);
+      let arr = [];
+      try{
+        const raw = localStorage.getItem(nmhcHistPrefix + deviceId);
+        if(raw){
+          const v = JSON.parse(raw);
+          if(Array.isArray(v)) arr = v;
+        }
+      }catch{}
+      nmhcHistByDevice.set(deviceId, arr);
+      return arr;
+    }
+
+    function saveNmchHistory(deviceId){
+      const arr = nmhcHistByDevice.get(deviceId) || [];
+      try{ localStorage.setItem(nmhcHistPrefix + deviceId, JSON.stringify(arr.slice(-5000))); } catch {}
+    }
+
+    function addNmchHistory(deviceId, entry){
+      if(!entry) return;
+      const arr = loadNmchHistory(deviceId);
+      arr.push(entry);
+      if(arr.length > 5000) arr.splice(0, arr.length-5000);
+      saveNmchHistory(deviceId);
+      const sel = selectedDevice();
+      if(sel === deviceId){
+        const run = document.getElementById('home-runCountVal');
+        if(run) run.textContent = String(arr.length);
+      }
+    }
+
+    function pushEvtRow(deviceId, type, summary){
+      evtBuf.push({ t: nowStr(), deviceId: deviceId || '', type, summary: summary || '' });
+      if(evtBuf.length > evtMax) evtBuf.splice(0, evtBuf.length-evtMax);
+    }
+
+    function renderOverview(){
+      if(!overviewDevicesEl) return;
+      const rows = [];
+      for(const [id, d] of deviceInfo.entries()){
+        if(!String(id).startsWith('GC')) continue;
+        const c143 = d && d.cmdCounts ? (d.cmdCounts['143'] || d.cmdCounts[143] || 0) : 0;
+        rows.push({id, connected: !!d.connected, lastSeen: d.lastSeen || '', c143, last143: d.last143 || ''});
+      }
+      rows.sort((a,b)=> String(a.id).localeCompare(String(b.id)));
+      if(rows.length === 0){
+        overviewDevicesEl.innerHTML = '<tr><td class="mono" colspan="5" style="color:var(--muted)">等待 GC...</td></tr>';
+        return;
+      }
+      overviewDevicesEl.innerHTML = rows.map(r=>{
+        return '<tr>' +
+          '<td class="mono">' + r.id + '</td>' +
+          '<td class="mono">' + (r.connected ? 'Y' : 'N') + '</td>' +
+          '<td class="mono">' + (r.lastSeen ? String(r.lastSeen).replace('T',' ').replace('Z','') : '-') + '</td>' +
+          '<td class="mono">' + String(r.c143) + '</td>' +
+          '<td class="mono">' + (r.last143 ? String(r.last143).replace('T',' ').replace('Z','') : '-') + '</td>' +
+        '</tr>';
+      }).join('');
+    }
+
+    function renderResults(){
+      if(!resTbodyEl) return;
+      const sel = selectedDevice();
+      if(!sel){
+        resTbodyEl.innerHTML = '<tr><td class="mono" colspan="4" style="color:var(--muted)">未选择设备</td></tr>';
+        return;
+      }
+      const arr = loadNmchHistory(sel);
+      const fromD = parseTimeText(resFromEl && resFromEl.value);
+      const toD = parseTimeText(resToEl && resToEl.value);
+      const fromT = fromD ? fromD.getTime() : null;
+      const toT = toD ? toD.getTime() : null;
+      const f4 = (v)=> (v === null || v === undefined || !isFinite(Number(v))) ? '-' : Number(v).toFixed(4);
+      const items = [];
+      for(const it of arr){
+        const t = new Date(it.t);
+        const tt = t.getTime();
+        if(fromT !== null && tt < fromT) continue;
+        if(toT !== null && tt > toT) continue;
+        items.push({t, it});
+      }
+      items.sort((a,b)=> b.t.getTime() - a.t.getTime());
+      if(items.length === 0){
+        resTbodyEl.innerHTML = '<tr><td class="mono" colspan="4" style="color:var(--muted)">暂无数据</td></tr>';
+        return;
+      }
+      resTbodyEl.innerHTML = items.slice(0, 2000).map(x=>{
+        const t = x.t;
+        const ts = String(t.getFullYear()) + '-' + String(t.getMonth()+1).padStart(2,'0') + '-' + String(t.getDate()).padStart(2,'0') + ' ' + String(t.getHours()).padStart(2,'0') + ':' + String(t.getMinutes()).padStart(2,'0') + ':' + String(t.getSeconds()).padStart(2,'0');
+        return '<tr>' +
+          '<td class="mono">' + ts + '</td>' +
+          '<td class="mono">' + f4(x.it.thc) + '</td>' +
+          '<td class="mono">' + f4(x.it.ch4) + '</td>' +
+          '<td class="mono">' + f4(x.it.nmhc) + '</td>' +
+        '</tr>';
+      }).join('');
+    }
+
+    function renderEvents(){
+      if(!evtTbodyEl) return;
+      const onlySel = !!(evtOnlySelectedEl && evtOnlySelectedEl.checked);
+      const sel = selectedDevice();
+      const items = onlySel && sel ? evtBuf.filter(e=> e.deviceId === sel) : evtBuf.slice();
+      if(items.length === 0){
+        evtTbodyEl.innerHTML = '<tr><td class="mono" colspan="4" style="color:var(--muted)">暂无数据</td></tr>';
+        return;
+      }
+      evtTbodyEl.innerHTML = items.slice(-300).reverse().map(e=>{
+        return '<tr>' +
+          '<td class="mono">' + e.t + '</td>' +
+          '<td class="mono">' + (e.deviceId || '-') + '</td>' +
+          '<td class="mono">' + e.type + '</td>' +
+          '<td class="mono">' + String(e.summary || '') + '</td>' +
+        '</tr>';
+      }).join('');
+    }
+
+    function renderLogs(){
+      if(!logsPreEl) return;
+      const sel = selectedDevice();
+      const lines = [];
+      if(serverInfo){
+        lines.push('server.pid=' + (serverInfo.pid || ''));
+        lines.push('server.startedAt=' + (serverInfo.startedAt || ''));
+        lines.push('server.httpPort=' + (serverInfo.httpPort || ''));
+        lines.push('server.tcpPorts=' + (serverInfo.tcpPorts ? JSON.stringify(serverInfo.tcpPorts) : ''));
+      }
+      if(sel){
+        const d = deviceInfo.get(sel);
+        if(d){
+          const c143 = d && d.cmdCounts ? (d.cmdCounts['143'] || d.cmdCounts[143] || 0) : 0;
+          lines.push('device=' + sel + ' connected=' + (!!d.connected) + ' lastCmd=' + d.lastCmd + ' 143=' + c143);
+          lines.push('lastSeen=' + (d.lastSeen || '') + ' last143=' + (d.last143 || ''));
+        }
+        const s = streams.get(streamKey(sel, Number(chnEl.value||'0')));
+        if(s && s.cycleStartedAtMs !== null){
+          lines.push('elapsed=' + (s.lastElapsedS/60).toFixed(3) + 'min fullWindow=' + (fullWindowS()/60).toFixed(3) + 'min');
+        }
+      }
+      const dbgEl = document.getElementById('dbg');
+      if(dbgEl && dbgEl.textContent) lines.push('dbg=' + dbgEl.textContent);
+      logsPreEl.textContent = lines.join('\n');
+    }
+
+    const epcMapKey = 'online_monitor_epc_map';
+    function loadEpcMap(){
+      try{
+        const raw = localStorage.getItem(epcMapKey);
+        if(raw){
+          const v = JSON.parse(raw);
+          const c = Number(v.carrier);
+          const h = Number(v.h2);
+          const a = Number(v.air);
+          return { carrier: isFinite(c) && c >= 0 ? c : 0, h2: isFinite(h) && h >= 0 ? h : 1, air: isFinite(a) && a >= 0 ? a : 2 };
+        }
+      }catch{}
+      return { carrier: 0, h2: 1, air: 2 };
+    }
+
+    function saveEpcMap(map){
+      try{ localStorage.setItem(epcMapKey, JSON.stringify(map)); }catch{}
+    }
+
+    function fillEpcSelects(maxIdx){
+      const n = Math.max(3, Math.min(64, Number(maxIdx || 12)));
+      const opts = [];
+      for(let i=0;i<n;i++){
+        opts.push('<option value=\"' + i + '\">' + i + '</option>');
+      }
+      if(setEpcCarrierEl) setEpcCarrierEl.innerHTML = opts.join('');
+      if(setEpcH2El) setEpcH2El.innerHTML = opts.join('');
+      if(setEpcAirEl) setEpcAirEl.innerHTML = opts.join('');
+      const m = loadEpcMap();
+      if(setEpcCarrierEl) setEpcCarrierEl.value = String(m.carrier);
+      if(setEpcH2El) setEpcH2El.value = String(m.h2);
+      if(setEpcAirEl) setEpcAirEl.value = String(m.air);
+    }
+
+    function exportResultsCsv(){
+      const sel = selectedDevice();
+      if(!sel) return;
+      const arr = loadNmchHistory(sel);
+      const fromD = parseTimeText(resFromEl && resFromEl.value);
+      const toD = parseTimeText(resToEl && resToEl.value);
+      const fromT = fromD ? fromD.getTime() : null;
+      const toT = toD ? toD.getTime() : null;
+      const f4 = (v)=> (v === null || v === undefined || !isFinite(Number(v))) ? '' : Number(v).toFixed(4);
+      const lines = ['time,THC,CH4,NMHC'];
+      for(const it of arr){
+        const t = new Date(it.t);
+        const tt = t.getTime();
+        if(fromT !== null && tt < fromT) continue;
+        if(toT !== null && tt > toT) continue;
+        lines.push([it.t, f4(it.thc), f4(it.ch4), f4(it.nmhc)].join(','));
+      }
+      const blob = new Blob([lines.join('\\n')], {type:'text/csv;charset=utf-8'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'nmhc_' + sel + '.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(()=>{ try{ URL.revokeObjectURL(a.href); }catch{} }, 1000);
+    }
+
+    function deleteResultsRange(){
+      const sel = selectedDevice();
+      if(!sel) return;
+      const fromD = parseTimeText(resFromEl && resFromEl.value);
+      const toD = parseTimeText(resToEl && resToEl.value);
+      if(!fromD || !toD){
+        alert('请填写开始与结束时间');
+        return;
+      }
+      const fromT = fromD.getTime();
+      const toT = toD.getTime();
+      if(!(toT >= fromT)){
+        alert('结束时间必须大于开始时间');
+        return;
+      }
+      if(!confirm('确认删除该时间段内的记录？')) return;
+      const arr = loadNmchHistory(sel);
+      const out = [];
+      for(const it of arr){
+        const tt = new Date(it.t).getTime();
+        if(tt >= fromT && tt <= toT) continue;
+        out.push(it);
+      }
+      nmhcHistByDevice.set(sel, out);
+      saveNmchHistory(sel);
+      renderResults();
+      const run = document.getElementById('home-runCountVal');
+      if(run) run.textContent = String(out.length);
+    }
+
 
     function fullWindowS(){
       const v = Number(fullminEl.value || '2');
@@ -1561,9 +1852,13 @@ var indexHTML = `<!doctype html>
           if(prefer){
             deviceEl.value = prefer;
             statusEl.textContent = '在线: ' + prefer;
+            const run = document.getElementById('home-runCountVal');
+            if(run) run.textContent = String(loadNmchHistory(prefer).length);
           }
         }
         renderDebug();
+        if(views.overview && views.overview.classList.contains('active')) renderOverview();
+        if(views.logs && views.logs.classList.contains('active')) renderLogs();
       }catch{}
     }
 
@@ -1701,6 +1996,7 @@ var indexHTML = `<!doctype html>
 	    if(!String(msg.deviceId).startsWith('GC')) return;
 	    const sel = selectedDevice();
 	    if(sel && msg.deviceId !== sel) return;
+	    pushEvtRow(msg.deviceId, 'telemetry', 'temps=' + [msg.tempCol,msg.tempInj1,msg.tempDet1,msg.tempInj2].filter(v=>v!==undefined).length + ' epc=' + (msg.epc ? msg.epc.length : 0));
 	    const f2 = (v)=> {
 	      if(v === undefined || v === null) return '-';
 	      const n = Number(v);
@@ -1717,13 +2013,20 @@ var indexHTML = `<!doctype html>
 	      if(f === '-') return p + ' psi';
 	      return p + ' psi / ' + f + ' sccm';
 	    };
-	    if(gasCarrierEl && (msg.carrierPsi !== undefined || msg.carrierSccm !== undefined)) gasCarrierEl.textContent = gasText(msg.carrierPsi, msg.carrierSccm);
-	    if(gasH2El && (msg.h2Psi !== undefined || msg.h2Sccm !== undefined)) gasH2El.textContent = gasText(msg.h2Psi, msg.h2Sccm);
-	    if(gasAirEl && (msg.airPsi !== undefined || msg.airSccm !== undefined)) gasAirEl.textContent = gasText(msg.airPsi, msg.airSccm);
+	    const epcMap = loadEpcMap();
+	    if(msg.epc && Array.isArray(msg.epc)){
+	      const g0 = msg.epc[epcMap.carrier] || null;
+	      const g1 = msg.epc[epcMap.h2] || null;
+	      const g2 = msg.epc[epcMap.air] || null;
+	      if(gasCarrierEl) gasCarrierEl.textContent = gasText(g0 && g0.psi, g0 && g0.sccm);
+	      if(gasH2El) gasH2El.textContent = gasText(g1 && g1.psi, g1 && g1.sccm);
+	      if(gasAirEl) gasAirEl.textContent = gasText(g2 && g2.psi, g2 && g2.sccm);
+	    }
 	    if(tempColEl && msg.tempCol !== undefined) tempColEl.textContent = f1(msg.tempCol);
 	    if(tempInj1El && msg.tempInj1 !== undefined) tempInj1El.textContent = f1(msg.tempInj1);
 	    if(tempDet1El && msg.tempDet1 !== undefined) tempDet1El.textContent = f1(msg.tempDet1);
 	    if(tempInj2El && msg.tempInj2 !== undefined) tempInj2El.textContent = f1(msg.tempInj2);
+	    if(views.events && views.events.classList.contains('active')) renderEvents();
 	    return;
 	  }
       if(msg.type === 'result'){
@@ -1733,6 +2036,9 @@ var indexHTML = `<!doctype html>
         if(sel && msg.deviceId !== sel) return;
         const rk = streamKey(msg.deviceId, ch);
         if(msg.result && msg.result.pollutants){
+          const entry = nmhcEntryFromResult(msg.deviceId, msg);
+          addNmchHistory(msg.deviceId, entry);
+          pushEvtRow(msg.deviceId, 'result', 'pollutants=' + msg.result.pollutants.length);
           const s = getStream(msg.deviceId, ch);
           results.set(rk, { result: msg.result, cycleStartedAtMs: s.cycleStartedAtMs });
           const table = document.getElementById('tbody');
@@ -1777,6 +2083,10 @@ var indexHTML = `<!doctype html>
           }
         }
         draw();
+        if(views.result && views.result.classList.contains('active')) renderResults();
+        if(views.overview && views.overview.classList.contains('active')) renderOverview();
+        if(views.events && views.events.classList.contains('active')) renderEvents();
+        if(views.logs && views.logs.classList.contains('active')) renderLogs();
         return;
       }
 
@@ -1785,6 +2095,7 @@ var indexHTML = `<!doctype html>
           ensureDeviceOption(msg.deviceId);
           lastActiveDevice = msg.deviceId;
         }
+        pushEvtRow(msg.deviceId, 'device', 'online');
         const sel = selectedDevice();
         if(sel === ''){
           if(String(msg.deviceId).startsWith('GC')){
@@ -1793,6 +2104,7 @@ var indexHTML = `<!doctype html>
         } else if(sel === msg.deviceId){
           statusEl.textContent = '在线: ' + msg.deviceId;
         }
+        if(views.events && views.events.classList.contains('active')) renderEvents();
         return;
       }
 
@@ -1815,6 +2127,7 @@ var indexHTML = `<!doctype html>
       if(s.stopped) return;
       const dt = Number(msg.dtS);
       if(!isFinite(dt) || dt <= 0) return;
+      pushEvtRow(msg.deviceId, 'samples', 'ch=' + msgChannel + ' n=' + (msg.values ? msg.values.length : 0) + ' dt=' + dt.toFixed(4));
       if(s.dtS !== dt){
         s.dtS = dt;
       }
@@ -1871,11 +2184,16 @@ var indexHTML = `<!doctype html>
       if(sel){
         statusEl.textContent = '在线: ' + sel;
         resetStream(sel, Number(chnEl.value || '0'));
+        const run = document.getElementById('home-runCountVal');
+        if(run) run.textContent = String(loadNmchHistory(sel).length);
       } else {
         statusEl.textContent = '未选择设备（自动）';
       }
       draw();
       renderDebug();
+      if(views.overview && views.overview.classList.contains('active')) renderOverview();
+      if(views.result && views.result.classList.contains('active')) renderResults();
+      if(views.logs && views.logs.classList.contains('active')) renderLogs();
     });
 
     chnEl.addEventListener('change', ()=>{
@@ -1909,10 +2227,12 @@ var indexHTML = `<!doctype html>
         if(v.ylow !== undefined) ylowEl.value = String(v.ylow);
         if(v.yhigh !== undefined) yhighEl.value = String(v.yhigh);
         if(v.autoy !== undefined) autoyEl.checked = !!v.autoy;
+        if(v.acqmin !== undefined) acqminEl.value = String(v.acqmin);
         document.getElementById('set-fullmin').value = fullminEl.value;
         document.getElementById('set-ylow').value = ylowEl.value;
         document.getElementById('set-yhigh').value = yhighEl.value;
         document.getElementById('set-autoy').checked = autoyEl.checked;
+        if(setAcqMinEl) setAcqMinEl.value = acqminEl.value;
       }catch{}
     }
 
@@ -1921,25 +2241,43 @@ var indexHTML = `<!doctype html>
       const ylow = Number(document.getElementById('set-ylow').value || '0');
       const yhigh = Number(document.getElementById('set-yhigh').value || '40');
       const autoy = !!document.getElementById('set-autoy').checked;
-      localStorage.setItem('online_monitor_settings', JSON.stringify({fullmin, ylow, yhigh, autoy}));
+      const acqmin = Number((setAcqMinEl && setAcqMinEl.value) ? setAcqMinEl.value : (acqminEl.value || '2'));
+      localStorage.setItem('online_monitor_settings', JSON.stringify({fullmin, ylow, yhigh, autoy, acqmin}));
       fullminEl.value = String(isFinite(fullmin) ? fullmin : 2);
       ylowEl.value = String(isFinite(ylow) ? ylow : 0);
       yhighEl.value = String(isFinite(yhigh) ? yhigh : 40);
       autoyEl.checked = autoy;
+      if(isFinite(acqmin) && acqmin > 0){
+        acqminEl.value = String(acqmin);
+        try{ localStorage.setItem(acqMinStorageKey, String(acqmin)); }catch{}
+      }
+      const m = { carrier: Number(setEpcCarrierEl && setEpcCarrierEl.value || '0'), h2: Number(setEpcH2El && setEpcH2El.value || '1'), air: Number(setEpcAirEl && setEpcAirEl.value || '2') };
+      saveEpcMap(m);
       draw();
     });
 
     setButtonsEnabled(false);
     loadSettings();
+    fillEpcSelects(12);
     tickClock();
     setInterval(tickClock, 250);
-    drawPlaceholder(document.getElementById('cv-method'));
-    drawPlaceholder(document.getElementById('cv-process'));
-    setActiveTab('home');
+    setActiveTab('overview');
     refreshDevices();
     setInterval(refreshDevices, 1000);
     refreshServer();
     setInterval(refreshServer, 2000);
+
+    if(resExportEl) resExportEl.addEventListener('click', exportResultsCsv);
+    if(resDeleteEl) resDeleteEl.addEventListener('click', deleteResultsRange);
+    if(resFromEl) resFromEl.addEventListener('change', renderResults);
+    if(resToEl) resToEl.addEventListener('change', renderResults);
+
+    if(evtClearEl) evtClearEl.addEventListener('click', ()=>{ evtBuf.splice(0, evtBuf.length); renderEvents(); });
+    if(evtOnlySelectedEl) evtOnlySelectedEl.addEventListener('change', renderEvents);
+
+    if(setEpcCarrierEl) setEpcCarrierEl.addEventListener('change', ()=>saveEpcMap({ carrier: Number(setEpcCarrierEl.value||'0'), h2: Number(setEpcH2El && setEpcH2El.value || '1'), air: Number(setEpcAirEl && setEpcAirEl.value || '2') }));
+    if(setEpcH2El) setEpcH2El.addEventListener('change', ()=>saveEpcMap({ carrier: Number(setEpcCarrierEl && setEpcCarrierEl.value || '0'), h2: Number(setEpcH2El.value||'1'), air: Number(setEpcAirEl && setEpcAirEl.value || '2') }));
+    if(setEpcAirEl) setEpcAirEl.addEventListener('change', ()=>saveEpcMap({ carrier: Number(setEpcCarrierEl && setEpcCarrierEl.value || '0'), h2: Number(setEpcH2El && setEpcH2El.value || '1'), air: Number(setEpcAirEl.value||'2') }));
   </script>
 </body>
 </html>`
