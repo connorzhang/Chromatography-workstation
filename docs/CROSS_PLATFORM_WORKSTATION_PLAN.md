@@ -8,9 +8,9 @@
 
 - 采集层：与色谱仪的连接使用网口协议（TCP），无需依赖 Windows 专有驱动。
 - 报表层：不需要复刻原系统的 Word/Excel 互操作与复杂报表，允许使用新语言重新实现简单报表。
-- 算法一致性：不要求与现有算法数值完全一致；要求同一输入在同一方法参数下输出稳定、可复现。
+- 算法一致性：重构版本需要**严格参考现有 Windows 版本的分析逻辑**。对关键输出（RT/面积/峰高/峰数/定量结果），需在约定的误差阈值内与基线一致，并通过固定数据集的对照测试持续回归。
 - UI：不复刻原 WinForms/DevExpress 界面；只需实现谱图展示与标定/套峰交互达到同等效果。
-- 技术偏好：使用 Rust/Go 实现分析内核；未来要支持云平台化（方法下发、结果上报、云端重算）。
+- 技术选型：分析内核使用 Go；未来要支持云平台化（方法下发、结果上报、云端重算）。
 
 ## 现有版本流程复盘（用于迁移对照）
 
@@ -34,7 +34,7 @@
 - 本地落盘：同步生成 XML + JSON。
 - 对外发布：向本地 UI 推送实时点列/周期结束事件（WebSocket/IPC）。
 
-2) 分析内核（Analyzer Core，Rust/Go）
+2) 分析内核（Analyzer Core，Go）
 - 输入：谱图记录（trace）+ 方法（method）。
 - 输出：分析结果（result）。
 - 对外形式：
@@ -149,7 +149,7 @@ JSON 与 XML 同源，建议将点序列展开为数组以提升性能：
 - 输入：TCP 数据流（仪器协议）。
 - 输出：实时点列推送；周期 trace（XML/JSON）落盘；周期结束事件；可选上报云端。
 
-**分析服务/库（Rust/Go）**
+**分析服务/库（Go）**
 - 输入：trace + method。
 - 输出：result（JSON，必要时可输出 XML）。
 
@@ -175,20 +175,96 @@ JSON 与 XML 同源，建议将点序列展开为数组以提升性能：
 - 本地分析后只上报 result（节省云算力）。
 - 或上传 trace 由云端统一分析（便于集中升级算法）。
 
+## MODBUS（标准 Modbus/TCP，实现寄存器地址映射）
+
+目标：对外提供**标准 Modbus/TCP**（MBAP 头 + Function Code），外部系统仅需按“寄存器地址”读取/写入。
+
+关键约定：
+
+- 连接：TCP 端口建议默认 `1502`（Linux 下避免绑定 502 的权限问题），支持配置为 `502`。
+- 多仪器：使用 Modbus/TCP 的 `Unit Identifier`（MBAP Header 里的 UnitId，1 字节）选择仪器实例；单仪器可固定 `UnitId=1`。
+- 通道分段：按 `base = channelIndex * 10000` 的方式做寄存器分段（0/1/2/3 通道分别在 0/10000/20000/30000 段）。
+- StationId：Holding Register `801~812`（共 12 寄存器，24 ASCII），每寄存器 2 字节，顺序见 [docs/DEVICE_ID_STATIONID.md](file:///d:/GIT/VS2022/Chromatography-workstation/docs/DEVICE_ID_STATIONID.md)。
+
+寄存器映射建议（MVP）：
+
+- **Coils（01/05/15）**：状态位与控制位（地址沿用现有定义，便于对照）
+  - `10000`：控温状态（读）
+  - `10001`：分析/采集中状态（读）
+  - `10002..10005`：通道 0..3 采集态（读）
+  - `10006`：点火状态 1（读）
+  - `10007`：点火状态 2（读）
+  - `10008`：事件状态 bit1（读）
+  - 对应“写入控制”统一用 05/15 写 coil，边缘节点再映射为主站下行命令（如 16/17、18/19、22/23、20 等）
+- **Holding Registers（03/06/16）**：关键只做“读寄存器”
+  - `base + 0..7`：设备/通道描述（16 字节 ASCII）
+  - `base + 8..15`：状态文本（16 字节 ASCII）
+  - `base + 16..21`：采集时间 `yyMMddHHmmss`（12 字节 ASCII）
+  - `base + 22`：检测器标识 `detMark`（uint16）
+  - `base + 24`：进样次数 `injNo`（uint16）
+  - `base + 25`：峰数 `peakCount`（uint16）
+  - `base + 26..27`：炉温/加热值 1（float32，2 寄存器）
+  - `base + 28..29`：炉温/加热值 2（float32，2 寄存器）
+  - `base + 801..812`：StationId（24 ASCII，12 寄存器）
+  - 峰表建议从 `base + 1000` 开始（每峰 40 寄存器，最多 20 峰，预留扩展）
+
+浮点端序（必须写死并文档化）：
+- 建议默认：寄存器高字在前（Big-Endian word order），每寄存器内部高字节在前（标准 Modbus 习惯）。
+- 如现场 PLC/采集卡需要 swap，可在边缘节点提供“字序/端序”配置项，但对外文档仍只给出默认。
+
+## 分析内核（已确认：Go）
+
+- 已确认：分析内核使用 **Go**。
+- MVP 统一用 **Go** 实现 Collector/Edge API/Analyzer/Telemetry（减少语言栈数量）。
+- Analyzer 对外接口固定为 HTTP（可预留 gRPC），便于解耦 UI/采集与分析实现，并支撑云端重算与回归测试基线对照。
+
 ## 版本治理与审计
 
 - 方法文件必须版本化：`method_id + version`。
 - 结果必须引用方法版本：result 内写明 `method_id/version`。
 - trace + method 可重放得到同结果（强调确定性与可复现）。
 
-## 里程碑（最小可用闭环）
+## 可交付里程碑（一步一步完成并测试）
 
-M1：实现 voc-trace v1 的 XML/JSON 解析与序列化（采集服务与工具）。
+每一步都必须满足：能运行、可观测（日志/指标/可复现输入输出）、有自动化测试（至少 golden fixtures）。
 
-M2：实现 method v1（pollutants + padding + align + baseline），Method Editor 能保存/加载。
+### Step 0：契约固化（Schema + Fixtures）
+- 产出：`voc-trace.v1 / voc-method.v1 / voc-result.v1` 的 JSON Schema + 3~5 份示例数据（含缺峰/漂移/噪声场景）
+- 测试：Schema 校验 + 示例反序列化/序列化一致性测试
 
-M3：实现 targeted integration（area/height/rt/status）并提供 HTTP/gRPC 或库接口。
+### Step 1：Analyzer v1（离线可测 + 对齐 Win 基线）
+- 产出：
+  - Analyzer（Go）提供 `POST /analyze`
+  - 基线导出器：从现有 Windows 版本（C# 引擎）对同一份 trace+method 导出“基线结果 JSON”
+  - 对照器：新 Analyzer 输出与“基线结果 JSON”自动对比（误差阈值、差异报告）
+- 测试：
+  - golden test：对固定 trace+method 的结果 JSON 做回归
+  - 基线一致性测试：RT/面积/峰高/峰数/定量等关键字段在约定误差阈值内与基线一致
+  - 确定性测试：同输入多次输出一致（字段级稳定）
 
-M4：Realtime Monitor：订阅采集点列实时绘图；周期结束自动分析并标注。
+### Step 2：Collector v1（用“仪器模拟器”先跑通）
+- 产出：
+  - GCKC 协议最小实现（接收点列、周期切片、落盘 trace JSON/XML、WebSocket 推送）
+  - 仪器模拟器：可模拟“主板连接 + 连续上报点列 + 周期结束事件”
+- 测试：
+  - 协议编解码 golden bytes
+  - 模拟器集成测试：collector 能稳定跑 N 个周期不丢包
+  - 可视化冒烟：UI 打开后能看到“设备在线/心跳”状态（先用最简页面也可）
 
-M5：边缘落盘（XML/JSON/result JSON）+ 可选云端上报接口。
+### Step 3：Realtime Monitor UI MVP
+- 产出：实时曲线 + 方法选择 + 周期结束自动分析 + 结果叠加标注
+- 测试：
+  - 端到端集成测试（模拟器→collector→analyzer→ui 可完成一个周期闭环）
+  - 冒烟验收用例（必须可重复执行）：
+    - 打开界面后能自动发现设备在线
+    - 点击“开始/停止”后主站命令下发与应答状态正确
+    - 实时曲线连续滚动、采样点数持续增长、Y 轴自动缩放不抖动
+    - 周期结束自动保存 trace，并自动触发 analyze，结果能叠加显示
+
+### Step 4：Modbus/TCP（标准协议）
+- 产出：标准 Modbus/TCP Server（03/01/05/15 等）+ 寄存器映射（含 StationId 801~812）
+- 测试：Modbus 客户端脚本集成测试（读写地址/边界/异常码）；与模拟器联动验证状态位与结果字段更新
+
+### Step 5：Telemetry（MQTT→EMQX→ES）与运维反控
+- 产出：结果增量上报、心跳、告警；运维反控命令链路（云→边缘→主站下行命令）
+- 测试：离线消息回放 + 断网重连/补发策略测试；权限与审计测试（仅运维命令可达）

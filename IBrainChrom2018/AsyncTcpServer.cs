@@ -22,6 +22,8 @@ public sealed class AsyncTcpServer : IDisposable
 
 	private TcpListener tcpListener_0;
 
+	private TcpListener tcpListener_8000;
+
 	private IPEndPoint ipendPoint_0;
 
 	public List<TcpServerSocket> m_tcpServerList;
@@ -220,6 +222,10 @@ public sealed class AsyncTcpServer : IDisposable
 		ipendPoint_0 = ipendPoint_1;
 		LogMgr.Instance.Write2RunLog("New AsyncTcpServer" + ipendPoint_0.ToString());
 		tcpListener_0 = new TcpListener(ipendPoint_0);
+		try {
+			tcpListener_8000 = new TcpListener(new IPEndPoint(IPAddress.Any, 8000));
+		} catch {}
+
 		m_tcpServerList = new List<TcpServerSocket>();
 		m_tcpServerList.Capacity = 500;
 		for (int i = 0; i < 500; i++)
@@ -277,6 +283,18 @@ public sealed class AsyncTcpServer : IDisposable
 		LogMgr.Instance.Write2RunLog($"tcpListener_0.Start");
 		tcpListener_0.Start();
 		tcpListener_0.BeginAcceptSocket(BeginAsyncReceiveData, tcpListener_0);
+
+		if (tcpListener_8000 != null)
+		{
+			try {
+				tcpListener_8000.Start();
+				tcpListener_8000.BeginAcceptSocket(BeginAsyncReceiveData, tcpListener_8000);
+				LogMgr.Instance.Write2RunLog($"tcpListener_8000.Start on port 8000 success");
+			} catch (Exception ex) {
+				LogMgr.Instance.Write2RunLog($"tcpListener_8000.Start failed: {ex.Message}");
+			}
+		}
+
 		return true;
 	}
 
@@ -294,6 +312,14 @@ public sealed class AsyncTcpServer : IDisposable
 		{
 			LogMgr.Instance.Write2RunLog(string.Format("停止AsyncTcpServer时发生异常：", arg));
 		}
+
+		if (tcpListener_8000 != null)
+		{
+			try {
+				tcpListener_8000.Stop();
+			} catch {}
+		}
+
 		return !flag;
 	}
 
@@ -781,6 +807,9 @@ public sealed class AsyncTcpServer : IDisposable
 	{
 		CloseTcpServerSocketList();
 		tcpListener_0.Stop();
+		if (tcpListener_8000 != null) {
+			try { tcpListener_8000.Stop(); } catch {}
+		}
 		myAcceptSocketHandler = null;
 		myReceiveDataHandler = null;
 		mySendDataHandler = null;

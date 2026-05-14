@@ -1,0 +1,1945 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"chromatography-workstation/edge/internal/analyzer"
+	v1 "chromatography-workstation/edge/internal/contracts/v1"
+	"chromatography-workstation/edge/internal/protocol/chromsend143"
+	"chromatography-workstation/edge/internal/protocol/gckc"
+	"chromatography-workstation/edge/internal/realtime"
+)
+
+var startedAt = time.Now().UTC()
+
+type deviceState struct {
+	mu       sync.Mutex
+	lastTS   map[int]float64
+	lastSeen time.Time
+	lastCmd  byte
+	cmdCnt   map[byte]uint64
+	conn     net.Conn
+	seq      uint32
+	last143  time.Time
+	sessions map[int]*runSession
+}
+
+type runSession struct {
+	active     bool
+	startedAt  time.Time
+	dtS        float64
+	values     []float64
+	lastSample float64
+}
+
+type event struct {
+	Type     string    `json:"type"`
+	DeviceID string    `json:"deviceId"`
+	At       time.Time `json:"at"`
+
+	Channel int       `json:"channel"`
+	DTs     float64   `json:"dtS"`
+	T0s     float64   `json:"t0S"`
+	Values  []float64 `json:"values"`
+}
+
+type sessionSnapshot struct {
+	DtS    float64
+	Values []float64
+}
+
+type resultEvent struct {
+	Type     string    `json:"type"`
+	DeviceID string    `json:"deviceId"`
+	Channel  int       `json:"channel"`
+	At       time.Time `json:"at"`
+	Result   v1.Result `json:"result"`
+	Trace    v1.Trace  `json:"trace"`
+	Method   v1.Method `json:"method"`
+	Error    string    `json:"error,omitempty"`
+}
+
+type telemetryEvent struct {
+	Type     string    `json:"type"`
+	DeviceID string    `json:"deviceId"`
+	At       time.Time `json:"at"`
+
+	TempInj1 *float64 `json:"tempInj1,omitempty"`
+	TempCol  *float64 `json:"tempCol,omitempty"`
+	TempDet1 *float64 `json:"tempDet1,omitempty"`
+	TempInj2 *float64 `json:"tempInj2,omitempty"`
+
+	CarrierPsi  *float64 `json:"carrierPsi,omitempty"`
+	CarrierSccm *float64 `json:"carrierSccm,omitempty"`
+	H2Psi       *float64 `json:"h2Psi,omitempty"`
+	H2Sccm      *float64 `json:"h2Sccm,omitempty"`
+	AirPsi      *float64 `json:"airPsi,omitempty"`
+	AirSccm     *float64 `json:"airSccm,omitempty"`
+}
+
+func f64p(v float64) *float64 {
+	return &v
+}
+
+func bcd2Temp1(data []byte, off int) (float64, bool) {
+	if off < 0 || off+1 >= len(data) {
+		return 0, false
+	}
+	b0 := data[off]
+	neg := (b0 & 0xD0) == 0xD0
+	if neg {
+		b0 -= 0xD0
+	}
+	d1 := int((b0 >> 4) & 0x0F)
+	d2 := int(b0 & 0x0F)
+	d3 := int((data[off+1] >> 4) & 0x0F)
+	d4 := int(data[off+1] & 0x0F)
+	if d1 > 9 || d2 > 9 || d3 > 9 || d4 > 9 {
+		return 0, false
+	}
+	v := float64(d1*100+d2*10+d3) + float64(d4)*0.1
+	if neg {
+		v = -v
+	}
+	return v, true
+}
+
+func u16BE(data []byte, off int) (uint16, bool) {
+	if off < 0 || off+1 >= len(data) {
+		return 0, false
+	}
+	return uint16(data[off])<<8 | uint16(data[off+1]), true
+}
+
+func parseTemps143(payload []byte) (telemetryEvent, bool) {
+	if len(payload) < 12 {
+		return telemetryEvent{}, false
+	}
+	inj1, ok0 := bcd2Temp1(payload, 0)
+	col, ok1 := bcd2Temp1(payload, 2)
+	det1, ok2 := bcd2Temp1(payload, 4)
+	inj2, ok4 := bcd2Temp1(payload, 8)
+	if !ok0 && !ok1 && !ok2 && !ok4 {
+		return telemetryEvent{}, false
+	}
+	te := telemetryEvent{Type: "telemetry", At: time.Now().UTC()}
+	if ok0 {
+		te.TempInj1 = f64p(inj1)
+	}
+	if ok1 {
+		te.TempCol = f64p(col)
+	}
+	if ok2 {
+		te.TempDet1 = f64p(det1)
+	}
+	if ok4 {
+		te.TempInj2 = f64p(inj2)
+	}
+	return te, true
+}
+
+type epcItem struct {
+	ActualPsi  float64
+	ActualSccm float64
+}
+
+func parseEpc159(payload []byte) ([]epcItem, bool) {
+	if len(payload) < 1 {
+		return nil, false
+	}
+	n := int(payload[0])
+	idx := 1
+	items := make([]epcItem, 0, n)
+	for i := 0; i < n; i++ {
+		if idx >= len(payload) {
+			break
+		}
+		idx++
+		u0, ok0 := u16BE(payload, idx)
+		u1, ok1 := u16BE(payload, idx+2)
+		u2, ok2 := u16BE(payload, idx+4)
+		if !ok0 || !ok1 || !ok2 {
+			break
+		}
+		_ = u0
+		items = append(items, epcItem{ActualPsi: float64(u1) / 100.0, ActualSccm: float64(u2) / 100.0})
+		idx += 6
+		if idx >= len(payload) {
+			break
+		}
+		idx++
+		if idx >= len(payload) {
+			break
+		}
+		idx++
+	}
+	if len(items) == 0 {
+		return nil, false
+	}
+	return items, true
+}
+
+func main() {
+	tcpPort := 25001
+	tcpPort8000 := 8000
+	httpPort := 8080
+	allowControl := envBool("EDGE_ALLOW_CONTROL", false)
+
+	hub := realtime.NewHub()
+	states := &sync.Map{}
+	cfg := chromsend143.Config{ShuaiJian1: 1, ShuaiJian2: 1, ShuaiJian3: 1}
+	method := loadMethod()
+
+	go func() {
+		if err := serveTCP(tcpPort, hub, states, cfg, method); err != nil {
+			log.Printf("collector tcp listener stopped: %v", err)
+		}
+	}()
+	go func() {
+		if err := serveTCP(tcpPort8000, hub, states, cfg, method); err != nil {
+			log.Printf("collector tcp listener stopped: %v", err)
+		}
+	}()
+
+	writePID()
+
+	if err := serveHTTP(httpPort, hub, states, allowControl, method); err != nil {
+		log.Fatalf("collector stopped: %v", err)
+	}
+}
+
+func writePID() {
+	_ = os.MkdirAll(filepath.Join(".run"), 0o755)
+	pidPath := filepath.Join(".run", "collector.pid")
+	_ = os.WriteFile(pidPath, []byte(strconv.Itoa(os.Getpid())), 0o644)
+}
+
+func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool, method v1.Method) error {
+	mux := http.NewServeMux()
+	mux.Handle("/events", hub)
+	mux.HandleFunc("/api/v1/server", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"pid":       os.Getpid(),
+			"startedAt": startedAt.Format(time.RFC3339),
+			"httpPort":  port,
+			"tcpPorts":  []int{25001, 8000},
+			"pidFile":   filepath.Join(".run", "collector.pid"),
+		})
+	})
+	mux.HandleFunc("/api/v1/method", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		writeJSON(w, http.StatusOK, method)
+	})
+	mux.HandleFunc("/api/v1/devices", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		type dev struct {
+			DeviceID   string            `json:"deviceId"`
+			LastSeen   time.Time         `json:"lastSeen"`
+			LastCmd    int               `json:"lastCmd"`
+			CmdCounts  map[string]uint64 `json:"cmdCounts"`
+			Last143    time.Time         `json:"last143"`
+			Connected  bool              `json:"connected"`
+			AllowCtrl  bool              `json:"allowControl"`
+			CanStart22 bool              `json:"canStart22"`
+		}
+		out := make([]dev, 0)
+		states.Range(func(key, value any) bool {
+			id := key.(string)
+			if strings.HasPrefix(id, "DEV") {
+				return true
+			}
+			st := value.(*deviceState)
+			st.mu.Lock()
+			cc := map[string]uint64{}
+			for k, v := range st.cmdCnt {
+				cc[strconv.Itoa(int(k))] = v
+			}
+			connected := st.conn != nil
+			lastSeen := st.lastSeen
+			lastCmd := st.lastCmd
+			last143 := st.last143
+			st.mu.Unlock()
+			out = append(out, dev{DeviceID: id, LastSeen: lastSeen, LastCmd: int(lastCmd), CmdCounts: cc, Last143: last143, Connected: connected, AllowCtrl: allowControl, CanStart22: allowControl && connected})
+			return true
+		})
+		writeJSON(w, http.StatusOK, out)
+	})
+	mux.HandleFunc("/api/v1/devices/", func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, "/api/v1/devices/")
+		parts := strings.Split(path, "/")
+		if len(parts) < 2 {
+			http.NotFound(w, r)
+			return
+		}
+		deviceID := parts[0]
+		action := parts[1]
+		if action != "cmd" && action != "localStart" && action != "localStop" && action != "localResult" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		stAny, ok := states.Load(deviceID)
+		if !ok {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "device not found"})
+			return
+		}
+		if strings.HasPrefix(deviceID, "DEV") {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "device not found"})
+			return
+		}
+		st := stAny.(*deviceState)
+		switch action {
+		case "cmd":
+			if !allowControl {
+				writeJSON(w, http.StatusForbidden, map[string]any{"error": "control disabled: set EDGE_ALLOW_CONTROL=1"})
+				return
+			}
+			sub := r.URL.Query().Get("name")
+			ch := envIntFromQuery(r, "channel", 0)
+			cmd, payload, err := buildCmd(sub, ch)
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+				return
+			}
+			if err := sendCmd(st, deviceID, cmd, payload); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "cmd": cmd})
+		case "localStart":
+			ch := envIntFromQuery(r, "channel", 0)
+			if ch < 0 || ch > 7 {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid channel"})
+				return
+			}
+			resetSession(st, ch)
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		case "localStop":
+			ch := envIntFromQuery(r, "channel", 0)
+			if ch < 0 || ch > 7 {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid channel"})
+				return
+			}
+			if allowControl {
+				channelMask := byte(1 << uint(ch))
+				_ = sendCmd(st, deviceID, 245, []byte{channelMask})
+				time.Sleep(100 * time.Millisecond)
+			}
+			ok, msg := finalizeSession(hub, st, deviceID, ch, method)
+			if !ok {
+				writeJSON(w, http.StatusConflict, map[string]any{"error": msg})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		case "localResult":
+			ch := envIntFromQuery(r, "channel", 0)
+			if ch < 0 || ch > 7 {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid channel"})
+				return
+			}
+			ok, msg := publishSessionResultSnapshot(hub, st, deviceID, ch, method)
+			if !ok {
+				writeJSON(w, http.StatusConflict, map[string]any{"error": msg})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		}
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(indexHTML))
+	})
+	log.Printf("collector http listening on 127.0.0.1:%d", port)
+	return http.ListenAndServe("127.0.0.1:"+strconv.Itoa(port), mux)
+}
+
+func serveTCP(port int, hub *realtime.Hub, states *sync.Map, cfg chromsend143.Config, method v1.Method) error {
+	ln, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", port))
+	if err != nil {
+		return fmt.Errorf("tcp listen %d failed: %w", port, err)
+	}
+	log.Printf("collector tcp listening on 0.0.0.0:%d", port)
+	for {
+		c, err := ln.Accept()
+		if err != nil {
+			continue
+		}
+		go handleConn(c, hub, states, cfg, method)
+	}
+}
+
+func handleConn(c net.Conn, hub *realtime.Hub, states *sync.Map, cfg chromsend143.Config, method v1.Method) {
+	defer c.Close()
+	dec := &gckc.StreamDecoder{}
+	buf := make([]byte, 64*1024)
+
+	for {
+		n, err := c.Read(buf)
+		if n > 0 {
+			dec.Push(buf[:n])
+			for {
+				f, ok, derr := dec.Next()
+				if derr != nil {
+					break
+				}
+				if !ok {
+					break
+				}
+				processFrame(c, f, hub, states, cfg, method)
+			}
+		}
+		if err != nil {
+			if err == io.EOF {
+				return
+			}
+			return
+		}
+	}
+}
+
+func processFrame(c net.Conn, f gckc.Frame, hub *realtime.Hub, states *sync.Map, cfg chromsend143.Config, method v1.Method) {
+	if strings.HasPrefix(f.DeviceID, "DEV") {
+		return
+	}
+	st := getState(states, f.DeviceID)
+	st.mu.Lock()
+	st.lastSeen = time.Now()
+	st.lastCmd = f.Cmd
+	if st.cmdCnt == nil {
+		st.cmdCnt = map[byte]uint64{}
+	}
+	st.cmdCnt[f.Cmd]++
+	st.conn = c
+	if st.sessions == nil {
+		st.sessions = map[int]*runSession{}
+	}
+	st.mu.Unlock()
+
+	hub.Publish(f.DeviceID, event{Type: "device", DeviceID: f.DeviceID, At: time.Now()})
+
+	switch f.Cmd {
+	case 146:
+		resetAllSessions(st)
+	case 150:
+		if len(f.Payload) > 0 {
+			ch := int(f.Payload[0])
+			resetSession(st, ch)
+		}
+	case 147:
+			finalizeAllSessions(hub, st, f.DeviceID, method)
+	case 151:
+		if len(f.Payload) > 0 {
+			ch := int(f.Payload[0])
+				finalizeSession(hub, st, f.DeviceID, ch, method)
+		}
+		case 159:
+			if items, ok := parseEpc159(f.Payload); ok {
+				e := telemetryEvent{Type: "telemetry", DeviceID: f.DeviceID, At: time.Now().UTC()}
+				if len(items) > 0 {
+					e.CarrierPsi = f64p(items[0].ActualPsi)
+					e.CarrierSccm = f64p(items[0].ActualSccm)
+				}
+				if len(items) > 1 {
+					e.H2Psi = f64p(items[1].ActualPsi)
+					e.H2Sccm = f64p(items[1].ActualSccm)
+				}
+				if len(items) > 2 {
+					e.AirPsi = f64p(items[2].ActualPsi)
+					e.AirSccm = f64p(items[2].ActualSccm)
+				}
+				hub.Publish(f.DeviceID, e)
+			}
+	}
+
+	if f.Cmd != 143 {
+		return
+	}
+	if te, ok := parseTemps143(f.Payload); ok {
+		te.DeviceID = f.DeviceID
+		hub.Publish(f.DeviceID, te)
+	}
+	parsedAll, has, err := chromsend143.ParseAll(f.Payload, cfg)
+	if err != nil || !has || len(parsedAll) == 0 {
+		return
+	}
+
+	for _, parsed := range parsedAll {
+		dtS := 1.0 / float64(parsed.Freq10)
+		st.mu.Lock()
+		if st.lastTS == nil {
+			st.lastTS = map[int]float64{}
+		}
+		t0 := st.lastTS[parsed.Channel]
+		st.lastTS[parsed.Channel] = t0 + float64(len(parsed.Values))*dtS
+		st.last143 = time.Now()
+		appendSessionSamplesLocked(st, parsed.Channel, dtS, t0, parsed.Values)
+		st.mu.Unlock()
+		hub.Publish(f.DeviceID, event{Type: "samples", DeviceID: f.DeviceID, At: time.Now(), Channel: parsed.Channel, DTs: dtS, T0s: t0, Values: parsed.Values})
+	}
+}
+
+func resetAllSessions(st *deviceState) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.lastTS = map[int]float64{}
+	if st.sessions == nil {
+		st.sessions = map[int]*runSession{}
+	}
+	for ch := range st.sessions {
+		st.sessions[ch] = &runSession{active: true, startedAt: time.Now()}
+	}
+}
+
+func resetSession(st *deviceState, ch int) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.lastTS == nil {
+		st.lastTS = map[int]float64{}
+	}
+	st.lastTS[ch] = 0
+	if st.sessions == nil {
+		st.sessions = map[int]*runSession{}
+	}
+	st.sessions[ch] = &runSession{active: true, startedAt: time.Now()}
+}
+
+func appendSessionSamplesLocked(st *deviceState, ch int, dtS float64, t0 float64, vals []float64) {
+	s, ok := st.sessions[ch]
+	if !ok || s == nil {
+		s = &runSession{active: true, startedAt: time.Now()}
+		st.sessions[ch] = s
+	}
+	if !s.active {
+		return
+	}
+	if s.dtS == 0 {
+		s.dtS = dtS
+	} else if mathAbs(s.dtS-dtS) > 1e-6 {
+		s.dtS = dtS
+		s.values = nil
+	}
+	idx0 := int(t0 / s.dtS)
+	if idx0 < 0 {
+		idx0 = 0
+	}
+	need := idx0 + len(vals)
+	if len(s.values) < need {
+		last := s.lastSample
+		if len(s.values) > 0 {
+			last = s.values[len(s.values)-1]
+		}
+		for len(s.values) < need {
+			s.values = append(s.values, last)
+		}
+	}
+	for i := 0; i < len(vals); i++ {
+		s.values[idx0+i] = vals[i]
+		s.lastSample = vals[i]
+	}
+}
+
+func finalizeAllSessions(hub *realtime.Hub, st *deviceState, deviceID string, method v1.Method) {
+	st.mu.Lock()
+	chs := make([]int, 0, len(st.sessions))
+	for ch := range st.sessions {
+		chs = append(chs, ch)
+	}
+	st.mu.Unlock()
+	for _, ch := range chs {
+		finalizeSession(hub, st, deviceID, ch, method)
+	}
+}
+
+func finalizeSession(hub *realtime.Hub, st *deviceState, deviceID string, ch int, method v1.Method) (bool, string) {
+	st.mu.Lock()
+	s, ok := st.sessions[ch]
+	if !ok || s == nil || !s.active || s.dtS <= 0 || len(s.values) < 2 {
+		if ok && s != nil {
+			s.active = false
+		}
+		st.mu.Unlock()
+		return false, "no active session"
+	}
+	trace := v1.Trace{
+		Schema:    "voc-trace.v1",
+		TraceID:   fmt.Sprintf("%s-%d-%d", deviceID, ch, time.Now().UnixNano()),
+		DeviceID:  deviceID,
+		StationID: deviceID,
+		DataTime:  time.Now().UTC().Format(time.RFC3339),
+		DtS:       s.dtS,
+		TimeSpanS: float64(len(s.values)-1) * s.dtS,
+		Unit:      "pA",
+		Values:    append([]float64(nil), s.values...),
+	}
+	s.active = false
+	st.mu.Unlock()
+
+	res, err := analyzer.Analyze(trace, method, "dev", time.Now())
+	e := resultEvent{Type: "result", DeviceID: deviceID, Channel: ch, At: time.Now(), Trace: trace, Method: method}
+	if err != nil {
+		e.Error = err.Error()
+	} else {
+		e.Result = res
+	}
+	hub.Publish(deviceID, e)
+	return true, e.Error
+}
+
+func publishSessionResultSnapshot(hub *realtime.Hub, st *deviceState, deviceID string, ch int, method v1.Method) (bool, string) {
+	st.mu.Lock()
+	s, ok := st.sessions[ch]
+	if !ok || s == nil || !s.active || s.dtS <= 0 || len(s.values) < 2 {
+		st.mu.Unlock()
+		return false, "no active session"
+	}
+	snap := sessionSnapshot{DtS: s.dtS, Values: append([]float64(nil), s.values...)}
+	st.mu.Unlock()
+
+	trace := v1.Trace{
+		Schema:    "voc-trace.v1",
+		TraceID:   fmt.Sprintf("%s-%d-snap-%d", deviceID, ch, time.Now().UnixNano()),
+		DeviceID:  deviceID,
+		StationID: deviceID,
+		DataTime:  time.Now().UTC().Format(time.RFC3339),
+		DtS:       snap.DtS,
+		TimeSpanS: float64(len(snap.Values)-1) * snap.DtS,
+		Unit:      "pA",
+		Values:    snap.Values,
+	}
+
+	e := resultEvent{Type: "result", DeviceID: deviceID, Channel: ch, At: time.Now().UTC(), Trace: trace, Method: method}
+	res, err := analyzer.Analyze(trace, method, deviceID, time.Now())
+	if err != nil {
+		e.Error = err.Error()
+	} else {
+		e.Result = res
+	}
+	hub.Publish(deviceID, e)
+	return true, e.Error
+}
+
+func mathAbs(v float64) float64 {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
+func loadMethod() v1.Method {
+	path := filepath.Join(".run", "method.json")
+	b, err := os.ReadFile(path)
+	if err == nil {
+		var m v1.Method
+		if json.Unmarshal(b, &m) == nil && m.Schema != "" {
+			return m
+		}
+	}
+	return v1.Method{
+		Schema:   "voc-method.v1",
+		MethodID: "default",
+		Version:  1,
+		Pollutants: []v1.PollutantSpec{
+			{Code: "THC", Name: "总烃", StartS: 0, EndS: 20, PaddingS: 2, Threshold: 0},
+			{Code: "CH4", Name: "甲烷", StartS: 20, EndS: 80, PaddingS: 2, Threshold: 0},
+		},
+	}
+}
+
+func getState(states *sync.Map, deviceID string) *deviceState {
+	v, ok := states.Load(deviceID)
+	if ok {
+		return v.(*deviceState)
+	}
+	st := &deviceState{lastTS: map[int]float64{}}
+	states.Store(deviceID, st)
+	return st
+}
+
+func envInt(name string, def int) int {
+	v := os.Getenv(name)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return def
+	}
+	return n
+}
+
+func envBool(name string, def bool) bool {
+	v := os.Getenv(name)
+	if v == "" {
+		return def
+	}
+	v = strings.TrimSpace(strings.ToLower(v))
+	return v == "1" || v == "true" || v == "yes" || v == "on"
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func envIntFromQuery(r *http.Request, key string, def int) int {
+	v := r.URL.Query().Get(key)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return def
+	}
+	return n
+}
+
+func buildCmd(name string, channel int) (byte, []byte, error) {
+	switch name {
+	case "start":
+		return 22, []byte{byte(channel)}, nil
+	case "stop":
+		return 23, []byte{byte(channel)}, nil
+	case "startAll":
+		return 18, nil, nil
+	case "stopAll":
+		return 19, nil, nil
+	case "tempOn":
+		return 16, nil, nil
+	case "tempOff":
+		return 17, nil, nil
+	default:
+		return 0, nil, fmt.Errorf("unknown cmd name: %s", name)
+	}
+}
+
+func sendCmd(st *deviceState, deviceID string, cmd byte, payload []byte) error {
+	st.mu.Lock()
+	conn := st.conn
+	st.mu.Unlock()
+	if conn == nil {
+		return fmt.Errorf("device %s not connected", deviceID)
+	}
+	seq := uint16(atomic.AddUint32(&st.seq, 1) & 0xFFFF)
+	frame, err := gckc.Encode(gckc.Frame{DeviceID: deviceID, Seq: seq, Cmd: cmd, Payload: payload})
+	if err != nil {
+		return err
+	}
+	_, err = conn.Write(frame)
+	return err
+}
+
+var indexHTML = `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Edge Collector</title>
+  <style>
+    :root{--bg:#F3F6FB;--card:#FFFFFF;--stroke:#D9E2EF;--grid:#E6EEF8;--shadow:0 2px 10px rgba(15,39,71,0.08);--text:#1F2A44;--muted:#5B6B84;--primary:#2B6DFF;--dark:#3B3B3B;--dark2:#2F2F2F;--ok:#3AC268;--warn:#FF4D4F;--blueCard:#6FB6FF;--blueCard2:#56A6FF}
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{font-family:system-ui,"Segoe UI",Arial;margin:0;background:var(--bg);color:var(--text)}
+    .mono{font-variant-numeric:tabular-nums}
+    .shell{min-height:100%;display:flex;flex-direction:column}
+    .topbar{background:linear-gradient(180deg,var(--dark),var(--dark2));color:#fff;display:flex;align-items:center;gap:18px;padding:10px 16px}
+    .brand{font-size:26px;letter-spacing:1px;white-space:nowrap;margin-right:8px}
+    .tabs{display:flex;gap:10px;align-items:center;flex:1}
+    .tab{appearance:none;border:none;background:transparent;color:#fff;display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:10px;cursor:pointer;opacity:0.9}
+    .tab:hover{background:rgba(255,255,255,0.08);opacity:1}
+    .tab.active{background:rgba(255,255,255,0.14);opacity:1}
+    .tabIcon{width:28px;height:28px;border-radius:999px;background:rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;font-size:14px;position:relative;flex:none}
+    .tab.active .tabIcon::after{content:"";position:absolute;bottom:-6px;left:50%;transform:translateX(-50%);width:10px;height:10px;border-radius:999px;background:rgba(144,238,144,0.9);box-shadow:0 0 0 2px rgba(0,0,0,0.25)}
+    .tabText{font-size:13px;white-space:nowrap}
+    .flame{width:46px;height:46px;border-radius:14px;background:#fff;display:flex;align-items:center;justify-content:center;box-shadow:var(--shadow);border:1px solid var(--stroke)}
+    .flameInner{width:22px;height:22px;background:var(--warn);border-radius:14px 14px 14px 0;transform:rotate(45deg)}
+    .main{padding:14px 16px;flex:1}
+    .view{display:none}
+    .view.active{display:block}
+    .card{background:var(--card);border:1px solid var(--stroke);border-radius:10px;box-shadow:var(--shadow)}
+    .cardPad{padding:12px}
+    .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    .spacer{flex:1}
+    .btn{appearance:none;border:1px solid var(--stroke);background:#fff;color:var(--text);border-radius:8px;padding:8px 12px;cursor:pointer}
+    .btn:hover{background:rgba(43,109,255,0.06);border-color:rgba(43,109,255,0.35)}
+    .btn.dark{background:#444;color:#fff;border-color:#444}
+    .btn.primary{background:var(--primary);border-color:var(--primary);color:#fff}
+    .btn:disabled{opacity:0.45;cursor:not-allowed}
+    .input,.select{border:1px solid var(--stroke);border-radius:8px;padding:8px 10px;background:#fff;color:var(--text);outline:none}
+    .label{font-size:12px;color:var(--muted)}
+    .dot{width:10px;height:10px;border-radius:999px;display:inline-block}
+    .modeItem{display:flex;gap:6px;align-items:center;color:var(--text);font-size:13px}
+    .modeItem input{accent-color:var(--primary)}
+
+    #row{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+    #status{padding:6px 10px;border:1px solid var(--stroke);border-radius:6px;background:#fff}
+    #panel{display:grid;grid-template-columns:1fr 380px;gap:12px;align-items:start}
+    #chartWrap{min-width:720px}
+    @media (max-width:1200px){#panel{grid-template-columns:1fr}#chartWrap{min-width:unset}}
+    canvas{border:1px solid var(--stroke);border-radius:8px;background:#fff;width:100%;height:440px;display:block}
+    #right{border:1px solid var(--stroke);border-radius:10px;overflow:hidden;background:#fff;box-shadow:var(--shadow)}
+    #tblTitle{background:rgba(31,42,68,0.92);color:#fff;padding:10px 12px;font-size:12px}
+    table{width:100%;border-collapse:collapse}
+    th{background:rgba(31,42,68,0.92);color:#fff;font-weight:600;text-align:left;padding:10px 12px;font-size:12px}
+    td{padding:10px 12px;border-top:1px solid var(--grid);font-size:12px}
+
+    .homeGrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;max-width:560px}
+    .blueCard{background:linear-gradient(180deg,var(--blueCard),var(--blueCard2));border:1px solid rgba(255,255,255,0.65);border-radius:6px;min-height:118px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;color:#0b1b2f}
+    .blueTitle{font-size:18px;opacity:0.92}
+    .blueValue{font-size:28px;font-weight:700;letter-spacing:0.5px}
+    .bottomBar{margin-top:12px;display:grid;grid-template-columns:1fr 60px 300px;gap:12px;align-items:end;max-width:980px}
+    .statusStrip{background:linear-gradient(180deg,#87C2FF,#74B9FF);border-radius:6px;padding:8px 12px;color:#0b1b2f}
+    .ctrlStrip{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .ctrlBtn{background:#E9EEF5;border:1px solid #D0D7E2;border-radius:6px;padding:8px 12px;color:#20314f}
+    .ctrlVal{background:#87C2FF;border:1px solid rgba(255,255,255,0.6);border-radius:6px;padding:8px 12px;color:#0b1b2f;min-width:100px;text-align:center}
+    .ctrlAction{background:#2B6DFF;border:1px solid rgba(0,0,0,0.05);border-radius:6px;padding:8px 16px;color:#fff}
+    .clock{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;background:#fff;border:1px solid #000;border-radius:2px;padding:10px 12px;font-size:28px;letter-spacing:1px;text-align:center}
+    @media (max-width:1200px){.bottomBar{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand">在线监测</div>
+      <nav class="tabs" id="tabs">
+        <button class="tab active" data-tab="home"><span class="tabIcon">主</span><span class="tabText">主界面</span></button>
+        <button class="tab" data-tab="chrom"><span class="tabIcon">谱</span><span class="tabText">谱图</span></button>
+        <button class="tab" data-tab="method"><span class="tabIcon">法</span><span class="tabText">仪器方法</span></button>
+        <button class="tab" data-tab="process"><span class="tabIcon">处</span><span class="tabText">谱图处理</span></button>
+        <button class="tab" data-tab="report"><span class="tabIcon">报</span><span class="tabText">记录报表</span></button>
+        <button class="tab" data-tab="settings"><span class="tabIcon">设</span><span class="tabText">系统设置</span></button>
+      </nav>
+      <div class="flame" title="告警"><div class="flameInner"></div></div>
+    </header>
+
+    <main class="main">
+      <section id="view-home" class="view active">
+        <div class="card cardPad" style="max-width:980px">
+          <div class="homeGrid">
+            <div class="blueCard"><div class="blueTitle">总烃</div><div class="blueValue mono" id="kpi-thc">1.6394</div></div>
+            <div class="blueCard"><div class="blueTitle" style="opacity:0.0">占位</div><div class="blueValue mono" id="kpi-thc2"> </div></div>
+            <div class="blueCard"><div class="blueTitle">甲烷</div><div class="blueValue mono" id="kpi-ch4">0.1686</div></div>
+            <div class="blueCard"><div class="blueTitle" style="opacity:0.0">占位</div><div class="blueValue mono" id="kpi-ch4b"> </div></div>
+            <div class="blueCard"><div class="blueTitle">非甲烷总烃</div><div class="blueValue mono" id="kpi-nmhc">1.4709</div></div>
+            <div class="blueCard"><div class="blueTitle" style="opacity:0.0">占位</div><div class="blueValue mono" id="kpi-nmhc2"> </div></div>
+          </div>
+
+          <div class="bottomBar">
+            <div>
+              <div class="statusStrip mono" id="home-status">时间: 0.000 min   信号: 0.000 pA</div>
+              <div style="margin-top:10px" class="ctrlStrip">
+                <button class="ctrlBtn">运行次数</button>
+                <div class="ctrlVal mono" id="home-runCountVal">1720</div>
+                <button class="ctrlBtn">单位</button>
+                <div class="ctrlVal mono" id="home-unitVal">mg/m³</div>
+                <button class="ctrlAction" id="home-inject">进样</button>
+              </div>
+            </div>
+            <div class="flame" title="状态"><div class="flameInner"></div></div>
+            <div class="clock mono" id="home-clock">0000-00-00 00:00:00</div>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-chrom" class="view">
+        <div class="card cardPad" style="max-width:1240px">
+          <div class="row" style="margin-bottom:10px">
+            <button class="btn dark">通道1结束</button>
+            <label class="modeItem"><span class="dot" style="background:var(--ok)"></span><input type="radio" name="mode" checked /> 正常进样</label>
+            <label class="modeItem"><span class="dot" style="background:#B7C0CF"></span><input type="radio" name="mode" /> 零气反标</label>
+            <label class="modeItem"><span class="dot" style="background:#B7C0CF"></span><input type="radio" name="mode" /> 标气反标</label>
+            <div class="spacer"></div>
+            <span class="label">下限:</span><input id="ylow" class="input mono" style="width:90px" value="0" />
+            <span class="label">上限:</span><input id="yhigh" class="input mono" style="width:90px" value="40" />
+            <span class="label">采集时间:</span><input id="acqmin" class="input mono" style="width:70px" value="2" />
+            <input class="input" style="width:48px" value="0" />
+            <span class="label">满屏时间</span><input id="fullmin" class="input mono" style="width:70px" value="2" />
+          </div>
+
+          <div class="row" style="margin-bottom:10px">
+            <div id="stat" class="mono">通道1: 0.000 min  0.000 pA  信号1:</div>
+            <label class="modeItem"><input id="autoy" type="checkbox" checked /> 峰高自适应</label>
+            <label class="modeItem"><input id="loop" type="checkbox" checked /> 自动出数</label>
+            <input id="name" class="input" placeholder="谱图名称" style="width:260px" />
+            <div class="spacer"></div>
+            <div class="kpi"><div class="label">在线</div><div id="status" class="mono">未连接</div></div>
+            <div class="kpi"><div class="label">设备</div><select id="device" class="select mono"><option value="">等待 GC...</option></select></div>
+            <div class="kpi"><div class="label">Channel</div><select id="chn" class="select mono"><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option></select></div>
+            <button class="btn primary" id="start">开始</button>
+            <button class="btn" id="stop">停止</button>
+            <button class="btn" id="clear">清屏</button>
+          </div>
+
+          <div id="panel">
+            <div id="chartWrap" class="card" style="padding:10px">
+              <canvas id="cv" width="1200" height="440"></canvas>
+            </div>
+            <div>
+              <div id="right">
+                <div id="tblTitle">名称 | 含量(mg/m³)</div>
+                <table>
+                  <thead><tr><th>名称</th><th>含量(mg/m³)</th></tr></thead>
+                  <tbody id="tbody">
+                    <tr><td>总烃</td><td class="mono">-</td></tr>
+                    <tr><td>甲烷</td><td class="mono">-</td></tr>
+                    <tr><td>非甲烷总烃</td><td class="mono">-</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
+                <div class="card" style="border-radius:10px;overflow:hidden">
+                  <div id="tblTitle">实测</div>
+                  <table>
+                    <tbody>
+                      <tr><td>载气</td><td class="mono" id="gas-carrier">-</td></tr>
+                      <tr><td>氢气</td><td class="mono" id="gas-h2">-</td></tr>
+                      <tr><td>空气</td><td class="mono" id="gas-air">-</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div class="card" style="border-radius:10px;overflow:hidden">
+                  <div id="tblTitle">实测℃</div>
+                  <table>
+                    <tbody>
+                      <tr><td>柱箱</td><td class="mono" id="temp-col">-</td></tr>
+                      <tr><td>阀温</td><td class="mono" id="temp-inj1">-</td></tr>
+                      <tr><td>检测1</td><td class="mono" id="temp-det1">-</td></tr>
+                      <tr><td>进样2</td><td class="mono" id="temp-inj2">-</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="flame" style="margin-top:12px" title="状态"><div class="flameInner"></div></div>
+              <div id="dbg" class="mono" style="margin-top:10px;color:var(--muted)"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-method" class="view">
+        <div class="card cardPad" style="max-width:1240px">
+          <div class="row" style="margin-bottom:10px">
+            <button class="btn dark">打开谱图</button>
+            <button class="btn dark" disabled>应用到方法</button>
+            <select class="select" style="min-width:180px"><option>非甲烷总烃</option></select>
+            <button class="btn">▧</button>
+            <button class="btn">✓</button>
+            <div class="spacer"></div>
+            <button class="btn dark">重置</button>
+          </div>
+          <div style="display:grid;grid-template-columns:420px 1fr;gap:12px">
+            <div>
+              <div class="card" style="border-radius:10px;overflow:hidden">
+                <div id="tblTitle">组份编辑</div>
+                <table>
+                  <thead><tr><th>名称</th><th>保留时间</th><th>窗宽</th><th>面积</th><th>标气浓度</th></tr></thead>
+                  <tbody>
+                    <tr><td>总烃</td><td class="mono">0.1058</td><td class="mono">0.2</td><td class="mono">115.675</td><td class="mono">49.88</td></tr>
+                    <tr><td>甲烷</td><td class="mono">0.6158</td><td class="mono">0.2</td><td class="mono">22.0271</td><td class="mono">9.98</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="card" style="margin-top:12px;border-radius:10px;overflow:hidden">
+                <div id="tblTitle">面积/峰表</div>
+                <table>
+                  <thead><tr><th>序号</th><th>保留时间</th><th>面积(pA*S)</th><th>高度(pA)</th><th>开始时间</th><th>结束时间</th></tr></thead>
+                  <tbody><tr><td class="mono" colspan="6" style="color:var(--muted)">暂无数据</td></tr></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="cardPad" style="padding:10px">
+              <canvas id="cv-method" width="900" height="440"></canvas>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-process" class="view">
+        <div class="card cardPad" style="max-width:1240px">
+          <div class="row"><button class="btn dark">打开谱图</button><button class="btn dark">重置</button><div class="spacer"></div><div class="label">占位：按旧版布局后续补齐</div></div>
+          <div class="cardPad" style="padding:10px;margin-top:12px">
+            <canvas id="cv-process" width="1200" height="440"></canvas>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-report" class="view">
+        <div class="card cardPad" style="max-width:1240px">
+          <div class="row" style="margin-bottom:10px">
+            <div class="label">记录报表</div>
+          </div>
+          <div id="report-history">
+            <div style="display:grid;grid-template-columns:420px 1fr;gap:12px">
+              <div class="card" style="border-radius:10px;overflow:hidden">
+                <div id="tblTitle">记录报表</div>
+                <table>
+                  <thead><tr><th>时间</th><th>总烃</th><th>甲烷</th><th>非甲烷总烃</th></tr></thead>
+                  <tbody><tr><td class="mono" colspan="4" style="color:var(--muted)">暂无数据</td></tr></tbody>
+                </table>
+              </div>
+              <div class="card" style="border-radius:10px;min-height:420px"></div>
+            </div>
+            <div class="row" style="margin-top:12px;gap:10px">
+              <input class="input mono" style="width:220px" value="2020/04/18 00:00:00" />
+              <input class="input mono" style="width:220px" value="2020/04/18 00:00:00" />
+              <button class="btn dark">导出数据</button>
+              <button class="btn dark">NMHC删除选中数据</button>
+              <button class="btn dark">BTEX删除选中数据</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-settings" class="view">
+        <div class="card cardPad" style="max-width:980px">
+          <div id="tblTitle">系统设置</div>
+          <div class="row" style="margin-top:12px">
+            <div><div class="label">默认满屏时间(min)</div><input id="set-fullmin" class="input mono" style="width:120px" value="2" /></div>
+            <div><div class="label">默认下限</div><input id="set-ylow" class="input mono" style="width:120px" value="0" /></div>
+            <div><div class="label">默认上限</div><input id="set-yhigh" class="input mono" style="width:120px" value="40" /></div>
+            <div><div class="label">默认峰高自适应</div><label class="modeItem"><input id="set-autoy" type="checkbox" checked /> 启用</label></div>
+            <div class="spacer"></div>
+            <button class="btn primary" id="set-save">保存</button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const tabsEl = document.getElementById('tabs');
+    const views = {
+      home: document.getElementById('view-home'),
+      chrom: document.getElementById('view-chrom'),
+      method: document.getElementById('view-method'),
+      process: document.getElementById('view-process'),
+      report: document.getElementById('view-report'),
+      settings: document.getElementById('view-settings'),
+    };
+
+    const reportHistory = document.getElementById('report-history');
+
+    function setActiveTab(tab){
+      for(const b of tabsEl.querySelectorAll('.tab')){
+        b.classList.toggle('active', b.dataset.tab === tab);
+      }
+      for(const k in views){
+        views[k].classList.toggle('active', k === tab);
+      }
+      if(tab === 'chrom') draw();
+      if(tab === 'method') drawPlaceholder(document.getElementById('cv-method'));
+      if(tab === 'process') drawPlaceholder(document.getElementById('cv-process'));
+      if(tab === 'report') {
+        if(reportHistory) reportHistory.style.display = '';
+      }
+    }
+
+    tabsEl.addEventListener('click', (e)=>{
+      const btn = e.target.closest('.tab');
+      if(!btn) return;
+      setActiveTab(btn.dataset.tab);
+    });
+
+    if(reportHistory) reportHistory.style.display = '';
+
+    const statusEl = document.getElementById('status');
+    const deviceEl = document.getElementById('device');
+    const chnEl = document.getElementById('chn');
+    const ylowEl = document.getElementById('ylow');
+    const yhighEl = document.getElementById('yhigh');
+    const acqminEl = document.getElementById('acqmin');
+    const fullminEl = document.getElementById('fullmin');
+    const autoyEl = document.getElementById('autoy');
+    const loopEl = document.getElementById('loop');
+    const statEl = document.getElementById('stat');
+    const cv = document.getElementById('cv');
+    const ctx = cv.getContext('2d');
+    const streams = new Map();
+    const seenDevices = new Set();
+    let lastActiveDevice = '';
+    let deviceInfo = new Map();
+    let serverInfo = null;
+    const results = new Map();
+
+    const gasCarrierEl = document.getElementById('gas-carrier');
+    const gasH2El = document.getElementById('gas-h2');
+    const gasAirEl = document.getElementById('gas-air');
+    const tempColEl = document.getElementById('temp-col');
+    const tempInj1El = document.getElementById('temp-inj1');
+    const tempDet1El = document.getElementById('temp-det1');
+    const tempInj2El = document.getElementById('temp-inj2');
+
+    const acqMinStorageKey = 'chrom.acqmin';
+    try {
+      const v = localStorage.getItem(acqMinStorageKey);
+      if(v !== null && v !== undefined && acqminEl) {
+        acqminEl.value = v;
+      }
+    } catch {}
+    if(acqminEl){
+      const saveAcqMin = ()=>{
+        try { localStorage.setItem(acqMinStorageKey, String(acqminEl.value || '')); } catch {}
+      };
+      acqminEl.addEventListener('input', saveAcqMin);
+      acqminEl.addEventListener('change', saveAcqMin);
+    }
+
+    if(acqminEl){
+      acqminEl.addEventListener('change', ()=>{
+        const sel = selectedDevice();
+        if(!sel) return;
+        const ch = Number(chnEl.value || '0');
+        const s = getStream(sel, ch);
+        applyTargetStopFromUI(s);
+        if(s.loopActive && !s.stopped && !s.stopRequested){
+          armAutoResult(s, true);
+        }
+      });
+    }
+
+    const loopStorageKey = 'chrom.loop';
+    try {
+      const v = localStorage.getItem(loopStorageKey);
+      if(v !== null && v !== undefined && loopEl) {
+        loopEl.checked = (v === '1' || v === 'true');
+      }
+    } catch {}
+    if(loopEl){
+      const saveLoop = ()=>{
+        try { localStorage.setItem(loopStorageKey, loopEl.checked ? '1' : '0'); } catch {}
+      };
+      loopEl.addEventListener('change', saveLoop);
+    }
+
+    const homeStatusEl = document.getElementById('home-status');
+    const homeClockEl = document.getElementById('home-clock');
+    const homeInjectEl = document.getElementById('home-inject');
+
+    function fullWindowS(){
+      const v = Number(fullminEl.value || '2');
+      if(!isFinite(v) || v <= 0) return 2*60;
+      return v*60;
+    }
+
+    function tickClock(){
+      const d = new Date();
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth()+1).padStart(2,'0');
+      const dd = String(d.getDate()).padStart(2,'0');
+      const hh = String(d.getHours()).padStart(2,'0');
+      const mi = String(d.getMinutes()).padStart(2,'0');
+      const ss = String(d.getSeconds()).padStart(2,'0');
+      homeClockEl.textContent = yyyy + '-' + mm + '-' + dd + ' ' + hh + ':' + mi + ':' + ss;
+    }
+
+    function drawPlaceholder(canvas){
+      if(!canvas) return;
+      const ctx = canvas.getContext('2d');
+      if(!ctx) return;
+      const w = canvas.width;
+      const h = canvas.height;
+      ctx.clearRect(0,0,w,h);
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0,0,w,h);
+      ctx.strokeStyle = '#E6EEF8';
+      ctx.lineWidth = 1;
+      for(let i=0;i<=10;i++){
+        const x = 60 + (w-80)*(i/10);
+        ctx.beginPath();
+        ctx.moveTo(x, 16);
+        ctx.lineTo(x, h-44);
+        ctx.stroke();
+      }
+      for(let i=0;i<=7;i++){
+        const y = 16 + (h-60)*(i/7);
+        ctx.beginPath();
+        ctx.moveTo(60, y);
+        ctx.lineTo(w-18, y);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(60, 16);
+      ctx.lineTo(60, h-44);
+      ctx.lineTo(w-18, h-44);
+      ctx.stroke();
+      ctx.save();
+      ctx.translate(22, (h-44+16)/2);
+      ctx.rotate(-Math.PI/2);
+      ctx.fillStyle = '#2B6DFF';
+      ctx.font = '14px system-ui';
+      ctx.fillText('信号(pA)', -28, 0);
+      ctx.restore();
+    }
+
+    function streamKey(deviceId, channel){
+      return deviceId + '|' + String(channel);
+    }
+
+    function getStream(deviceId, channel){
+      const k = streamKey(deviceId, channel);
+      let s = streams.get(k);
+      if(!s){
+        s = { deviceId, channel, cycleStartS: null, dtS: null, winS: null, pts: [], lastMin: null, lastMax: null, lastElapsedS: 0, lastValue: null, stopped: false, targetStopS: null, stopRequested: false, resultRequested: false, loopActive: false, autoTimer: null, cycleStartedAtMs: null };
+        streams.set(k, s);
+      }
+      s.deviceId = deviceId;
+      s.channel = channel;
+      const win = fullWindowS();
+      if(s.winS !== win){
+        s.winS = win;
+      }
+      return s;
+    }
+
+    function trimPointsToWindow(s){
+      const win = s.winS || fullWindowS();
+      let i = 0;
+      while(i < s.pts.length && s.pts[i][0] < -0.5) i++;
+      if(i > 0) s.pts = s.pts.slice(i);
+      let j = s.pts.length - 1;
+      while(j >= 0 && s.pts[j][0] > win+0.5) j--;
+      if(j < s.pts.length - 1) s.pts = s.pts.slice(0, j+1);
+      if(s.pts.length > 200000) s.pts = s.pts.slice(s.pts.length - 200000);
+    }
+
+    function resetStream(deviceId, channel){
+      const s = getStream(deviceId, channel);
+      if(s.autoTimer){
+        try { clearTimeout(s.autoTimer); } catch {}
+      }
+      s.autoTimer = null;
+      s.cycleStartedAtMs = null;
+      s.cycleStartS = null;
+      s.dtS = null;
+      s.pts = [];
+      s.lastMin = null;
+      s.lastMax = null;
+      s.lastElapsedS = 0;
+      s.lastValue = null;
+      s.stopped = false;
+      s.targetStopS = null;
+      s.stopRequested = false;
+      s.resultRequested = false;
+      s.loopActive = false;
+    }
+
+    function resetStreamForNewCycle(deviceId, channel){
+      const s = getStream(deviceId, channel);
+      if(s.autoTimer){
+        try { clearTimeout(s.autoTimer); } catch {}
+      }
+      s.autoTimer = null;
+      s.cycleStartedAtMs = null;
+      s.cycleStartS = null;
+      s.dtS = null;
+      s.pts = [];
+      s.lastMin = null;
+      s.lastMax = null;
+      s.lastElapsedS = 0;
+      s.lastValue = null;
+      s.stopped = false;
+      s.stopRequested = false;
+      s.resultRequested = false;
+      applyTargetStopFromUI(s);
+      if(s.loopActive){
+        armAutoResult(s, false);
+      }
+      return s;
+    }
+
+    function applyTargetStopFromUI(s){
+      const acqMin = Number(acqminEl.value || '0');
+      if(isFinite(acqMin) && acqMin > 0){
+        s.targetStopS = acqMin * 60;
+      } else {
+        s.targetStopS = null;
+      }
+    }
+
+    function armAutoResult(s, keepStart){
+      if(!(loopEl && loopEl.checked)) return;
+      if(s.autoTimer){
+        try { clearTimeout(s.autoTimer); } catch {}
+      }
+      s.autoTimer = null;
+      if(!keepStart || s.cycleStartedAtMs === null){
+        s.cycleStartedAtMs = Date.now();
+      }
+      if(s.targetStopS === null || !isFinite(s.targetStopS) || s.targetStopS <= 0) return;
+	  const elapsed = Date.now() - (s.cycleStartedAtMs || Date.now());
+	  const remain = Math.round(s.targetStopS * 1000 - elapsed);
+	  if(remain <= 0){
+	    requestResultAtAcqTime(s.deviceId, s.channel);
+	    return;
+	  }
+      s.autoTimer = setTimeout(()=>{
+	    requestResultAtAcqTime(s.deviceId, s.channel);
+      }, Math.max(10, remain));
+    }
+
+    function requestResultAtAcqTime(deviceId, channel){
+      const s = getStream(deviceId, channel);
+      if(s.resultRequested) return;
+      s.resultRequested = true;
+      if(s.autoTimer){
+        try { clearTimeout(s.autoTimer); } catch {}
+      }
+      s.autoTimer = null;
+      localActionFor(deviceId, channel, 'localResult').finally(()=>{});
+    }
+
+    async function localActionFor(deviceId, channel, action){
+      if(!deviceId) return {ok:false, error:'no device'};
+      const url = '/api/v1/devices/' + encodeURIComponent(deviceId) + '/' + action + '?channel=' + Number(channel || 0);
+      const res = await fetch(url, {method:'POST'});
+      const j = await res.json().catch(()=>({}));
+      if(!res.ok){
+        return {ok:false, error: j.error || 'request failed'};
+      }
+      return {ok:true};
+    }
+
+    async function localAction(action){
+      const sel = selectedDevice();
+      const channel = Number(chnEl.value || '0');
+      return localActionFor(sel, channel, action);
+    }
+
+    function draw(){
+      ctx.clearRect(0,0,cv.width,cv.height);
+      const sel = selectedDevice();
+      const ch = Number(chnEl.value || '0');
+      if(!sel){
+        ctx.fillStyle = '#777';
+        ctx.font = '14px system-ui';
+        ctx.fillText('等待选择设备', 12, 22);
+        return;
+      }
+
+      const s = getStream(sel, ch);
+      if(!s.pts || s.pts.length < 2){
+        ctx.fillStyle = '#777';
+        ctx.font = '14px system-ui';
+        ctx.fillText('暂无实时数据（等待主板发送 143 数据流）', 12, 22);
+        return;
+      }
+
+      const win = s.winS || fullWindowS();
+      const viewStartS = 0;
+      const viewEndS = win;
+
+      let yBeg = Number(ylowEl.value || '0');
+      let yEnd = Number(yhighEl.value || '40');
+      if(!isFinite(yBeg)) yBeg = 0;
+      if(!isFinite(yEnd)) yEnd = 40;
+      if(yEnd <= yBeg) yEnd = yBeg + 1;
+
+      if(autoyEl.checked){
+        let yMin = Infinity, yMax = -Infinity;
+        for(const p of s.pts){
+          const t = p[0];
+          if(t < viewStartS || t > viewEndS) continue;
+          const y = p[1];
+          if(!isFinite(y)) continue;
+          if(y < yMin) yMin = y;
+          if(y > yMax) yMax = y;
+        }
+        if(!isFinite(yMin) || !isFinite(yMax)){
+          yMin = 0;
+          yMax = 1;
+        }
+        const span0 = yMax - yMin;
+        const minSpan = 0.5;
+        if(span0 < minSpan){
+          const c0 = (yMin + yMax) * 0.5;
+          yMin = c0 - minSpan/2;
+          yMax = c0 + minSpan/2;
+        }
+        const c = (yMin + yMax) * 0.5;
+        const half = (yMax - yMin) * 0.5;
+        const padHalf = half * 1.02;
+        yBeg = c - padHalf;
+        yEnd = c + padHalf;
+      }
+
+      if(s.lastMin !== null && s.lastMax !== null){
+        const a = 0.2;
+        yBeg = s.lastMin + (yBeg - s.lastMin) * a;
+        yEnd = s.lastMax + (yEnd - s.lastMax) * a;
+      }
+      s.lastMin = yBeg;
+      s.lastMax = yEnd;
+
+      const padL = 60;
+      const padR = 18;
+      const padT = 16;
+      const padB = 44;
+      const w = cv.width - padL - padR;
+      const h = cv.height - padT - padB;
+
+      const curveTopReserve = h * 0.40;
+      const curveBottomReserve = h * 0.05;
+      const curveH = Math.max(1, h - curveTopReserve - curveBottomReserve);
+
+      const xBegMin = 0;
+      const xEndMin = viewEndS / 60;
+      const xSpanMin = xEndMin - xBegMin;
+
+      function niceStep(range, targetTicks){
+        const raw = range / targetTicks;
+        const pow = Math.pow(10, Math.floor(Math.log10(raw)));
+        const n = raw / pow;
+        let step;
+        if(n <= 1) step = 1;
+        else if(n <= 2) step = 2;
+        else if(n <= 3) step = 3;
+        else if(n <= 5) step = 5;
+        else step = 10;
+        return step * pow;
+      }
+
+      const xStep = niceStep(xSpanMin, 7);
+      const yStep = niceStep(yEnd - yBeg, 5);
+
+      ctx.strokeStyle = '#E6EEF8';
+      ctx.lineWidth = 1;
+      for(let x = Math.ceil(xBegMin / xStep) * xStep; x <= xEndMin + 1e-9; x += xStep){
+        const sx = padL + ((x - xBegMin) / xSpanMin) * w;
+        ctx.beginPath();
+        ctx.moveTo(sx, padT);
+        ctx.lineTo(sx, padT + h);
+        ctx.stroke();
+      }
+      for(let y = Math.ceil(yBeg / yStep) * yStep; y <= yEnd + 1e-9; y += yStep){
+        const sy = padT + (1 - (y - yBeg) / (yEnd - yBeg)) * h;
+        ctx.beginPath();
+        ctx.moveTo(padL, sy);
+        ctx.lineTo(padL + w, sy);
+        ctx.stroke();
+      }
+
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(padL, padT);
+      ctx.lineTo(padL, padT + h);
+      ctx.lineTo(padL + w, padT + h);
+      ctx.stroke();
+
+      ctx.fillStyle = '#000';
+      ctx.font = '12px system-ui';
+      for(let x = Math.ceil(xBegMin / xStep) * xStep; x <= xEndMin + 1e-9; x += xStep){
+        const sx = padL + ((x - xBegMin) / xSpanMin) * w;
+        const label = (Math.round(x * 1000) / 1000).toString();
+        ctx.fillText(label, sx - 6, padT + h + 18);
+      }
+
+      ctx.fillStyle = '#1F5CFF';
+      ctx.font = '700 14px system-ui';
+      for(let y = Math.ceil(yBeg / yStep) * yStep; y <= yEnd + 1e-9; y += yStep){
+        const sy = padT + (1 - (y - yBeg) / (yEnd - yBeg)) * h;
+        ctx.fillText(y.toFixed(0), 10, sy + 5);
+      }
+
+      ctx.save();
+      ctx.translate(26, padT + h/2);
+      ctx.rotate(-Math.PI/2);
+      ctx.fillStyle = '#1F5CFF';
+      ctx.font = '700 14px system-ui';
+      ctx.fillText('信号(pA)', -32, 0);
+      ctx.restore();
+
+      ctx.strokeStyle = '#1F5CFF';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      let started = false;
+      const maxDraw = Math.max(2000, Math.floor(w*3));
+      const stride = Math.max(1, Math.floor(s.pts.length / maxDraw));
+      for(let i=0;i<s.pts.length;i+=stride){
+        const tS = s.pts[i][0];
+        if(tS < viewStartS || tS > viewEndS) continue;
+        const v = s.pts[i][1];
+        if(!isFinite(v)){
+          started = false;
+          continue;
+        }
+        const tMin = tS / 60;
+        const x = padL + ((tMin - xBegMin) / xSpanMin) * w;
+        const yn = (v-yBeg)/(yEnd-yBeg);
+        const y = padT + curveTopReserve + (1-yn)*curveH;
+        if(!started){
+          ctx.moveTo(x,y);
+          started = true;
+        } else {
+          ctx.lineTo(x,y);
+        }
+      }
+      ctx.stroke();
+
+      const rk = streamKey(sel, ch);
+      const rr = results.get(rk);
+      const r = rr && rr.result ? rr.result : null;
+      const rCycle = rr && rr.cycleStartedAtMs !== undefined ? rr.cycleStartedAtMs : null;
+      if(r && r.pollutants && Array.isArray(r.pollutants) && rCycle !== null && s.cycleStartedAtMs !== null && rCycle === s.cycleStartedAtMs){
+        ctx.save();
+        ctx.fillStyle = '#1F5CFF';
+        ctx.font = '700 13px system-ui';
+        for(const p of r.pollutants){
+          if(!p || p.status !== 'detected') continue;
+          const rtS = Number(p.rtS);
+          if(!isFinite(rtS)) continue;
+          const xMin = rtS/60;
+          if(xMin < xBegMin || xMin > xEndMin) continue;
+          const x = padL + ((xMin - xBegMin) / xSpanMin) * w;
+          const y = padT + curveTopReserve * 0.9;
+          ctx.save();
+          ctx.translate(x, y);
+          ctx.rotate(-Math.PI/2);
+          const t = (p.name || p.code || '') + '  ' + (xMin.toFixed(4));
+          ctx.fillText(t, 0, 0);
+          ctx.restore();
+        }
+        ctx.restore();
+      }
+    }
+
+    document.getElementById('clear').addEventListener('click', ()=>{
+      const sel = selectedDevice();
+      if(!sel) return;
+      resetStream(sel, Number(chnEl.value || '0'));
+      draw();
+    });
+
+    function setButtonsEnabled(enabled){
+      document.getElementById('start').disabled = !enabled;
+      document.getElementById('stop').disabled = !enabled;
+    }
+
+    async function refreshDevices(){
+      try{
+        const res = await fetch('/api/v1/devices');
+        if(!res.ok) return;
+        const arr = await res.json();
+        deviceInfo = new Map();
+        for(const d of arr){
+          deviceInfo.set(d.deviceId, d);
+          ensureDeviceOption(d.deviceId);
+        }
+
+        if(selectedDevice() === ''){
+          let prefer = '';
+          for(const d of arr){
+            if(String(d.deviceId || '').startsWith('GC')){ prefer = d.deviceId; break; }
+          }
+          if(prefer){
+            deviceEl.value = prefer;
+            statusEl.textContent = '在线: ' + prefer;
+          }
+        }
+        renderDebug();
+      }catch{}
+    }
+
+    async function refreshServer(){
+      try{
+        const res = await fetch('/api/v1/server');
+        if(!res.ok) return;
+        serverInfo = await res.json();
+        renderDebug();
+      }catch{}
+    }
+
+    function renderDebug(){
+      const dbg = document.getElementById('dbg');
+      const sel = selectedDevice();
+      const cur = sel || lastActiveDevice;
+      if(!cur){
+        dbg.textContent = '';
+        setButtonsEnabled(false);
+        return;
+      }
+      const d = deviceInfo.get(cur);
+      if(!d){
+        dbg.textContent = '设备: ' + cur + '（未获取到统计信息）';
+        setButtonsEnabled(false);
+        return;
+      }
+      const c143 = (d.cmdCounts && d.cmdCounts['143']) ? d.cmdCounts['143'] : 0;
+      const lastSeen = d.lastSeen ? new Date(d.lastSeen) : null;
+      const last143 = d.last143 ? new Date(d.last143) : null;
+      const now = new Date();
+      const seenAgo = lastSeen ? Math.max(0, Math.round((now - lastSeen)/1000)) : -1;
+      const d143Ago = last143 && last143.getTime() > 0 ? Math.max(0, Math.round((now - last143)/1000)) : -1;
+      let extra = '';
+      const s = streams.get(streamKey(cur, Number(chnEl.value||'0')));
+      if(s && s.cycleStartS !== null){
+        extra = ' | elapsed=' + (s.lastElapsedS/60).toFixed(2) + 'min/' + (fullWindowS()/60).toFixed(2) + 'min';
+      }
+      let sinfo = '';
+      if(serverInfo && serverInfo.pid){
+        sinfo = ' | pid=' + serverInfo.pid;
+      }
+      dbg.textContent = '设备: ' + cur + ' | lastCmd=' + d.lastCmd + ' | 143=' + c143 + ' | lastSeen=' + (seenAgo>=0 ? (seenAgo+'s') : '-') + ' | last143=' + (d143Ago>=0 ? (d143Ago+'s') : '-') + ' | control=' + (d.allowControl ? 'on' : 'off') + extra + sinfo;
+	  setButtonsEnabled(!!d.connected);
+    }
+
+    async function sendCmd(name){
+      const sel = selectedDevice();
+      if(!sel){
+        alert('请选择设备');
+        return;
+      }
+      const channel = Number(chnEl.value || '0');
+      const url = '/api/v1/devices/' + encodeURIComponent(sel) + '/cmd?name=' + encodeURIComponent(name) + '&channel=' + channel;
+      const res = await fetch(url, {method:'POST'});
+      const j = await res.json().catch(()=>({}));
+      if(!res.ok){
+        alert(j.error || '发送失败');
+        return;
+      }
+      await refreshDevices();
+    }
+
+    document.getElementById('start').addEventListener('click', ()=>{
+      const sel = selectedDevice();
+      if(sel){
+        resetStream(sel, Number(chnEl.value || '0'));
+        const s = getStream(sel, Number(chnEl.value || '0'));
+        s.loopActive = true;
+	applyTargetStopFromUI(s);
+	armAutoResult(s, false);
+        draw();
+      }
+	  localAction('localStart').finally(()=>{});
+	  const di = deviceInfo.get(sel);
+	  if(di && di.canStart22){
+	    sendCmd('start');
+	  }
+    });
+	  document.getElementById('stop').addEventListener('click', ()=>{
+	    const sel = selectedDevice();
+	    if(sel){
+	      const s = getStream(sel, Number(chnEl.value || '0'));
+	      s.loopActive = false;
+	      if(s.autoTimer){
+	        try { clearTimeout(s.autoTimer); } catch {}
+	      }
+	      s.autoTimer = null;
+	      s.stopRequested = true;
+	      s.stopped = true;
+	    }
+	    localAction('localStop').finally(()=>{});
+	  });
+
+    homeInjectEl.addEventListener('click', ()=>{
+      setActiveTab('chrom');
+      const sel = selectedDevice();
+      if(sel){
+        resetStream(sel, Number(chnEl.value || '0'));
+	    const s = getStream(sel, Number(chnEl.value || '0'));
+	    s.loopActive = true;
+	applyTargetStopFromUI(s);
+	armAutoResult(s, false);
+        draw();
+      }
+	  localAction('localStart').finally(()=>{});
+	  const di = deviceInfo.get(sel);
+	  if(di && di.canStart22){
+	    sendCmd('start');
+	  }
+    });
+
+    function ensureDeviceOption(id){
+      if(!String(id).startsWith('GC')) return;
+      if(seenDevices.has(id)) return;
+      seenDevices.add(id);
+      const opt = document.createElement('option');
+      opt.value = id;
+      opt.textContent = id;
+      if(deviceEl.options.length === 1 && deviceEl.options[0].value === ''){
+        deviceEl.remove(0);
+      }
+      deviceEl.appendChild(opt);
+    }
+
+    function selectedDevice(){
+      return deviceEl.value || '';
+    }
+
+    const es = new EventSource('/events');
+    es.onmessage = (e)=>{
+      let msg;
+      try{ msg = JSON.parse(e.data); }catch{ return; }
+	  if(msg.type === 'telemetry'){
+	    if(!String(msg.deviceId).startsWith('GC')) return;
+	    const sel = selectedDevice();
+	    if(sel && msg.deviceId !== sel) return;
+	    const f2 = (v)=> {
+	      if(v === undefined || v === null) return '-';
+	      const n = Number(v);
+	      if(!isFinite(n)) return '-';
+	      if(n >= 655.35 - 1e-9) return '-';
+	      return n.toFixed(2);
+	    };
+	    const f1 = (v)=> (v === undefined || v === null || !isFinite(Number(v))) ? '-' : Number(v).toFixed(1);
+	    const gasText = (psi, sccm)=>{
+	      const p = f2(psi);
+	      const f = f2(sccm);
+	      if(p === '-' && f === '-') return '-';
+	      if(p === '-') return f + ' sccm';
+	      if(f === '-') return p + ' psi';
+	      return p + ' psi / ' + f + ' sccm';
+	    };
+	    if(gasCarrierEl && (msg.carrierPsi !== undefined || msg.carrierSccm !== undefined)) gasCarrierEl.textContent = gasText(msg.carrierPsi, msg.carrierSccm);
+	    if(gasH2El && (msg.h2Psi !== undefined || msg.h2Sccm !== undefined)) gasH2El.textContent = gasText(msg.h2Psi, msg.h2Sccm);
+	    if(gasAirEl && (msg.airPsi !== undefined || msg.airSccm !== undefined)) gasAirEl.textContent = gasText(msg.airPsi, msg.airSccm);
+	    if(tempColEl && msg.tempCol !== undefined) tempColEl.textContent = f1(msg.tempCol);
+	    if(tempInj1El && msg.tempInj1 !== undefined) tempInj1El.textContent = f1(msg.tempInj1);
+	    if(tempDet1El && msg.tempDet1 !== undefined) tempDet1El.textContent = f1(msg.tempDet1);
+	    if(tempInj2El && msg.tempInj2 !== undefined) tempInj2El.textContent = f1(msg.tempInj2);
+	    return;
+	  }
+      if(msg.type === 'result'){
+        if(!String(msg.deviceId).startsWith('GC')) return;
+        const ch = (msg.channel === undefined || msg.channel === null) ? 0 : msg.channel;
+        const sel = selectedDevice();
+        if(sel && msg.deviceId !== sel) return;
+        const rk = streamKey(msg.deviceId, ch);
+        if(msg.result && msg.result.pollutants){
+          const s = getStream(msg.deviceId, ch);
+          results.set(rk, { result: msg.result, cycleStartedAtMs: s.cycleStartedAtMs });
+          const table = document.getElementById('tbody');
+          if(table){
+            const rows = table.querySelectorAll('tr');
+            const byName = new Map();
+            for(const p of msg.result.pollutants){
+              if(p && (p.name || p.code)) byName.set(p.code || p.name, p);
+            }
+            let thc = byName.get('THC');
+            let ch4 = byName.get('CH4');
+			const k1 = document.getElementById('kpi-thc');
+			const k2 = document.getElementById('kpi-ch4');
+			const k3 = document.getElementById('kpi-nmhc');
+			if(k1) k1.textContent = thc && isFinite(thc.height) ? Number(thc.height).toFixed(4) : '-';
+			if(k2) k2.textContent = ch4 && isFinite(ch4.height) ? Number(ch4.height).toFixed(4) : '-';
+			if(k3) {
+				if(thc && ch4 && isFinite(thc.height) && isFinite(ch4.height)){
+					k3.textContent = (Number(thc.height) - Number(ch4.height)).toFixed(4);
+				} else {
+					k3.textContent = '-';
+				}
+			}
+            for(const tr of rows){
+              const tds = tr.querySelectorAll('td');
+              if(tds.length < 2) continue;
+              const name = (tds[0].textContent || '').trim();
+              if(name === '总烃'){
+                tds[1].textContent = thc && isFinite(thc.height) ? Number(thc.height).toFixed(4) : '-';
+              }
+              if(name === '甲烷'){
+                tds[1].textContent = ch4 && isFinite(ch4.height) ? Number(ch4.height).toFixed(4) : '-';
+              }
+              if(name === '非甲烷总烃'){
+                if(thc && ch4 && isFinite(thc.height) && isFinite(ch4.height)){
+                  tds[1].textContent = (Number(thc.height) - Number(ch4.height)).toFixed(4);
+                } else {
+                  tds[1].textContent = '-';
+                }
+              }
+            }
+          }
+        }
+        draw();
+        return;
+      }
+
+      if(msg.type === 'device'){
+        if(String(msg.deviceId).startsWith('GC')){
+          ensureDeviceOption(msg.deviceId);
+          lastActiveDevice = msg.deviceId;
+        }
+        const sel = selectedDevice();
+        if(sel === ''){
+          if(String(msg.deviceId).startsWith('GC')){
+            statusEl.textContent = '在线: ' + msg.deviceId + '（自动）';
+          }
+        } else if(sel === msg.deviceId){
+          statusEl.textContent = '在线: ' + msg.deviceId;
+        }
+        return;
+      }
+
+      if(msg.type !== 'samples') return;
+
+      if(!String(msg.deviceId).startsWith('GC')) return;
+      ensureDeviceOption(msg.deviceId);
+      const sel = selectedDevice();
+      if(sel && msg.deviceId !== sel) return;
+
+      const msgChannel = (msg.channel === undefined || msg.channel === null) ? 0 : msg.channel;
+      if(String(msgChannel) !== chnEl.value) return;
+
+      if(!sel){
+        deviceEl.value = msg.deviceId;
+        statusEl.textContent = '在线: ' + msg.deviceId;
+      }
+
+      let s = getStream(msg.deviceId, msgChannel);
+      if(s.stopped) return;
+      const dt = Number(msg.dtS);
+      if(!isFinite(dt) || dt <= 0) return;
+      if(s.dtS !== dt){
+        s.dtS = dt;
+      }
+      if(s.cycleStartS === null){
+        s.cycleStartS = Number(msg.t0S) || 0;
+      }
+      const base = (Number(msg.t0S) || 0) - s.cycleStartS;
+
+      if(base < -1 || (s.lastElapsedS > 0 && base+msg.values.length*dt < s.lastElapsedS-5)){
+        resetStreamForNewCycle(msg.deviceId, msgChannel);
+        s = getStream(msg.deviceId, msgChannel);
+        s.dtS = dt;
+        s.cycleStartS = Number(msg.t0S) || 0;
+        processSamples(s, 0, dt, msg.values);
+      } else {
+        processSamples(s, base, dt, msg.values);
+      }
+
+      const minText = (s.lastElapsedS/60).toFixed(3);
+      const vText = (s.lastValue === null ? '0.000' : Number(s.lastValue).toFixed(3));
+      statEl.textContent = '通道' + (Number(chnEl.value||'0')+1) + ': ' + minText + ' min   ' + vText + ' pA';
+      homeStatusEl.textContent = '时间: ' + minText + ' min   信号: ' + vText + ' pA';
+      draw();
+      renderDebug();
+    };
+
+    function processSamples(s, base, dt, values){
+      const win = s.winS || fullWindowS();
+      for(let i=0;i<values.length;i++){
+        const t = base + i*dt;
+        if(t < -0.5) continue;
+        if(t > win+0.5) continue;
+        const vv = Number(values[i]);
+        s.pts.push([t, vv]);
+        s.lastValue = vv;
+      }
+      const end = base + values.length*dt;
+      if(end > s.lastElapsedS) s.lastElapsedS = end;
+      trimPointsToWindow(s);
+    }
+    es.onerror = ()=>{
+      const sel = selectedDevice();
+      if(sel){
+        statusEl.textContent = '连接断开: ' + sel;
+      } else if(lastActiveDevice){
+        statusEl.textContent = '连接断开: ' + lastActiveDevice;
+      } else {
+        statusEl.textContent = '连接断开';
+      }
+    };
+
+    deviceEl.addEventListener('change', ()=>{
+      const sel = selectedDevice();
+      if(sel){
+        statusEl.textContent = '在线: ' + sel;
+        resetStream(sel, Number(chnEl.value || '0'));
+      } else {
+        statusEl.textContent = '未选择设备（自动）';
+      }
+      draw();
+      renderDebug();
+    });
+
+    chnEl.addEventListener('change', ()=>{
+      const sel = selectedDevice();
+      if(sel){
+        resetStream(sel, Number(chnEl.value || '0'));
+      }
+      draw();
+      renderDebug();
+    });
+
+    fullminEl.addEventListener('change', ()=>{
+      const sel = selectedDevice();
+      if(sel){
+        resetStream(sel, Number(chnEl.value || '0'));
+      }
+      draw();
+      renderDebug();
+    });
+
+    ylowEl.addEventListener('change', ()=>{ draw(); });
+    yhighEl.addEventListener('change', ()=>{ draw(); });
+    autoyEl.addEventListener('change', ()=>{ draw(); });
+
+    function loadSettings(){
+      try{
+        const raw = localStorage.getItem('online_monitor_settings');
+        if(!raw) return;
+        const v = JSON.parse(raw);
+        if(v.fullmin !== undefined) fullminEl.value = String(v.fullmin);
+        if(v.ylow !== undefined) ylowEl.value = String(v.ylow);
+        if(v.yhigh !== undefined) yhighEl.value = String(v.yhigh);
+        if(v.autoy !== undefined) autoyEl.checked = !!v.autoy;
+        document.getElementById('set-fullmin').value = fullminEl.value;
+        document.getElementById('set-ylow').value = ylowEl.value;
+        document.getElementById('set-yhigh').value = yhighEl.value;
+        document.getElementById('set-autoy').checked = autoyEl.checked;
+      }catch{}
+    }
+
+    document.getElementById('set-save').addEventListener('click', ()=>{
+      const fullmin = Number(document.getElementById('set-fullmin').value || '2');
+      const ylow = Number(document.getElementById('set-ylow').value || '0');
+      const yhigh = Number(document.getElementById('set-yhigh').value || '40');
+      const autoy = !!document.getElementById('set-autoy').checked;
+      localStorage.setItem('online_monitor_settings', JSON.stringify({fullmin, ylow, yhigh, autoy}));
+      fullminEl.value = String(isFinite(fullmin) ? fullmin : 2);
+      ylowEl.value = String(isFinite(ylow) ? ylow : 0);
+      yhighEl.value = String(isFinite(yhigh) ? yhigh : 40);
+      autoyEl.checked = autoy;
+      draw();
+    });
+
+    setButtonsEnabled(false);
+    loadSettings();
+    tickClock();
+    setInterval(tickClock, 250);
+    drawPlaceholder(document.getElementById('cv-method'));
+    drawPlaceholder(document.getElementById('cv-process'));
+    setActiveTab('home');
+    refreshDevices();
+    setInterval(refreshDevices, 1000);
+    refreshServer();
+    setInterval(refreshServer, 2000);
+  </script>
+</body>
+</html>`
