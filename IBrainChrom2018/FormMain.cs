@@ -1969,7 +1969,7 @@ public class FormMain : Form, FrmChromatManagerInterface, ChromFormInterface
 		catch (Exception ex)
 		{
 			toolStripStatusServer.Text = Lang.PS("启动AsyncTcpServer时发生异常：", "started AsyncTcpServer Error：") + ex.Message;
-			MessageBox.Show(Lang.PS("工作站启用的25001、502或503端口被占用，启动服务失败！", "25001、502 Or 503 Port is occupied,Service failed to start!"), Lang.PS("端口被占用", "Port is occupied"), MessageBoxButtons.OK, MessageBoxIcon.Hand);
+			MessageBox.Show(Lang.PS("工作站启用的25001、8000、502或503端口被占用，启动服务失败！", "25001, 8000, 502 Or 503 Port is occupied,Service failed to start!"), Lang.PS("端口被占用", "Port is occupied"), MessageBoxButtons.OK, MessageBoxIcon.Hand);
 		}
 	}
 

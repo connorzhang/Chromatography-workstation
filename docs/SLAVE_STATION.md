@@ -4,6 +4,8 @@
 
 注意：代码中 `502/503` 的协议形态并不是标准 MBAP 头的 Modbus/TCP（更像“简化/自定义 Modbus 报文头 + 功能码”）。本文按“实际代码实现”描述。
 
+新跨平台边缘节点将改为**标准 Modbus/TCP**（MBAP 头 + 标准功能码），寄存器映射见 [docs/MODBUS_STANDARD_MAP.md](file:///d:/GIT/VS2022/Chromatography-workstation/docs/MODBUS_STANDARD_MAP.md)。
+
 ---
 
 ## 1. 从站入口与通信通道
@@ -164,4 +166,3 @@
 - 从站返回数据打包（峰表/元信息）：[ModBusData](file:///d:/GIT/VS2022/Chromatography-workstation/IBrainChrom2018/ModBusData.cs)
 - 仪器会话选择（MID→TcpServerSocket）：[AsyncTcpServer.GetOneInstrumByMID](file:///d:/GIT/VS2022/Chromatography-workstation/IBrainChrom2018/AsyncTcpServer.cs#L738-L749)
 - 主站命令下发（从站写入最终落点）：[TcpServerSocket.SendCmd](file:///d:/GIT/VS2022/Chromatography-workstation/IBrainChrom2018/TcpServerSocket.cs#L3254-L3321)
-

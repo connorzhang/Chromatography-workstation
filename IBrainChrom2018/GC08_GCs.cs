@@ -50,6 +50,7 @@ public class GC08_GCs : GCC_GCs
 	private Instrument instrument_0;
 
 	private static TcpListener tcpListener_0;
+	private static TcpListener tcpListener_8000;
 
 	private static int int_0 = 0;
 
@@ -157,6 +158,12 @@ public class GC08_GCs : GCC_GCs
 		if (tcpListener_0 == null)
 		{
 			tcpListener_0 = new TcpListener(IPAddress.Any, 25001);
+		}
+		if (tcpListener_8000 == null)
+		{
+			try {
+				tcpListener_8000 = new TcpListener(IPAddress.Any, 8000);
+			} catch {}
 		}
 		tmrListen = new Timer();
 		tmrListen.Interval = 100;
@@ -698,6 +705,9 @@ public class GC08_GCs : GCC_GCs
 			if (int_0 == 0 && tcpListener_0.Server.IsBound)
 			{
 				tcpListener_0.Stop();
+				if (tcpListener_8000 != null && tcpListener_8000.Server.IsBound) {
+					try { tcpListener_8000.Stop(); } catch {}
+				}
 			}
 		}
 	}
@@ -814,15 +824,22 @@ public class GC08_GCs : GCC_GCs
 			if (!tcpListener_0.Server.IsBound)
 			{
 				tcpListener_0.Start();
+				if (tcpListener_8000 != null) {
+					try { tcpListener_8000.Start(); } catch {}
+				}
 			}
-			else if (tcpListener_0.Pending())
+			else if (tcpListener_0.Pending() || (tcpListener_8000 != null && tcpListener_8000.Pending()))
 			{
 				if (tcpClient_0 != null && tcpClient_0.Connected)
 				{
 					networkStream_0.Close();
 					tcpClient_0.Close();
 				}
-				tcpClient_0 = tcpListener_0.AcceptTcpClient();
+				if (tcpListener_8000 != null && tcpListener_8000.Pending()) {
+					tcpClient_0 = tcpListener_8000.AcceptTcpClient();
+				} else {
+					tcpClient_0 = tcpListener_0.AcceptTcpClient();
+				}
 				networkStream_0 = tcpClient_0.GetStream();
 				networkStream_0.BeginRead(byte_1, 0, byte_1.Length, method_0, networkStream_0);
 				devMonitorForm_0.gcShow(null, "已建立连接", true);
