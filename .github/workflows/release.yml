@@ -1,0 +1,76 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: src/edge/go.mod
+          cache: true
+
+      - name: Build (all targets)
+        shell: bash
+        working-directory: src/edge
+        run: |
+          set -euo pipefail
+
+          TAG="${GITHUB_REF#refs/tags/}"
+          ROOT="${GITHUB_WORKSPACE}"
+          DIST="${ROOT}/dist"
+          mkdir -p "${DIST}"
+
+          build_one() {
+            local goos="$1" goarch="$2" goarm="${3:-}" ext="" suffix="" out=""
+            if [[ "${goos}" == "windows" ]]; then
+              ext=".exe"
+            fi
+            suffix="${goos}_${goarch}"
+            if [[ -n "${goarm}" ]]; then
+              suffix="${goos}_${goarch}v${goarm}"
+            fi
+            out="${DIST}/collector_${TAG}_${suffix}${ext}"
+
+            if [[ -n "${goarm}" ]]; then
+              CGO_ENABLED=0 GOOS="${goos}" GOARCH="${goarch}" GOARM="${goarm}" \
+                go build -trimpath -ldflags "-s -w" -o "${out}" ./cmd/collector
+            else
+              CGO_ENABLED=0 GOOS="${goos}" GOARCH="${goarch}" \
+                go build -trimpath -ldflags "-s -w" -o "${out}" ./cmd/collector
+            fi
+          }
+
+          build_one linux amd64
+          build_one linux arm64
+          build_one linux arm 7
+          build_one windows amd64
+          build_one darwin amd64
+          build_one darwin arm64
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: false
+          body: |
+            Edge Collector 自动构建发布。
+
+            - 默认端口：HTTP 8080；TCP 25001/8000
+            - 对外访问：建议设置 `EDGE_HTTP_BIND=0.0.0.0`
+            - Windows 直接运行 `collector_*.exe`
+            - Linux/macOS 先执行 `chmod +x collector_*` 再运行
+          files: |
+            dist/collector_*
