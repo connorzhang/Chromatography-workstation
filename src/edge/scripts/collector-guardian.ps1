@@ -16,6 +16,9 @@ try {
   while ($true) {
     Write-GuardianLog 'collector starting'
     try {
+      if (-not $env:EDGE_HTTP_BIND -or $env:EDGE_HTTP_BIND.Trim().Length -eq 0) {
+        $env:EDGE_HTTP_BIND = '0.0.0.0'
+      }
       & "C:\Program Files\Go\bin\go.exe" run .\cmd\collector
       Write-GuardianLog 'collector exited (code=0)'
     } catch {

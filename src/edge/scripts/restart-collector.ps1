@@ -27,6 +27,9 @@ Start-Sleep -Milliseconds 300
 Push-Location $root
 try {
   $env:EDGE_ALLOW_CONTROL = '1'
+  if (-not $env:EDGE_HTTP_BIND -or $env:EDGE_HTTP_BIND.Trim().Length -eq 0) {
+    $env:EDGE_HTTP_BIND = '0.0.0.0'
+  }
   & "C:\Program Files\Go\bin\go.exe" run .\cmd\collector
 } finally {
   Pop-Location
