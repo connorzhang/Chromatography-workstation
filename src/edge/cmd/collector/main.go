@@ -1,14 +1,18 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,6 +28,8 @@ import (
 
 var startedAt = time.Now().UTC()
 
+var runSessionSeq uint64
+
 type deviceState struct {
 	mu       sync.Mutex
 	lastTS   map[int]float64
@@ -34,14 +40,28 @@ type deviceState struct {
 	seq      uint32
 	last143  time.Time
 	sessions map[int]*runSession
+	lastResultByCh map[int]lastResult
+}
+
+type lastResult struct {
+	token string
+	at    time.Time
+	res   v1.Result
 }
 
 type runSession struct {
+	token      string
 	active     bool
 	startedAt  time.Time
+	snapshotDone bool
 	dtS        float64
 	values     []float64
 	lastSample float64
+}
+
+func newRunSession() *runSession {
+	n := atomic.AddUint64(&runSessionSeq, 1)
+	return &runSession{token: fmt.Sprintf("%d-%d", time.Now().UnixNano(), n), active: true, startedAt: time.Now()}
 }
 
 type event struct {
@@ -49,10 +69,11 @@ type event struct {
 	DeviceID string    `json:"deviceId"`
 	At       time.Time `json:"at"`
 
-	Channel int       `json:"channel"`
-	DTs     float64   `json:"dtS"`
-	T0s     float64   `json:"t0S"`
-	Values  []float64 `json:"values"`
+	Channel       int       `json:"channel"`
+	SessionToken  string    `json:"sessionToken"`
+	DTs           float64   `json:"dtS"`
+	T0s           float64   `json:"t0S"`
+	Values        []float64 `json:"values"`
 }
 
 type sessionSnapshot struct {
@@ -60,10 +81,221 @@ type sessionSnapshot struct {
 	Values []float64
 }
 
+type nmhcRecord struct {
+	TimeRFC3339 string  `json:"time"`
+	DeviceID    string  `json:"deviceId"`
+	TraceID     string  `json:"traceId"`
+	THC         float64 `json:"thc"`
+	CH4         float64 `json:"ch4"`
+	NMHC        float64 `json:"nmhc"`
+}
+
+type nmhcHistoryStore struct {
+	mu       sync.Mutex
+	byDevice map[string][]nmhcRecord
+	path     string
+}
+
+func newNMHCHistoryStore(path string) *nmhcHistoryStore {
+	return &nmhcHistoryStore{byDevice: map[string][]nmhcRecord{}, path: path}
+}
+
+func (s *nmhcHistoryStore) Load() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.byDevice = map[string][]nmhcRecord{}
+	f, err := os.Open(s.path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		var r nmhcRecord
+		if json.Unmarshal([]byte(line), &r) != nil {
+			continue
+		}
+		if r.DeviceID == "" {
+			continue
+		}
+		s.byDevice[r.DeviceID] = append(s.byDevice[r.DeviceID], r)
+	}
+}
+
+func (s *nmhcHistoryStore) Add(r nmhcRecord) {
+	if r.DeviceID == "" || r.TimeRFC3339 == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.byDevice[r.DeviceID] = append(s.byDevice[r.DeviceID], r)
+	_ = os.MkdirAll(filepath.Dir(s.path), 0o755)
+	f, err := os.OpenFile(s.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	_, _ = f.Write(append(mustJSONLine(r), '\n'))
+	_ = f.Close()
+	if pstore != nil {
+		pstore.AddNMHC(r)
+	}
+}
+
+func mustJSONLine(v any) []byte {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return []byte("{}")
+	}
+	return b
+}
+
+func (s *nmhcHistoryStore) Query(deviceID string, from, to *time.Time, limit int) []nmhcRecord {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	src := s.byDevice[deviceID]
+	out := make([]nmhcRecord, 0, len(src))
+	for i := 0; i < len(src); i++ {
+		r := src[i]
+		t, err := time.Parse(time.RFC3339, r.TimeRFC3339)
+		if err != nil {
+			continue
+		}
+		if from != nil && t.Before(*from) {
+			continue
+		}
+		if to != nil && t.After(*to) {
+			continue
+		}
+		out = append(out, r)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		ti, e1 := time.Parse(time.RFC3339, out[i].TimeRFC3339)
+		tj, e2 := time.Parse(time.RFC3339, out[j].TimeRFC3339)
+		if e1 != nil || e2 != nil {
+			return false
+		}
+		return tj.After(ti)
+	})
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
+func (s *nmhcHistoryStore) DeleteRange(deviceID string, from, to time.Time) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	src := s.byDevice[deviceID]
+	if len(src) == 0 {
+		return 0
+	}
+	out := make([]nmhcRecord, 0, len(src))
+	deleted := 0
+	for i := 0; i < len(src); i++ {
+		r := src[i]
+		t, err := time.Parse(time.RFC3339, r.TimeRFC3339)
+		if err != nil {
+			out = append(out, r)
+			continue
+		}
+		if !t.Before(from) && !t.After(to) {
+			deleted++
+			continue
+		}
+		out = append(out, r)
+	}
+	s.byDevice[deviceID] = out
+	s.rewriteLocked()
+	return deleted
+}
+
+func (s *nmhcHistoryStore) rewriteLocked() {
+	_ = os.MkdirAll(filepath.Dir(s.path), 0o755)
+	tmp := s.path + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	for _, rs := range s.byDevice {
+		for i := 0; i < len(rs); i++ {
+			_, _ = f.Write(append(mustJSONLine(rs[i]), '\n'))
+		}
+	}
+	_ = f.Close()
+	_ = os.Rename(tmp, s.path)
+}
+
+func parseTimeAny(s string) (*time.Time, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil, nil
+	}
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return &t, nil
+	}
+	if t, err := time.ParseInLocation("2006-01-02 15:04:05", s, time.Local); err == nil {
+		tt := t.UTC()
+		return &tt, nil
+	}
+	return nil, errors.New("invalid time")
+}
+
+func extractNMHC(res v1.Result) (thc, ch4, nmhc float64, ok bool) {
+	var thcOK, ch4OK bool
+	for i := 0; i < len(res.Pollutants); i++ {
+		p := res.Pollutants[i]
+		switch p.Code {
+		case "THC":
+			thc = p.Height
+			thcOK = true
+		case "CH4":
+			ch4 = p.Height
+			ch4OK = true
+		}
+	}
+	if !thcOK || !ch4OK {
+		return 0, 0, 0, false
+	}
+	return thc, ch4, thc - ch4, true
+}
+
+var nmhcStore = newNMHCHistoryStore(filepath.Join(".run", "results_nmch.jsonl"))
+
+var pstore *persistStore
+
+type uiState struct {
+	DeviceID        string  `json:"deviceId"`
+	ActiveTab       string  `json:"activeTab"`
+	SelectedChannel int     `json:"selectedChannel"`
+	FullMin         float64 `json:"fullMin"`
+	YLow            float64 `json:"yLow"`
+	YHigh           float64 `json:"yHigh"`
+	AutoY           bool    `json:"autoY"`
+	AcqMin          float64 `json:"acqMin"`
+	Loop            bool    `json:"loop"`
+	EpcCarrier      int     `json:"epcCarrier"`
+	EpcH2           int     `json:"epcH2"`
+	EpcAir          int     `json:"epcAir"`
+	UpdatedAt       string  `json:"updatedAt"`
+}
+
+var uiMu sync.Mutex
+var uiByDevice = map[string]uiState{}
+var uiLastDevice string
+
+func defaultUIState(deviceID string) uiState {
+	return uiState{DeviceID: deviceID, ActiveTab: "overview", SelectedChannel: 0, FullMin: 2, YLow: 0, YHigh: 40, AutoY: true, AcqMin: 2, Loop: true, EpcCarrier: 0, EpcH2: 1, EpcAir: 2}
+}
+
 type resultEvent struct {
 	Type     string    `json:"type"`
 	DeviceID string    `json:"deviceId"`
 	Channel  int       `json:"channel"`
+	SessionToken string `json:"sessionToken"`
 	At       time.Time `json:"at"`
 	Result   v1.Result `json:"result"`
 	Trace    v1.Trace  `json:"trace"`
@@ -208,23 +440,26 @@ func main() {
 	states := &sync.Map{}
 	cfg := chromsend143.Config{ShuaiJian1: 1, ShuaiJian2: 1, ShuaiJian3: 1}
 	method := loadMethod()
+	nmhcStore.Load()
+	if ps, err := openPersistStore(filepath.Join(".run", "db")); err == nil {
+		pstore = ps
+		if v, ok := ps.LoadLastDeviceID(); ok {
+			uiMu.Lock()
+			uiLastDevice = v
+			uiMu.Unlock()
+		}
+		startPersistence(states)
+	} else {
+		log.Printf("persist disabled: %v", err)
+	}
+	startEngineScheduler(hub, states, method)
 
-	go func() {
-		if err := serveTCP(tcpPort, hub, states, cfg, method); err != nil {
-			log.Printf("collector tcp listener stopped: %v", err)
-		}
-	}()
-	go func() {
-		if err := serveTCP(tcpPort8000, hub, states, cfg, method); err != nil {
-			log.Printf("collector tcp listener stopped: %v", err)
-		}
-	}()
+	go runTCPForever(tcpPort, hub, states, cfg, method)
+	go runTCPForever(tcpPort8000, hub, states, cfg, method)
 
 	writePID()
 
-	if err := serveHTTP(httpPort, hub, states, allowControl, method); err != nil {
-		log.Fatalf("collector stopped: %v", err)
-	}
+	runHTTPForever(httpPort, hub, states, allowControl, method)
 }
 
 func writePID() {
@@ -249,12 +484,348 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			"pidFile":   filepath.Join(".run", "collector.pid"),
 		})
 	})
+	mux.HandleFunc("/api/v1/health", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "startedAt": startedAt.Format(time.RFC3339)})
+	})
 	mux.HandleFunc("/api/v1/method", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 		writeJSON(w, http.StatusOK, method)
+	})
+	mux.HandleFunc("/api/v1/ui", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			deviceID := strings.TrimSpace(r.URL.Query().Get("deviceId"))
+			if deviceID == "" {
+				uiMu.Lock()
+				last := uiLastDevice
+				uiMu.Unlock()
+				if last == "" && pstore != nil {
+					if v, ok := pstore.LoadLastDeviceID(); ok {
+						last = v
+					}
+				}
+				writeJSON(w, http.StatusOK, map[string]any{"lastDeviceId": last})
+				return
+			}
+			uiMu.Lock()
+			st, ok := uiByDevice[deviceID]
+			uiMu.Unlock()
+			if !ok && pstore != nil {
+				if v, ok2 := pstore.LoadUI(deviceID); ok2 {
+					st = v
+					ok = true
+				}
+			}
+			if !ok {
+				st = defaultUIState(deviceID)
+			}
+			writeJSON(w, http.StatusOK, st)
+			return
+		case http.MethodPost:
+			var in uiState
+			if json.NewDecoder(r.Body).Decode(&in) != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+				return
+			}
+			in.DeviceID = strings.TrimSpace(in.DeviceID)
+			if in.DeviceID == "" {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "deviceId required"})
+				return
+			}
+			in.ActiveTab = strings.TrimSpace(in.ActiveTab)
+			if in.ActiveTab == "" {
+				in.ActiveTab = "overview"
+			}
+			switch in.ActiveTab {
+			case "overview", "curve", "result", "events", "logs", "settings":
+			default:
+				in.ActiveTab = "overview"
+			}
+			if in.SelectedChannel < 0 {
+				in.SelectedChannel = 0
+			}
+			if in.SelectedChannel > 7 {
+				in.SelectedChannel = 7
+			}
+			if in.FullMin <= 0 || !isFinite(in.FullMin) {
+				in.FullMin = 2
+			}
+			if !isFinite(in.YLow) {
+				in.YLow = 0
+			}
+			if !isFinite(in.YHigh) || in.YHigh <= in.YLow {
+				in.YHigh = in.YLow + 1
+			}
+			if in.AcqMin < 0 || !isFinite(in.AcqMin) {
+				in.AcqMin = 0
+			}
+			in.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+			uiMu.Lock()
+			uiByDevice[in.DeviceID] = in
+			uiLastDevice = in.DeviceID
+			uiMu.Unlock()
+			if pstore != nil {
+				pstore.SaveUI(in)
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+			return
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+	})
+	mux.HandleFunc("/api/v1/session", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		deviceID := strings.TrimSpace(r.URL.Query().Get("deviceId"))
+		if deviceID == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "deviceId required"})
+			return
+		}
+		ch := envIntFromQuery(r, "channel", 0)
+		if ch < 0 || ch > 7 {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid channel"})
+			return
+		}
+		stAny, ok := states.Load(deviceID)
+		if !ok {
+			if pstore != nil {
+				if out, ok2 := pstore.LoadSession(deviceID, ch); ok2 {
+					writeJSON(w, http.StatusOK, out)
+					return
+				}
+			}
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "device not found"})
+			return
+		}
+		st := stAny.(*deviceState)
+		st.mu.Lock()
+		s := st.sessions[ch]
+		if s == nil {
+			st.mu.Unlock()
+			if pstore != nil {
+				if out, ok2 := pstore.LoadSession(deviceID, ch); ok2 {
+					writeJSON(w, http.StatusOK, out)
+					return
+				}
+			}
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "session not found"})
+			return
+		}
+		vals := append([]float64(nil), s.values...)
+		if len(vals) > 200000 {
+			vals = vals[len(vals)-200000:]
+		}
+		out := map[string]any{
+			"deviceId":      deviceID,
+			"channel":       ch,
+			"sessionToken":  s.token,
+			"active":        s.active,
+			"startedAt":     s.startedAt.UTC().Format(time.RFC3339),
+			"dtS":           s.dtS,
+			"timeSpanS":     float64(len(vals)-1) * s.dtS,
+			"values":        vals,
+			"lastSample":    s.lastSample,
+			"valuesCount":   len(vals),
+			"totalCount":    len(s.values),
+		}
+		if st.lastResultByCh != nil {
+			if lr, ok := st.lastResultByCh[ch]; ok && lr.token == s.token && lr.at.Unix() > 0 {
+				out["resultAt"] = lr.at.UTC().Format(time.RFC3339)
+				out["result"] = lr.res
+			} else if pstore != nil {
+				if rr, ok2 := pstore.LoadResult(deviceID, ch); ok2 {
+					if tok, _ := rr["sessionToken"].(string); tok == s.token {
+						out["resultAt"] = rr["at"]
+						out["result"] = rr["result"]
+					}
+				}
+			}
+		} else if pstore != nil {
+			if rr, ok2 := pstore.LoadResult(deviceID, ch); ok2 {
+				if tok, _ := rr["sessionToken"].(string); tok == s.token {
+					out["resultAt"] = rr["at"]
+					out["result"] = rr["result"]
+				}
+			}
+		}
+		st.mu.Unlock()
+		writeJSON(w, http.StatusOK, out)
+	})
+	mux.HandleFunc("/api/v1/session/active", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		deviceID := strings.TrimSpace(r.URL.Query().Get("deviceId"))
+		if deviceID == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "deviceId required"})
+			return
+		}
+		preferCh := envIntFromQuery(r, "channel", 0)
+		if preferCh < 0 {
+			preferCh = 0
+		}
+		if preferCh > 7 {
+			preferCh = 7
+		}
+		stAny, ok := states.Load(deviceID)
+		if !ok {
+			if pstore != nil {
+				if out, ok2 := pstore.LoadSession(deviceID, preferCh); ok2 {
+					writeJSON(w, http.StatusOK, out)
+					return
+				}
+			}
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "device not found"})
+			return
+		}
+		st := stAny.(*deviceState)
+		pick := func(ch int) (map[string]any, bool) {
+			s := st.sessions[ch]
+			if s == nil || s.dtS <= 0 || len(s.values) < 2 {
+				return nil, false
+			}
+			vals := append([]float64(nil), s.values...)
+			if len(vals) > 200000 {
+				vals = vals[len(vals)-200000:]
+			}
+			out := map[string]any{
+				"deviceId":     deviceID,
+				"channel":      ch,
+				"sessionToken": s.token,
+				"active":       s.active,
+				"startedAt":    s.startedAt.UTC().Format(time.RFC3339),
+				"dtS":          s.dtS,
+				"timeSpanS":    float64(len(vals)-1) * s.dtS,
+				"values":       vals,
+				"lastSample":   s.lastSample,
+				"valuesCount":  len(vals),
+				"totalCount":   len(s.values),
+			}
+			if st.lastResultByCh != nil {
+				if lr, ok := st.lastResultByCh[ch]; ok && lr.token == s.token && lr.at.Unix() > 0 {
+					out["resultAt"] = lr.at.UTC().Format(time.RFC3339)
+					out["result"] = lr.res
+				} else if pstore != nil {
+					if rr, ok2 := pstore.LoadResult(deviceID, ch); ok2 {
+						if tok, _ := rr["sessionToken"].(string); tok == s.token {
+							out["resultAt"] = rr["at"]
+							out["result"] = rr["result"]
+						}
+					}
+				}
+			} else if pstore != nil {
+				if rr, ok2 := pstore.LoadResult(deviceID, ch); ok2 {
+					if tok, _ := rr["sessionToken"].(string); tok == s.token {
+						out["resultAt"] = rr["at"]
+						out["result"] = rr["result"]
+					}
+				}
+			}
+			return out, true
+		}
+		st.mu.Lock()
+		if out, ok := pick(preferCh); ok {
+			st.mu.Unlock()
+			writeJSON(w, http.StatusOK, out)
+			return
+		}
+		for ch := 0; ch < 8; ch++ {
+			if out, ok := pick(ch); ok {
+				st.mu.Unlock()
+				writeJSON(w, http.StatusOK, out)
+				return
+			}
+		}
+		st.mu.Unlock()
+		if pstore != nil {
+			if out, ok2 := pstore.LoadSession(deviceID, preferCh); ok2 {
+				writeJSON(w, http.StatusOK, out)
+				return
+			}
+		}
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "session not found"})
+	})
+	mux.HandleFunc("/api/v1/results/nmhc", func(w http.ResponseWriter, r *http.Request) {
+		deviceID := strings.TrimSpace(r.URL.Query().Get("deviceId"))
+		if deviceID == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "deviceId required"})
+			return
+		}
+		from, err := parseTimeAny(r.URL.Query().Get("from"))
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid from"})
+			return
+		}
+		to, err := parseTimeAny(r.URL.Query().Get("to"))
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid to"})
+			return
+		}
+		limit := envIntFromQuery(r, "limit", 2000)
+		if limit < 0 {
+			limit = 0
+		}
+		if limit > 5000 {
+			limit = 5000
+		}
+
+		switch r.Method {
+		case http.MethodGet:
+			out := nmhcStore.Query(deviceID, from, to, limit)
+			writeJSON(w, http.StatusOK, out)
+			return
+		case http.MethodDelete:
+			if from == nil || to == nil {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "from/to required"})
+				return
+			}
+			deleted := nmhcStore.DeleteRange(deviceID, *from, *to)
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "deleted": deleted})
+			return
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+	})
+	mux.HandleFunc("/api/v1/results/nmhc/export.csv", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		deviceID := strings.TrimSpace(r.URL.Query().Get("deviceId"))
+		if deviceID == "" {
+			http.Error(w, "deviceId required", http.StatusBadRequest)
+			return
+		}
+		from, err := parseTimeAny(r.URL.Query().Get("from"))
+		if err != nil {
+			http.Error(w, "invalid from", http.StatusBadRequest)
+			return
+		}
+		to, err := parseTimeAny(r.URL.Query().Get("to"))
+		if err != nil {
+			http.Error(w, "invalid to", http.StatusBadRequest)
+			return
+		}
+		rs := nmhcStore.Query(deviceID, from, to, 5000)
+		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+		w.Header().Set("Content-Disposition", "attachment; filename=nmhc_"+deviceID+".csv")
+		_, _ = io.WriteString(w, "time,THC,CH4,NMHC\n")
+		for i := 0; i < len(rs); i++ {
+			line := fmt.Sprintf("%s,%.6f,%.6f,%.6f\n", rs[i].TimeRFC3339, rs[i].THC, rs[i].CH4, rs[i].NMHC)
+			_, _ = io.WriteString(w, line)
+		}
 	})
 	mux.HandleFunc("/api/v1/devices", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -344,12 +915,31 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid channel"})
 				return
 			}
+			force := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("force")))
+			if force != "1" && force != "true" && force != "yes" {
+				st.mu.Lock()
+				s := st.sessions[ch]
+				active := s != nil && s.active
+				st.mu.Unlock()
+				if active {
+					writeJSON(w, http.StatusOK, map[string]any{"ok": true, "skipped": true})
+					return
+				}
+			}
 			resetSession(st, ch)
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 		case "localStop":
 			ch := envIntFromQuery(r, "channel", 0)
 			if ch < 0 || ch > 7 {
 				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid channel"})
+				return
+			}
+			st.mu.Lock()
+			s := st.sessions[ch]
+			active := s != nil && s.active
+			st.mu.Unlock()
+			if !active {
+				writeJSON(w, http.StatusOK, map[string]any{"ok": true, "skipped": true})
 				return
 			}
 			if allowControl {
@@ -367,6 +957,14 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			ch := envIntFromQuery(r, "channel", 0)
 			if ch < 0 || ch > 7 {
 				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid channel"})
+				return
+			}
+			st.mu.Lock()
+			s := st.sessions[ch]
+			active := s != nil && s.active
+			st.mu.Unlock()
+			if !active {
+				writeJSON(w, http.StatusOK, map[string]any{"ok": true, "skipped": true})
 				return
 			}
 			ok, msg := publishSessionResultSnapshot(hub, st, deviceID, ch, method)
@@ -453,10 +1051,7 @@ func processFrame(c net.Conn, f gckc.Frame, hub *realtime.Hub, states *sync.Map,
 	case 146:
 		resetAllSessions(st)
 	case 150:
-		if len(f.Payload) > 0 {
-			ch := int(f.Payload[0])
-			resetSession(st, ch)
-		}
+		// stop/complete ack: do not reset session here; the next start ack (146) defines a new session
 	case 147:
 			finalizeAllSessions(hub, st, f.DeviceID, method)
 	case 151:
@@ -509,9 +1104,9 @@ func processFrame(c net.Conn, f gckc.Frame, hub *realtime.Hub, states *sync.Map,
 		t0 := st.lastTS[parsed.Channel]
 		st.lastTS[parsed.Channel] = t0 + float64(len(parsed.Values))*dtS
 		st.last143 = time.Now()
-		appendSessionSamplesLocked(st, parsed.Channel, dtS, t0, parsed.Values)
+		tok, _ := appendSessionSamplesLocked(st, parsed.Channel, dtS, t0, parsed.Values)
 		st.mu.Unlock()
-		hub.Publish(f.DeviceID, event{Type: "samples", DeviceID: f.DeviceID, At: time.Now(), Channel: parsed.Channel, DTs: dtS, T0s: t0, Values: parsed.Values})
+		hub.Publish(f.DeviceID, event{Type: "samples", DeviceID: f.DeviceID, At: time.Now(), Channel: parsed.Channel, SessionToken: tok, DTs: dtS, T0s: t0, Values: parsed.Values})
 	}
 }
 
@@ -523,7 +1118,7 @@ func resetAllSessions(st *deviceState) {
 		st.sessions = map[int]*runSession{}
 	}
 	for ch := range st.sessions {
-		st.sessions[ch] = &runSession{active: true, startedAt: time.Now()}
+		st.sessions[ch] = newRunSession()
 	}
 }
 
@@ -537,23 +1132,24 @@ func resetSession(st *deviceState, ch int) {
 	if st.sessions == nil {
 		st.sessions = map[int]*runSession{}
 	}
-	st.sessions[ch] = &runSession{active: true, startedAt: time.Now()}
+	st.sessions[ch] = newRunSession()
 }
 
-func appendSessionSamplesLocked(st *deviceState, ch int, dtS float64, t0 float64, vals []float64) {
+func appendSessionSamplesLocked(st *deviceState, ch int, dtS float64, t0 float64, vals []float64) (string, bool) {
 	s, ok := st.sessions[ch]
 	if !ok || s == nil {
-		s = &runSession{active: true, startedAt: time.Now()}
+		s = newRunSession()
 		st.sessions[ch] = s
 	}
 	if !s.active {
-		return
+		return s.token, false
 	}
 	if s.dtS == 0 {
 		s.dtS = dtS
 	} else if mathAbs(s.dtS-dtS) > 1e-6 {
 		s.dtS = dtS
 		s.values = nil
+		s.snapshotDone = false
 	}
 	idx0 := int(t0 / s.dtS)
 	if idx0 < 0 {
@@ -573,6 +1169,7 @@ func appendSessionSamplesLocked(st *deviceState, ch int, dtS float64, t0 float64
 		s.values[idx0+i] = vals[i]
 		s.lastSample = vals[i]
 	}
+	return s.token, true
 }
 
 func finalizeAllSessions(hub *realtime.Hub, st *deviceState, deviceID string, method v1.Method) {
@@ -608,15 +1205,35 @@ func finalizeSession(hub *realtime.Hub, st *deviceState, deviceID string, ch int
 		Unit:      "pA",
 		Values:    append([]float64(nil), s.values...),
 	}
+	tok := s.token
 	s.active = false
 	st.mu.Unlock()
 
 	res, err := analyzer.Analyze(trace, method, "dev", time.Now())
-	e := resultEvent{Type: "result", DeviceID: deviceID, Channel: ch, At: time.Now(), Trace: trace, Method: method}
+	e := resultEvent{Type: "result", DeviceID: deviceID, Channel: ch, SessionToken: tok, At: time.Now(), Trace: trace, Method: method}
 	if err != nil {
 		e.Error = err.Error()
 	} else {
 		e.Result = res
+		st.mu.Lock()
+		if st.lastResultByCh == nil {
+			st.lastResultByCh = map[int]lastResult{}
+		}
+		st.lastResultByCh[ch] = lastResult{token: tok, at: e.At.UTC(), res: res}
+		st.mu.Unlock()
+		if pstore != nil {
+			pstore.SaveResult(deviceID, ch, map[string]any{"deviceId": deviceID, "channel": ch, "sessionToken": tok, "at": e.At.UTC().Format(time.RFC3339), "result": res})
+		}
+		if thc, ch4, nmhc, ok := extractNMHC(res); ok {
+			nmhcStore.Add(nmhcRecord{
+				TimeRFC3339: e.At.UTC().Format(time.RFC3339),
+				DeviceID:    deviceID,
+				TraceID:     trace.TraceID,
+				THC:         thc,
+				CH4:         ch4,
+				NMHC:        nmhc,
+			})
+		}
 	}
 	hub.Publish(deviceID, e)
 	return true, e.Error
@@ -630,6 +1247,8 @@ func publishSessionResultSnapshot(hub *realtime.Hub, st *deviceState, deviceID s
 		return false, "no active session"
 	}
 	snap := sessionSnapshot{DtS: s.dtS, Values: append([]float64(nil), s.values...)}
+	tok := s.token
+	s.snapshotDone = true
 	st.mu.Unlock()
 
 	trace := v1.Trace{
@@ -644,12 +1263,31 @@ func publishSessionResultSnapshot(hub *realtime.Hub, st *deviceState, deviceID s
 		Values:    snap.Values,
 	}
 
-	e := resultEvent{Type: "result", DeviceID: deviceID, Channel: ch, At: time.Now().UTC(), Trace: trace, Method: method}
+	e := resultEvent{Type: "result", DeviceID: deviceID, Channel: ch, SessionToken: tok, At: time.Now().UTC(), Trace: trace, Method: method}
 	res, err := analyzer.Analyze(trace, method, deviceID, time.Now())
 	if err != nil {
 		e.Error = err.Error()
 	} else {
 		e.Result = res
+		st.mu.Lock()
+		if st.lastResultByCh == nil {
+			st.lastResultByCh = map[int]lastResult{}
+		}
+		st.lastResultByCh[ch] = lastResult{token: tok, at: e.At.UTC(), res: res}
+		st.mu.Unlock()
+		if pstore != nil {
+			pstore.SaveResult(deviceID, ch, map[string]any{"deviceId": deviceID, "channel": ch, "sessionToken": tok, "at": e.At.UTC().Format(time.RFC3339), "result": res})
+		}
+		if thc, ch4, nmhc, ok := extractNMHC(res); ok {
+			nmhcStore.Add(nmhcRecord{
+				TimeRFC3339: e.At.UTC().Format(time.RFC3339),
+				DeviceID:    deviceID,
+				TraceID:     trace.TraceID,
+				THC:         thc,
+				CH4:         ch4,
+				NMHC:        nmhc,
+			})
+		}
 	}
 	hub.Publish(deviceID, e)
 	return true, e.Error
@@ -660,6 +1298,10 @@ func mathAbs(v float64) float64 {
 		return -v
 	}
 	return v
+}
+
+func isFinite(v float64) bool {
+	return !math.IsNaN(v) && !math.IsInf(v, 0)
 }
 
 func loadMethod() v1.Method {
@@ -687,7 +1329,7 @@ func getState(states *sync.Map, deviceID string) *deviceState {
 	if ok {
 		return v.(*deviceState)
 	}
-	st := &deviceState{lastTS: map[int]float64{}}
+	st := &deviceState{lastTS: map[int]float64{}, lastResultByCh: map[int]lastResult{}}
 	states.Store(deviceID, st)
 	return st
 }
@@ -853,11 +1495,11 @@ var indexHTML = `<!doctype html>
       <section id="view-overview" class="view active">
         <div class="card cardPad" style="max-width:980px">
           <div class="homeGrid">
-            <div class="blueCard"><div class="blueTitle">总烃</div><div class="blueValue mono" id="kpi-thc">1.6394</div></div>
+            <div class="blueCard"><div class="blueTitle">总烃</div><div class="blueValue mono" id="kpi-thc">-</div></div>
             <div class="blueCard"><div class="blueTitle" style="opacity:0.0">占位</div><div class="blueValue mono" id="kpi-thc2"> </div></div>
-            <div class="blueCard"><div class="blueTitle">甲烷</div><div class="blueValue mono" id="kpi-ch4">0.1686</div></div>
+            <div class="blueCard"><div class="blueTitle">甲烷</div><div class="blueValue mono" id="kpi-ch4">-</div></div>
             <div class="blueCard"><div class="blueTitle" style="opacity:0.0">占位</div><div class="blueValue mono" id="kpi-ch4b"> </div></div>
-            <div class="blueCard"><div class="blueTitle">非甲烷总烃</div><div class="blueValue mono" id="kpi-nmhc">1.4709</div></div>
+            <div class="blueCard"><div class="blueTitle">非甲烷总烃</div><div class="blueValue mono" id="kpi-nmhc">-</div></div>
             <div class="blueCard"><div class="blueTitle" style="opacity:0.0">占位</div><div class="blueValue mono" id="kpi-nmhc2"> </div></div>
           </div>
 
@@ -1023,6 +1665,13 @@ var indexHTML = `<!doctype html>
             <div class="spacer"></div>
             <div class="label">提示：idx 来自 Cmd=159 EPC 上报的条目序号（从 0 开始）</div>
           </div>
+          <div class="row" style="margin-top:12px">
+            <button class="btn dark" id="set-open-method">方法</button>
+            <button class="btn dark" id="set-open-processing">谱图处理</button>
+            <button class="btn dark" id="set-open-reports">高级报表</button>
+            <div class="spacer"></div>
+            <div class="label" style="color:var(--muted)">二级入口占位：不占用顶栏标签</div>
+          </div>
         </div>
       </section>
     </main>
@@ -1040,13 +1689,25 @@ var indexHTML = `<!doctype html>
     };
 
     function setActiveTab(tab){
+      currentTab = tab || 'overview';
       for(const b of tabsEl.querySelectorAll('.tab')){
         b.classList.toggle('active', b.dataset.tab === tab);
       }
       for(const k in views){
         views[k].classList.toggle('active', k === tab);
       }
-      if(tab === 'curve') draw();
+      const sel = selectedDevice();
+      if(sel) saveUiToBackend(sel);
+      if(tab === 'curve'){
+        if(sel && !suppressUiSave){
+          const ch = Number(chnEl.value || '0');
+          const s = streams.get(streamKey(sel, ch));
+          if(!s || !s.pts || s.pts.length === 0){
+            restoreSessionOnly(sel).finally(()=>{});
+          }
+        }
+        draw();
+      }
       if(tab === 'overview') renderOverview();
       if(tab === 'result') renderResults();
       if(tab === 'events') renderEvents();
@@ -1104,6 +1765,9 @@ var indexHTML = `<!doctype html>
     const setEpcCarrierEl = document.getElementById('set-epc-carrier');
     const setEpcH2El = document.getElementById('set-epc-h2');
     const setEpcAirEl = document.getElementById('set-epc-air');
+    const setOpenMethodEl = document.getElementById('set-open-method');
+    const setOpenProcessingEl = document.getElementById('set-open-processing');
+    const setOpenReportsEl = document.getElementById('set-open-reports');
 
     const acqMinStorageKey = 'chrom.acqmin';
     try {
@@ -1153,6 +1817,7 @@ var indexHTML = `<!doctype html>
 
     const nmhcHistPrefix = 'nmhc_history.';
     const nmhcHistByDevice = new Map();
+    const nmhcFetchByDevice = new Map();
     const evtBuf = [];
     const evtMax = 400;
 
@@ -1213,6 +1878,77 @@ var indexHTML = `<!doctype html>
       try{ localStorage.setItem(nmhcHistPrefix + deviceId, JSON.stringify(arr.slice(-5000))); } catch {}
     }
 
+    function getNmhcFetchState(deviceId){
+      let st = nmhcFetchByDevice.get(deviceId);
+      if(!st){
+        st = { inFlight: false, lastKey: '', lastOkAtMs: 0 };
+        nmhcFetchByDevice.set(deviceId, st);
+      }
+      return st;
+    }
+
+    function nmhcRangeKey(fromD, toD){
+      return (fromD ? fromD.toISOString() : '') + '|' + (toD ? toD.toISOString() : '');
+    }
+
+    async function fetchNmhcHistory(deviceId, fromD, toD){
+      const qs = new URLSearchParams();
+      qs.set('deviceId', deviceId);
+      if(fromD) qs.set('from', fromD.toISOString());
+      if(toD) qs.set('to', toD.toISOString());
+      qs.set('limit', '5000');
+      const res = await fetch('/api/v1/results/nmhc?' + qs.toString(), {method:'GET'});
+      const j = await res.json().catch(()=>null);
+      if(!res.ok){
+        const msg = j && j.error ? String(j.error) : 'request failed';
+        throw new Error(msg);
+      }
+      if(!Array.isArray(j)) return [];
+      const out = [];
+      for(const r of j){
+        if(!r || !r.time) continue;
+        out.push({
+          t: String(r.time),
+          deviceId: r.deviceId ? String(r.deviceId) : deviceId,
+          traceId: r.traceId ? String(r.traceId) : '',
+          thc: (r.thc === null || r.thc === undefined) ? null : Number(r.thc),
+          ch4: (r.ch4 === null || r.ch4 === undefined) ? null : Number(r.ch4),
+          nmhc: (r.nmhc === null || r.nmhc === undefined) ? null : Number(r.nmhc),
+        });
+      }
+      return out;
+    }
+
+    function kickFetchNmhcHistory(deviceId, fromD, toD, force){
+      if(!deviceId) return;
+      const st = getNmhcFetchState(deviceId);
+      const key = nmhcRangeKey(fromD, toD);
+      const now = Date.now();
+      if(!force){
+        if(st.inFlight && st.lastKey === key) return;
+        if(st.lastKey === key && (now - st.lastOkAtMs) < 1500) return;
+      }
+      st.inFlight = true;
+      st.lastKey = key;
+      fetchNmhcHistory(deviceId, fromD, toD).then(arr=>{
+        nmhcHistByDevice.set(deviceId, arr);
+        saveNmchHistory(deviceId);
+        st.inFlight = false;
+        st.lastOkAtMs = Date.now();
+        applyKpiFromLatestNmhc(deviceId);
+        const sel = selectedDevice();
+        if(sel === deviceId){
+          const run = document.getElementById('home-runCountVal');
+          if(run) run.textContent = String(arr.length);
+        }
+        if(views.result && views.result.classList.contains('active') && selectedDevice() === deviceId){
+          renderResults();
+        }
+      }).catch(()=>{
+        st.inFlight = false;
+      });
+    }
+
     function addNmchHistory(deviceId, entry){
       if(!entry) return;
       const arr = loadNmchHistory(deviceId);
@@ -1223,6 +1959,50 @@ var indexHTML = `<!doctype html>
       if(sel === deviceId){
         const run = document.getElementById('home-runCountVal');
         if(run) run.textContent = String(arr.length);
+      }
+    }
+
+    function applyKpiFromLatestNmhc(deviceId){
+      const arr = loadNmchHistory(deviceId);
+      let latest = null;
+      for(const it of arr){
+        if(!it || !it.t) continue;
+        if(!latest){ latest = it; continue; }
+        if(new Date(it.t).getTime() > new Date(latest.t).getTime()) latest = it;
+      }
+      const k1 = document.getElementById('kpi-thc');
+      const k2 = document.getElementById('kpi-ch4');
+      const k3 = document.getElementById('kpi-nmhc');
+      const f4 = (v)=> (v === null || v === undefined || !isFinite(Number(v))) ? '-' : Number(v).toFixed(4);
+      const thc = latest ? latest.thc : null;
+      const ch4 = latest ? latest.ch4 : null;
+      if(k1) k1.textContent = f4(thc);
+      if(k2) k2.textContent = f4(ch4);
+      if(k3){
+        if(isFinite(Number(thc)) && isFinite(Number(ch4))){
+          k3.textContent = (Number(thc) - Number(ch4)).toFixed(4);
+        } else {
+          k3.textContent = '-';
+        }
+      }
+
+      const table = document.getElementById('tbody');
+      if(table){
+        const rows = table.querySelectorAll('tr');
+        for(const tr of rows){
+          const tds = tr.querySelectorAll('td');
+          if(tds.length < 2) continue;
+          const name = (tds[0].textContent || '').trim();
+          if(name === '总烃') tds[1].textContent = f4(thc);
+          if(name === '甲烷') tds[1].textContent = f4(ch4);
+          if(name === '非甲烷总烃'){
+            if(isFinite(Number(thc)) && isFinite(Number(ch4))){
+              tds[1].textContent = (Number(thc) - Number(ch4)).toFixed(4);
+            } else {
+              tds[1].textContent = '-';
+            }
+          }
+        }
       }
     }
 
@@ -1262,9 +2042,15 @@ var indexHTML = `<!doctype html>
         resTbodyEl.innerHTML = '<tr><td class="mono" colspan="4" style="color:var(--muted)">未选择设备</td></tr>';
         return;
       }
-      const arr = loadNmchHistory(sel);
       const fromD = parseTimeText(resFromEl && resFromEl.value);
       const toD = parseTimeText(resToEl && resToEl.value);
+      kickFetchNmhcHistory(sel, fromD, toD, false);
+      const arr = loadNmchHistory(sel);
+      const fetchSt = getNmhcFetchState(sel);
+      if(arr.length === 0 && fetchSt.inFlight){
+        resTbodyEl.innerHTML = '<tr><td class="mono" colspan="4" style="color:var(--muted)">加载中...</td></tr>';
+        return;
+      }
       const fromT = fromD ? fromD.getTime() : null;
       const toT = toD ? toD.getTime() : null;
       const f4 = (v)=> (v === null || v === undefined || !isFinite(Number(v))) ? '-' : Number(v).toFixed(4);
@@ -1376,31 +2162,21 @@ var indexHTML = `<!doctype html>
     function exportResultsCsv(){
       const sel = selectedDevice();
       if(!sel) return;
-      const arr = loadNmchHistory(sel);
       const fromD = parseTimeText(resFromEl && resFromEl.value);
       const toD = parseTimeText(resToEl && resToEl.value);
-      const fromT = fromD ? fromD.getTime() : null;
-      const toT = toD ? toD.getTime() : null;
-      const f4 = (v)=> (v === null || v === undefined || !isFinite(Number(v))) ? '' : Number(v).toFixed(4);
-      const lines = ['time,THC,CH4,NMHC'];
-      for(const it of arr){
-        const t = new Date(it.t);
-        const tt = t.getTime();
-        if(fromT !== null && tt < fromT) continue;
-        if(toT !== null && tt > toT) continue;
-        lines.push([it.t, f4(it.thc), f4(it.ch4), f4(it.nmhc)].join(','));
-      }
-      const blob = new Blob([lines.join('\\n')], {type:'text/csv;charset=utf-8'});
       const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = 'nmhc_' + sel + '.csv';
+      const qs = new URLSearchParams();
+      qs.set('deviceId', sel);
+      if(fromD) qs.set('from', fromD.toISOString());
+      if(toD) qs.set('to', toD.toISOString());
+      a.href = '/api/v1/results/nmhc/export.csv?' + qs.toString();
+      a.rel = 'noopener';
       document.body.appendChild(a);
       a.click();
       a.remove();
-      setTimeout(()=>{ try{ URL.revokeObjectURL(a.href); }catch{} }, 1000);
     }
 
-    function deleteResultsRange(){
+    async function deleteResultsRange(){
       const sel = selectedDevice();
       if(!sel) return;
       const fromD = parseTimeText(resFromEl && resFromEl.value);
@@ -1416,18 +2192,17 @@ var indexHTML = `<!doctype html>
         return;
       }
       if(!confirm('确认删除该时间段内的记录？')) return;
-      const arr = loadNmchHistory(sel);
-      const out = [];
-      for(const it of arr){
-        const tt = new Date(it.t).getTime();
-        if(tt >= fromT && tt <= toT) continue;
-        out.push(it);
+      const qs = new URLSearchParams();
+      qs.set('deviceId', sel);
+      qs.set('from', fromD.toISOString());
+      qs.set('to', toD.toISOString());
+      const res = await fetch('/api/v1/results/nmhc?' + qs.toString(), {method:'DELETE'});
+      const j = await res.json().catch(()=>({}));
+      if(!res.ok){
+        alert(j && j.error ? String(j.error) : '删除失败');
+        return;
       }
-      nmhcHistByDevice.set(sel, out);
-      saveNmchHistory(sel);
-      renderResults();
-      const run = document.getElementById('home-runCountVal');
-      if(run) run.textContent = String(out.length);
+      kickFetchNmhcHistory(sel, null, null, true);
     }
 
 
@@ -1497,7 +2272,7 @@ var indexHTML = `<!doctype html>
       const k = streamKey(deviceId, channel);
       let s = streams.get(k);
       if(!s){
-        s = { deviceId, channel, cycleStartS: null, dtS: null, winS: null, pts: [], lastMin: null, lastMax: null, lastElapsedS: 0, lastValue: null, stopped: false, targetStopS: null, stopRequested: false, resultRequested: false, loopActive: false, autoTimer: null, cycleStartedAtMs: null };
+        s = { deviceId, channel, sessionToken: '', cycleStartS: null, dtS: null, winS: null, pts: [], lastMin: null, lastMax: null, lastElapsedS: 0, lastValue: null, stopped: false, targetStopS: null, stopRequested: false, resultRequested: false, loopActive: false, autoTimer: null, cycleStartedAtMs: null };
         streams.set(k, s);
       }
       s.deviceId = deviceId;
@@ -1527,6 +2302,7 @@ var indexHTML = `<!doctype html>
       }
       s.autoTimer = null;
       s.cycleStartedAtMs = null;
+      s.sessionToken = '';
       s.cycleStartS = null;
       s.dtS = null;
       s.pts = [];
@@ -1548,6 +2324,7 @@ var indexHTML = `<!doctype html>
       }
       s.autoTimer = null;
       s.cycleStartedAtMs = null;
+      s.sessionToken = '';
       s.cycleStartS = null;
       s.dtS = null;
       s.pts = [];
@@ -1797,8 +2574,8 @@ var indexHTML = `<!doctype html>
       const rk = streamKey(sel, ch);
       const rr = results.get(rk);
       const r = rr && rr.result ? rr.result : null;
-      const rCycle = rr && rr.cycleStartedAtMs !== undefined ? rr.cycleStartedAtMs : null;
-      if(r && r.pollutants && Array.isArray(r.pollutants) && rCycle !== null && s.cycleStartedAtMs !== null && rCycle === s.cycleStartedAtMs){
+      const rTok = rr && rr.sessionToken ? rr.sessionToken : '';
+      if(r && r.pollutants && Array.isArray(r.pollutants) && rTok && s.sessionToken && rTok === s.sessionToken){
         ctx.save();
         ctx.fillStyle = '#1F5CFF';
         ctx.font = '700 13px system-ui';
@@ -1846,14 +2623,25 @@ var indexHTML = `<!doctype html>
 
         if(selectedDevice() === ''){
           let prefer = '';
+          if(backendLastDeviceId && deviceInfo.has(backendLastDeviceId)){
+            prefer = backendLastDeviceId;
+          }
           for(const d of arr){
-            if(String(d.deviceId || '').startsWith('GC')){ prefer = d.deviceId; break; }
+            if(!prefer && String(d.deviceId || '').startsWith('GC')){ prefer = d.deviceId; break; }
           }
           if(prefer){
             deviceEl.value = prefer;
             statusEl.textContent = '在线: ' + prefer;
             const run = document.getElementById('home-runCountVal');
             if(run) run.textContent = String(loadNmchHistory(prefer).length);
+          }
+        }
+
+        if(!didInitialRestore){
+          const sel0 = selectedDevice();
+          if(sel0){
+            didInitialRestore = true;
+            restoreFromBackend(sel0).finally(()=>{ saveUiToBackend(sel0); });
           }
         }
         renderDebug();
@@ -2040,7 +2828,8 @@ var indexHTML = `<!doctype html>
           addNmchHistory(msg.deviceId, entry);
           pushEvtRow(msg.deviceId, 'result', 'pollutants=' + msg.result.pollutants.length);
           const s = getStream(msg.deviceId, ch);
-          results.set(rk, { result: msg.result, cycleStartedAtMs: s.cycleStartedAtMs });
+          const tok = (msg.sessionToken !== undefined && msg.sessionToken !== null) ? String(msg.sessionToken) : (s.sessionToken || '');
+          results.set(rk, { result: msg.result, sessionToken: tok });
           const table = document.getElementById('tbody');
           if(table){
             const rows = table.querySelectorAll('tr');
@@ -2125,6 +2914,12 @@ var indexHTML = `<!doctype html>
 
       let s = getStream(msg.deviceId, msgChannel);
       if(s.stopped) return;
+      const msgTok = (msg.sessionToken !== undefined && msg.sessionToken !== null) ? String(msg.sessionToken) : '';
+      if(msgTok && s.sessionToken && msgTok !== s.sessionToken){
+        resetStreamForNewCycle(msg.deviceId, msgChannel);
+        s = getStream(msg.deviceId, msgChannel);
+      }
+      if(msgTok) s.sessionToken = msgTok;
       const dt = Number(msg.dtS);
       if(!isFinite(dt) || dt <= 0) return;
       pushEvtRow(msg.deviceId, 'samples', 'ch=' + msgChannel + ' n=' + (msg.values ? msg.values.length : 0) + ' dt=' + dt.toFixed(4));
@@ -2183,9 +2978,10 @@ var indexHTML = `<!doctype html>
       const sel = selectedDevice();
       if(sel){
         statusEl.textContent = '在线: ' + sel;
-        resetStream(sel, Number(chnEl.value || '0'));
         const run = document.getElementById('home-runCountVal');
         if(run) run.textContent = String(loadNmchHistory(sel).length);
+        kickFetchNmhcHistory(sel, null, null, true);
+        restoreFromBackend(sel).finally(()=>{ saveUiToBackend(sel); });
       } else {
         statusEl.textContent = '未选择设备（自动）';
       }
@@ -2199,7 +2995,7 @@ var indexHTML = `<!doctype html>
     chnEl.addEventListener('change', ()=>{
       const sel = selectedDevice();
       if(sel){
-        resetStream(sel, Number(chnEl.value || '0'));
+        restoreSessionOnly(sel).finally(()=>{ saveUiToBackend(sel); });
       }
       draw();
       renderDebug();
@@ -2217,6 +3013,166 @@ var indexHTML = `<!doctype html>
     ylowEl.addEventListener('change', ()=>{ draw(); });
     yhighEl.addEventListener('change', ()=>{ draw(); });
     autoyEl.addEventListener('change', ()=>{ draw(); });
+
+    let backendLastDeviceId = '';
+    let didInitialRestore = false;
+    let suppressUiSave = false;
+    let currentTab = 'overview';
+
+    function uiPayloadFor(deviceId){
+      const ch = Number(chnEl.value || '0');
+      const fullMin = Number(fullminEl.value || '2');
+      const yLow = Number(ylowEl.value || '0');
+      const yHigh = Number(yhighEl.value || '40');
+      const autoY = !!autoyEl.checked;
+      const acqMin = Number(acqminEl.value || '0');
+      const loop = !!(loopEl && loopEl.checked);
+      const epcMap = loadEpcMap();
+      return {
+        deviceId,
+        activeTab: currentTab,
+        selectedChannel: isFinite(ch) ? ch : 0,
+        fullMin: isFinite(fullMin) ? fullMin : 2,
+        yLow: isFinite(yLow) ? yLow : 0,
+        yHigh: isFinite(yHigh) ? yHigh : 40,
+        autoY,
+        acqMin: isFinite(acqMin) ? acqMin : 0,
+        loop,
+        epcCarrier: Number(epcMap.carrier || 0),
+        epcH2: Number(epcMap.h2 || 1),
+        epcAir: Number(epcMap.air || 2),
+      };
+    }
+
+    async function saveUiToBackend(deviceId){
+      if(suppressUiSave) return;
+      if(!deviceId) return;
+      const payload = uiPayloadFor(deviceId);
+      try{
+        await fetch('/api/v1/ui', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+      }catch{}
+    }
+
+    function applyUiState(u){
+      if(!u) return;
+      if(u.activeTab){
+        currentTab = String(u.activeTab);
+      }
+      if(u.fullMin !== undefined) fullminEl.value = String(u.fullMin);
+      if(u.yLow !== undefined) ylowEl.value = String(u.yLow);
+      if(u.yHigh !== undefined) yhighEl.value = String(u.yHigh);
+      if(u.autoY !== undefined) autoyEl.checked = !!u.autoY;
+      if(u.acqMin !== undefined) acqminEl.value = String(u.acqMin);
+      if(u.loop !== undefined && loopEl) loopEl.checked = !!u.loop;
+      if(u.selectedChannel !== undefined) chnEl.value = String(u.selectedChannel);
+
+      document.getElementById('set-fullmin').value = fullminEl.value;
+      document.getElementById('set-ylow').value = ylowEl.value;
+      document.getElementById('set-yhigh').value = yhighEl.value;
+      document.getElementById('set-autoy').checked = autoyEl.checked;
+      if(setAcqMinEl) setAcqMinEl.value = acqminEl.value;
+
+      const epcMap = { carrier: Number(u.epcCarrier || 0), h2: Number(u.epcH2 || 1), air: Number(u.epcAir || 2) };
+      saveEpcMap(epcMap);
+      if(setEpcCarrierEl) setEpcCarrierEl.value = String(epcMap.carrier);
+      if(setEpcH2El) setEpcH2El.value = String(epcMap.h2);
+      if(setEpcAirEl) setEpcAirEl.value = String(epcMap.air);
+    }
+
+    function hydrateStreamFromSession(deviceId, channel, sess){
+      if(!sess) return;
+      const dt = Number(sess.dtS);
+      const values = sess.values;
+      if(!isFinite(dt) || dt <= 0) return;
+      if(!Array.isArray(values) || values.length < 2) return;
+      resetStream(deviceId, channel);
+      const s = getStream(deviceId, channel);
+      s.dtS = dt;
+      s.sessionToken = sess.sessionToken ? String(sess.sessionToken) : '';
+      s.cycleStartS = 0;
+      const win = fullWindowS();
+      s.winS = win;
+      const maxPts = 200000;
+      const maxSpanPts = Math.max(2, Math.floor((win + 2) / dt));
+      const keep = Math.min(values.length, Math.max(maxSpanPts, Math.min(maxPts, values.length)));
+      const valuesCount = values.length;
+      const totalCount = (sess.totalCount !== undefined && sess.totalCount !== null) ? Number(sess.totalCount) : valuesCount;
+      const baseIdx = Math.max(0, totalCount - valuesCount);
+      const startLocalIdx = Math.max(0, valuesCount - keep);
+      for(let i=startLocalIdx;i<valuesCount;i++){
+        const t = (baseIdx + i) * dt;
+        const v = Number(values[i]);
+        s.pts.push([t, v]);
+        s.lastValue = v;
+      }
+      s.lastElapsedS = (totalCount - 1) * dt;
+      trimPointsToWindow(s);
+      const minText = (s.lastElapsedS/60).toFixed(3);
+      const vText = (s.lastValue === null ? '0.000' : Number(s.lastValue).toFixed(3));
+      statEl.textContent = '通道' + (Number(chnEl.value||'0')+1) + ': ' + minText + ' min   ' + vText + ' pA';
+      homeStatusEl.textContent = '时间: ' + minText + ' min   信号: ' + vText + ' pA';
+    }
+
+    async function restoreFromBackend(deviceId){
+      if(!deviceId) return;
+      suppressUiSave = true;
+      try{
+        const uRes = await fetch('/api/v1/ui?deviceId=' + encodeURIComponent(deviceId));
+        if(uRes.ok){
+          const u = await uRes.json();
+          applyUiState(u);
+          if(u && u.activeTab){
+            setActiveTab(String(u.activeTab));
+          }
+        }
+      }catch{}
+      suppressUiSave = false;
+      kickFetchNmhcHistory(deviceId, null, null, true);
+      applyKpiFromLatestNmhc(deviceId);
+      try{
+        const ch = Number(chnEl.value || '0');
+        const sRes = await fetch('/api/v1/session/active?deviceId=' + encodeURIComponent(deviceId) + '&channel=' + ch);
+        if(sRes.ok){
+          const sess = await sRes.json();
+          if(sess && sess.channel !== undefined) chnEl.value = String(sess.channel);
+          hydrateStreamFromSession(deviceId, Number(chnEl.value||'0'), sess);
+          if(sess && sess.result && sess.sessionToken){
+            const rk = streamKey(deviceId, Number(chnEl.value||'0'));
+            results.set(rk, { result: sess.result, sessionToken: String(sess.sessionToken) });
+          }
+        }
+      }catch{}
+      draw();
+      renderDebug();
+    }
+
+    async function restoreSessionOnly(deviceId){
+      if(!deviceId) return;
+      try{
+        const ch = Number(chnEl.value || '0');
+        const sRes = await fetch('/api/v1/session/active?deviceId=' + encodeURIComponent(deviceId) + '&channel=' + ch);
+        if(sRes.ok){
+          const sess = await sRes.json();
+          if(sess && sess.channel !== undefined) chnEl.value = String(sess.channel);
+          hydrateStreamFromSession(deviceId, Number(chnEl.value||'0'), sess);
+          if(sess && sess.result && sess.sessionToken){
+            const rk = streamKey(deviceId, Number(chnEl.value||'0'));
+            results.set(rk, { result: sess.result, sessionToken: String(sess.sessionToken) });
+          }
+        }
+      }catch{}
+      draw();
+      renderDebug();
+    }
+
+    async function fetchLastDeviceId(){
+      try{
+        const r = await fetch('/api/v1/ui');
+        if(!r.ok) return;
+        const j = await r.json();
+        if(j && j.lastDeviceId) backendLastDeviceId = String(j.lastDeviceId);
+      }catch{}
+    }
 
     function loadSettings(){
       try{
@@ -2253,15 +3209,21 @@ var indexHTML = `<!doctype html>
       }
       const m = { carrier: Number(setEpcCarrierEl && setEpcCarrierEl.value || '0'), h2: Number(setEpcH2El && setEpcH2El.value || '1'), air: Number(setEpcAirEl && setEpcAirEl.value || '2') };
       saveEpcMap(m);
+      const sel = selectedDevice();
+      saveUiToBackend(sel);
       draw();
     });
 
     setButtonsEnabled(false);
     loadSettings();
     fillEpcSelects(12);
+    const initActiveBtn = tabsEl.querySelector('.tab.active');
+    if(initActiveBtn && initActiveBtn.dataset && initActiveBtn.dataset.tab){
+      currentTab = initActiveBtn.dataset.tab;
+    }
+    fetchLastDeviceId().finally(()=>{});
     tickClock();
     setInterval(tickClock, 250);
-    setActiveTab('overview');
     refreshDevices();
     setInterval(refreshDevices, 1000);
     refreshServer();
@@ -2275,9 +3237,16 @@ var indexHTML = `<!doctype html>
     if(evtClearEl) evtClearEl.addEventListener('click', ()=>{ evtBuf.splice(0, evtBuf.length); renderEvents(); });
     if(evtOnlySelectedEl) evtOnlySelectedEl.addEventListener('change', renderEvents);
 
-    if(setEpcCarrierEl) setEpcCarrierEl.addEventListener('change', ()=>saveEpcMap({ carrier: Number(setEpcCarrierEl.value||'0'), h2: Number(setEpcH2El && setEpcH2El.value || '1'), air: Number(setEpcAirEl && setEpcAirEl.value || '2') }));
-    if(setEpcH2El) setEpcH2El.addEventListener('change', ()=>saveEpcMap({ carrier: Number(setEpcCarrierEl && setEpcCarrierEl.value || '0'), h2: Number(setEpcH2El.value||'1'), air: Number(setEpcAirEl && setEpcAirEl.value || '2') }));
-    if(setEpcAirEl) setEpcAirEl.addEventListener('change', ()=>saveEpcMap({ carrier: Number(setEpcCarrierEl && setEpcCarrierEl.value || '0'), h2: Number(setEpcH2El && setEpcH2El.value || '1'), air: Number(setEpcAirEl.value||'2') }));
+    if(setEpcCarrierEl) setEpcCarrierEl.addEventListener('change', ()=>{ saveEpcMap({ carrier: Number(setEpcCarrierEl.value||'0'), h2: Number(setEpcH2El && setEpcH2El.value || '1'), air: Number(setEpcAirEl && setEpcAirEl.value || '2') }); const sel = selectedDevice(); saveUiToBackend(sel); });
+    if(setEpcH2El) setEpcH2El.addEventListener('change', ()=>{ saveEpcMap({ carrier: Number(setEpcCarrierEl && setEpcCarrierEl.value || '0'), h2: Number(setEpcH2El.value||'1'), air: Number(setEpcAirEl && setEpcAirEl.value || '2') }); const sel = selectedDevice(); saveUiToBackend(sel); });
+    if(setEpcAirEl) setEpcAirEl.addEventListener('change', ()=>{ saveEpcMap({ carrier: Number(setEpcCarrierEl && setEpcCarrierEl.value || '0'), h2: Number(setEpcH2El && setEpcH2El.value || '1'), air: Number(setEpcAirEl.value||'2') }); const sel = selectedDevice(); saveUiToBackend(sel); });
+
+    const openPlaceholder = (title)=>{
+      alert(title + '：待实现');
+    };
+    if(setOpenMethodEl) setOpenMethodEl.addEventListener('click', ()=>openPlaceholder('方法'));
+    if(setOpenProcessingEl) setOpenProcessingEl.addEventListener('click', ()=>openPlaceholder('谱图处理'));
+    if(setOpenReportsEl) setOpenReportsEl.addEventListener('click', ()=>openPlaceholder('高级报表'));
   </script>
 </body>
 </html>`
