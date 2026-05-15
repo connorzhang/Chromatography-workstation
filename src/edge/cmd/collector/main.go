@@ -979,8 +979,13 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte(indexHTML))
 	})
-	log.Printf("collector http listening on 127.0.0.1:%d", port)
-	return http.ListenAndServe("127.0.0.1:"+strconv.Itoa(port), mux)
+	host := strings.TrimSpace(os.Getenv("EDGE_HTTP_BIND"))
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	addr := host + ":" + strconv.Itoa(port)
+	log.Printf("collector http listening on %s", addr)
+	return http.ListenAndServe(addr, mux)
 }
 
 func serveTCP(port int, hub *realtime.Hub, states *sync.Map, cfg chromsend143.Config, method v1.Method) error {
