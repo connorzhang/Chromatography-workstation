@@ -36,12 +36,12 @@ $root = Get-RepoRoot
 $envPath = Join-Path $root ".env"
 $kv = Read-DotEnv $envPath
 
-$host = $kv["TEST_SCREEN_SSH_HOST"]
+$sshHost = $kv["TEST_SCREEN_SSH_HOST"]
 $port = $kv["TEST_SCREEN_SSH_PORT"]
 $user = $kv["TEST_SCREEN_SSH_USER"]
 $pass = $kv["TEST_SCREEN_SSH_PASSWORD"]
 
-if ([string]::IsNullOrWhiteSpace($host)) { throw "TEST_SCREEN_SSH_HOST is missing in .env" }
+if ([string]::IsNullOrWhiteSpace($sshHost)) { throw "TEST_SCREEN_SSH_HOST is missing in .env" }
 if ([string]::IsNullOrWhiteSpace($port)) { $port = "22" }
 if ([string]::IsNullOrWhiteSpace($user)) { $user = "root" }
 if ([string]::IsNullOrWhiteSpace($pass)) { throw "TEST_SCREEN_SSH_PASSWORD is missing in .env" }
@@ -82,9 +82,9 @@ function Get-HostKey([string]$host, [string]$port) {
 $localBin = Join-Path $root "publish/edge-collector/collector-linux-arm64"
 if (-not (Test-Path $localBin)) { throw "local binary not found: $localBin" }
 
-$remote = "$user@$host"
+$remote = "$user@$sshHost"
 $putty = Ensure-Putty (Join-Path $root "src/edge/.run/tools/putty")
-$hostkey = Get-HostKey $host $port
+$hostkey = Get-HostKey $sshHost $port
 
 function Run-Remote([string]$cmd) {
   & $putty.Plink -batch -ssh -P $port -pw $pass -hostkey $hostkey $remote $cmd
