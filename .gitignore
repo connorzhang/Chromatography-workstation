@@ -3,6 +3,13 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/master/VisualStudio.gitignore
 
+# 边缘工作站与跨平台项目忽略
+.env
+src/edge/.run/
+src/edge/collector
+src/edge/collector.exe
+src/edge/dist/
+
 # User-specific files
 *.rsuser
 *.suo

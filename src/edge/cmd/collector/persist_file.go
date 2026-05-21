@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"chromatography-workstation/edge/internal/models"
 )
 
 type persistStore struct {
@@ -190,6 +192,62 @@ func (s *persistStore) SaveSnapshot(stateJSON string) {
 	}
 	_, _ = f.Write(append([]byte(stateJSON), '\n'))
 	_ = f.Close()
+}
+
+func (s *persistStore) SaveMethod(methodID string, method models.Method) {
+	if methodID == "" {
+		methodID = "default"
+	}
+	b, err := json.Marshal(method)
+	if err != nil {
+		return
+	}
+	path := filepath.Join(s.root, "methods")
+	_ = os.MkdirAll(path, 0o755)
+	_ = os.WriteFile(filepath.Join(path, methodID+".json"), b, 0o644)
+}
+
+func (s *persistStore) LoadMethod(methodID string) (models.Method, bool) {
+	if methodID == "" {
+		methodID = "default"
+	}
+	b, err := os.ReadFile(filepath.Join(s.root, "methods", methodID+".json"))
+	if err != nil {
+		return models.Method{}, false
+	}
+	var out models.Method
+	if json.Unmarshal(b, &out) != nil {
+		return models.Method{}, false
+	}
+	return out, true
+}
+
+func (s *persistStore) SaveHardwareConfig(deviceID string, cfg models.HardwareConfig) {
+	if deviceID == "" {
+		return
+	}
+	b, err := json.Marshal(cfg)
+	if err != nil {
+		return
+	}
+	path := filepath.Join(s.root, "hwconfig")
+	_ = os.MkdirAll(path, 0o755)
+	_ = os.WriteFile(filepath.Join(path, deviceID+".json"), b, 0o644)
+}
+
+func (s *persistStore) LoadHardwareConfig(deviceID string) (models.HardwareConfig, bool) {
+	if deviceID == "" {
+		return models.HardwareConfig{}, false
+	}
+	b, err := os.ReadFile(filepath.Join(s.root, "hwconfig", deviceID+".json"))
+	if err != nil {
+		return models.HardwareConfig{}, false
+	}
+	var out models.HardwareConfig
+	if json.Unmarshal(b, &out) != nil {
+		return models.HardwareConfig{}, false
+	}
+	return out, true
 }
 
 func itoa(n int) string {

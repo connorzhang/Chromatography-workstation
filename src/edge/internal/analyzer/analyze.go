@@ -51,6 +51,57 @@ func Analyze(trace contracts.Trace, method contracts.Method, gitSHA string, now 
 	return out, nil
 }
 
+// calcConcentration 基于多点标定曲线将响应值（面积或高度）转换为浓度
+func calcConcentration(response float64, levels []contracts.Level, curveFunc int) float64 {
+	if len(levels) == 0 {
+		return response // 如果没有校准点，默认返回响应值本身
+	}
+	
+	// 单点校准或所有点都在原点
+	if len(levels) == 1 {
+		l := levels[0]
+		if l.Response <= 0 {
+			return 0
+		}
+		// 默认过原点的单点线性校准
+		return response * (l.Amount / l.Response)
+	}
+
+	// 线性插值/外推 (遗留系统中 CurveFunc = 0 为线性)
+	// 为了简便，目前先实现两点/多点的线性分段插值
+	// TODO: 后续可加入最小二乘法进行多项式拟合
+	for i := 0; i < len(levels)-1; i++ {
+		l1, l2 := levels[i], levels[i+1]
+		// 确保 l1 < l2
+		if l1.Response > l2.Response {
+			l1, l2 = l2, l1
+		}
+		
+		if response >= l1.Response && response <= l2.Response {
+			if l2.Response == l1.Response {
+				return l1.Amount
+			}
+			f := (response - l1.Response) / (l2.Response - l1.Response)
+			return l1.Amount + f*(l2.Amount-l1.Amount)
+		}
+	}
+	
+	// 如果超出了最大点或小于最小点，采用最近的一段进行线性外推
+	if response < levels[0].Response {
+		l1, l2 := levels[0], levels[1]
+		if l2.Response == l1.Response { return 0 }
+		f := (response - l1.Response) / (l2.Response - l1.Response)
+		res := l1.Amount + f*(l2.Amount-l1.Amount)
+		if res < 0 { return 0 }
+		return res
+	}
+	
+	l1, l2 := levels[len(levels)-2], levels[len(levels)-1]
+	if l2.Response == l1.Response { return l2.Amount }
+	f := (response - l1.Response) / (l2.Response - l1.Response)
+	return l1.Amount + f*(l2.Amount-l1.Amount)
+}
+
 func analyzeOne(trace contracts.Trace, p contracts.PollutantSpec) (contracts.PollutantResult, error) {
 	if p.StartS < 0 || p.EndS < 0 || p.EndS < p.StartS {
 		return contracts.PollutantResult{}, errors.New("invalid startS/endS")
@@ -119,14 +170,23 @@ func analyzeOne(trace contracts.Trace, p contracts.PollutantSpec) (contracts.Pol
 		height = 0
 	}
 
-	return contracts.PollutantResult{
+	res := contracts.PollutantResult{
 		Code:   p.Code,
 		Name:   p.Name,
 		Status: status,
 		RtS:    round6(peakT),
 		Area:   round6(area),
 		Height: round6(height),
-	}, nil
+	}
+
+	// 根据 RespStyle (面积或高度) 计算浓度
+	resp := res.Area
+	if p.RespStyle == 1 {
+		resp = res.Height
+	}
+	res.Amount = calcConcentration(resp, p.Levels, p.CurveFunc)
+
+	return res, nil
 }
 
 func clampIndex(i int, n int) int {

@@ -28,6 +28,15 @@ type PollutantSpec struct {
 	AlignMode    string  `json:"alignMode"`
 	BaselineMode string  `json:"baselineMode"`
 	Threshold    float64 `json:"threshold"`
+	RespStyle    int     `json:"respStyle"` // 0: 面积, 1: 峰高
+	CurveFunc    int     `json:"curveFunc"` // 0: 线性分段
+	Levels       []Level `json:"levels"`    // 校准点
+}
+
+type Level struct {
+	LevelIndex int     `json:"levelIndex"`
+	Amount     float64 `json:"amount"`
+	Response   float64 `json:"response"`
 }
 
 type Result struct {
@@ -55,4 +64,5 @@ type PollutantResult struct {
 	RtS    float64 `json:"rtS"`
 	Area   float64 `json:"area"`
 	Height float64 `json:"height"`
+	Amount float64 `json:"amount"` // 计算出的浓度
 }

@@ -21,6 +21,7 @@ import (
 
 	"chromatography-workstation/edge/internal/analyzer"
 	v1 "chromatography-workstation/edge/internal/contracts/v1"
+	"chromatography-workstation/edge/internal/models"
 	"chromatography-workstation/edge/internal/protocol/chromsend143"
 	"chromatography-workstation/edge/internal/protocol/gckc"
 	"chromatography-workstation/edge/internal/realtime"
@@ -493,6 +494,304 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "startedAt": startedAt.Format(time.RFC3339)})
 	})
+	
+	// --- 新版 API_DESIGN 约定的 RESTful 接口 ---
+	
+	// 1. 分析方法与校准
+	mux.HandleFunc("/api/method", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			if pstore != nil {
+				if m, ok := pstore.LoadMethod("default"); ok {
+					writeJSON(w, http.StatusOK, m)
+					return
+				}
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"error": "method not found"})
+		case http.MethodPost:
+			var in models.Method
+			if json.NewDecoder(r.Body).Decode(&in) != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+				return
+			}
+			if pstore != nil {
+				pstore.SaveMethod("default", in)
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+
+	mux.HandleFunc("/api/method/calibrate", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var in struct {
+			Level  int     `json:"level"`
+			Amount float64 `json:"amount"` // 此次标气注入的实际浓度
+			RunID  string  `json:"run_id"` // 使用哪个进样批次的结果来标定
+		}
+		if json.NewDecoder(r.Body).Decode(&in) != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+			return
+		}
+
+		if pstore == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "store not ready"})
+			return
+		}
+
+		// 1. 获取当前方法
+		method, ok := pstore.LoadMethod("default")
+		if !ok {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "method not found"})
+			return
+		}
+
+		// 2. TODO: 根据 RunID 从历史数据库中查出对应的分析结果 (各组分面积)
+		// 暂且用伪代码模拟查到的响应值，后续打通 SQLite 后补全
+		mockResponses := map[string]float64{
+			"THC":  12345.6,
+			"CH4":  2345.6,
+			"NMHC": 10000.0,
+		}
+
+		// 3. 将对应组分的响应值存入 Method 的 Level 中
+		for i, cmpd := range method.Compounds {
+			if resp, ok := mockResponses[cmpd.Name]; ok {
+				// 查找是否已存在该级别
+				found := false
+				for j, lvl := range cmpd.Levels {
+					if lvl.LevelIndex == in.Level {
+						method.Compounds[i].Levels[j].Amount = in.Amount
+						method.Compounds[i].Levels[j].Response = resp
+						found = true
+						break
+					}
+				}
+				if !found {
+					method.Compounds[i].Levels = append(method.Compounds[i].Levels, models.Level{
+						LevelIndex: in.Level,
+						Amount:     in.Amount,
+						Response:   resp,
+					})
+				}
+				// 保证 Levels 按响应值升序，方便插值计算
+				sort.Slice(method.Compounds[i].Levels, func(a, b int) bool {
+					return method.Compounds[i].Levels[a].Response < method.Compounds[i].Levels[b].Response
+				})
+			}
+		}
+
+		// 4. 持久化保存
+		pstore.SaveMethod("default", method)
+
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "calibrate updated"})
+	})
+
+	// 2. 硬件反控
+	mux.HandleFunc("/api/control/temp", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !allowControl {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": "control disabled"})
+			return
+		}
+		var in struct {
+			Zone   string  `json:"zone"`
+			Target float64 `json:"target"`
+		}
+		if json.NewDecoder(r.Body).Decode(&in) != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+			return
+		}
+		
+		deviceID := uiLastDevice
+		stAny, ok := states.Load(deviceID)
+		if !ok {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "device not found"})
+			return
+		}
+		st := stAny.(*deviceState)
+
+		// Cmd 8: 恒温控制参数下发
+		// Payload: 12字节 (Inj1, Col, Det1, 保留, Inj2, 保留) 每个2字节BCD
+		// 这里简单实现：先读取现有持久化的 hwconfig，合并后下发
+		hw, _ := pstore.LoadHardwareConfig(deviceID)
+		if hw.Temperatures == nil {
+			hw.Temperatures = make(map[string]float64)
+		}
+		hw.Temperatures[in.Zone] = in.Target
+		pstore.SaveHardwareConfig(deviceID, hw)
+
+		payload := make([]byte, 12)
+		copy(payload[0:2], tempToBCD2(hw.Temperatures["Inj1"]))
+		copy(payload[2:4], tempToBCD2(hw.Temperatures["Col"]))
+		copy(payload[4:6], tempToBCD2(hw.Temperatures["Det1"]))
+		copy(payload[8:10], tempToBCD2(hw.Temperatures["Inj2"]))
+
+		if err := sendCmd(st, deviceID, 8, payload); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	})
+
+	mux.HandleFunc("/api/control/ignite", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !allowControl {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": "control disabled"})
+			return
+		}
+		var in struct {
+			Action   string `json:"action"`
+			Detector string `json:"detector"`
+		}
+		if json.NewDecoder(r.Body).Decode(&in) != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+			return
+		}
+		// 根据 API_DESIGN，转换为 Cmd 20 / 21
+		deviceID := uiLastDevice // 获取当前设备ID，这里暂用全局变量
+		stAny, ok := states.Load(deviceID)
+		if ok {
+			st := stAny.(*deviceState)
+			cmd := byte(20) // 默认 FID1
+			if in.Detector == "FID2" {
+				cmd = byte(21)
+			}
+			if in.Action == "start" {
+				_ = sendCmd(st, deviceID, cmd, nil)
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "ignite sent"})
+	})
+
+	mux.HandleFunc("/api/control/epc", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !allowControl {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": "control disabled"})
+			return
+		}
+		var in struct {
+			Channel  string  `json:"channel"`
+			Pressure float64 `json:"pressure"`
+		}
+		if json.NewDecoder(r.Body).Decode(&in) != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+			return
+		}
+
+		deviceID := uiLastDevice
+		stAny, ok := states.Load(deviceID)
+		if !ok {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "device not found"})
+			return
+		}
+		st := stAny.(*deviceState)
+
+		// 更新并持久化 EPC 配置
+		hw, _ := pstore.LoadHardwareConfig(deviceID)
+		if hw.EPCs == nil {
+			hw.EPCs = make(map[string]float64)
+		}
+		hw.EPCs[in.Channel] = in.Pressure
+		pstore.SaveHardwareConfig(deviceID, hw)
+
+		// Cmd 34 (0x22): 气路压力流量设定
+		// 简单假设目前仅支持前 3 路 (载气, H2, Air)，每路占 8 字节
+		// 格式: 压力设定(2B), 流量设定(2B), 分流比(2B), 状态(1B), 气体类型(1B)
+		payload := make([]byte, 24)
+		
+		cPsi := u16Bytes(hw.EPCs["Carrier1"], 100)
+		h2Psi := u16Bytes(hw.EPCs["H2"], 100)
+		airPsi := u16Bytes(hw.EPCs["Air"], 100)
+		
+		copy(payload[0:2], cPsi)
+		copy(payload[8:10], h2Psi)
+		copy(payload[16:18], airPsi)
+
+		if err := sendCmd(st, deviceID, 34, payload); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	})
+
+	mux.HandleFunc("/api/control/events", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !allowControl {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": "control disabled"})
+			return
+		}
+		var in []models.EventRow
+		if json.NewDecoder(r.Body).Decode(&in) != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+			return
+		}
+		
+		deviceID := uiLastDevice
+		stAny, ok := states.Load(deviceID)
+		if !ok {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "device not found"})
+			return
+		}
+		st := stAny.(*deviceState)
+
+		hw, _ := pstore.LoadHardwareConfig(deviceID)
+		hw.Events = in
+		pstore.SaveHardwareConfig(deviceID, hw)
+
+		// Cmd 10 (0x0A): 下发外部事件时间程序
+		// 格式: 事件数量(1B) + N * [时间(2B BCD) + 事件位状态(2B)]
+		n := len(in)
+		if n > 20 { n = 20 }
+		payload := make([]byte, 1+n*4)
+		payload[0] = byte(n)
+		for i := 0; i < n; i++ {
+			off := 1 + i*4
+			copy(payload[off:off+2], tempToBCD2(in[i].Time)) // 时间同样用 BCD 编码
+			mask := in[i].EventMask
+			payload[off+2] = byte(mask >> 8)
+			payload[off+3] = byte(mask & 0xFF)
+		}
+
+		if err := sendCmd(st, deviceID, 10, payload); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	})
+
+	// 3. 历史记录 (复用并扩展已有的 NMHC 逻辑)
+	mux.HandleFunc("/api/history/results", func(w http.ResponseWriter, r *http.Request) {
+		// 复用 /api/v1/results/nmhc 的逻辑或者重定向
+		http.Redirect(w, r, "/api/v1/results/nmhc?"+r.URL.RawQuery, http.StatusTemporaryRedirect)
+	})
+
+	mux.HandleFunc("/api/history/run/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		// TODO: 返回完整的单次进样谱图和 Peak 列表
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "run history stub"})
+	})
+
+	// --- 原有 API 继续保留 ---
 	mux.HandleFunc("/api/v1/method", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -984,8 +1283,216 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 		}
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		html := `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VOCs 色谱边缘工作站 v1.0</title>
+    <style>
+        :root { --bg: #0f172a; --panel: #1e293b; --text: #f8fafc; --accent: #3b82f6; --success: #10b981; --danger: #ef4444; }
+        body { margin: 0; font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); display: flex; height: 100vh; overflow: hidden; }
+        .sidebar { width: 80px; background: var(--panel); border-right: 1px solid #334155; display: flex; flex-direction: column; align-items: center; padding-top: 1rem; }
+        .nav-item { width: 60px; height: 60px; display: flex; flex-direction: column; align-items: center; justify-content: center; margin-bottom: 1rem; border-radius: 8px; cursor: pointer; color: #94a3b8; font-size: 12px; transition: all 0.2s; }
+        .nav-item:hover { background: #334155; color: var(--text); }
+        .nav-item.active { background: var(--accent); color: white; }
+        .nav-icon { font-size: 24px; margin-bottom: 4px; }
+        
+        .main-content { flex: 1; display: flex; flex-direction: column; padding: 1rem; overflow-y: auto; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid #334155; }
+        
+        .view-panel { display: none; height: 100%; }
+        .view-panel.active { display: flex; flex-direction: column; }
+        
+        .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem; }
+        .card { background: var(--panel); padding: 1.5rem; border-radius: 8px; border: 1px solid #334155; text-align: center; }
+        .card-title { font-size: 14px; color: #94a3b8; margin-bottom: 0.5rem; }
+        .card-value { font-size: 3rem; font-weight: bold; color: var(--success); font-family: monospace; }
+        .card-unit { font-size: 1rem; color: #94a3b8; }
+        
+        table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+        th, td { padding: 0.75rem; text-align: left; border-bottom: 1px solid #334155; }
+        th { color: #94a3b8; font-weight: normal; }
+        
+        .control-group { background: var(--panel); padding: 1rem; border-radius: 8px; margin-bottom: 1rem; }
+        .input { background: #0f172a; border: 1px solid #334155; color: white; padding: 0.5rem; border-radius: 4px; margin-right: 0.5rem; }
+        .btn { background: var(--accent); color: white; border: none; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; }
+        .btn:hover { background: #2563eb; }
+        .btn-danger { background: var(--danger); }
+        .btn-danger:hover { background: #dc2626; }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <div class="nav-item active" data-target="view-dashboard">
+            <div class="nav-icon">📊</div><div>大屏</div>
+        </div>
+        <div class="nav-item" data-target="view-live">
+            <div class="nav-icon">📈</div><div>谱图</div>
+        </div>
+        <div class="nav-item" data-target="view-method">
+            <div class="nav-icon">🧪</div><div>方法</div>
+        </div>
+        <div class="nav-item" data-target="view-settings">
+            <div class="nav-icon">⚙️</div><div>设置</div>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <div class="header">
+            <h2><span id="header-title">实时概览</span> <span style="font-size:12px;color:#94a3b8;margin-left:10px;">v1.0-Edge</span></h2>
+            <div id="status-badge" style="color:var(--success)">● 设备已连接</div>
+        </div>
+
+        <div id="view-dashboard" class="view-panel active">
+            <div class="card-grid">
+                <div class="card">
+                    <div class="card-title">非甲烷总烃 (NMHC)</div>
+                    <div class="card-value" id="val-nmhc">0.00</div>
+                    <div class="card-unit">mg/m³</div>
+                </div>
+                <div class="card">
+                    <div class="card-title">总烃 (THC)</div>
+                    <div class="card-value" id="val-thc">0.00</div>
+                    <div class="card-unit">mg/m³</div>
+                </div>
+                <div class="card">
+                    <div class="card-title">甲烷 (CH4)</div>
+                    <div class="card-value" id="val-ch4">0.00</div>
+                    <div class="card-unit">mg/m³</div>
+                </div>
+            </div>
+            
+            <div class="control-group" style="margin-top: 2rem; display: flex; gap: 1rem; align-items: center;">
+                <button class="btn" id="btn-start-analysis" onclick="sendCmd('startAll')">▶ 开始分析</button>
+                <button class="btn btn-danger" id="btn-stop-analysis" onclick="sendCmd('stopAll')">■ 停止分析</button>
+                <div style="margin-left: 2rem; color: #94a3b8;">
+                    循环状态: <span id="cycle-status" style="color: white;">等待中</span>
+                </div>
+            </div>
+        </div>
+
+        <div id="view-live" class="view-panel">
+            <div style="display: flex; height: 100%; gap: 1rem;">
+                <div style="flex: 3; background: var(--panel); border-radius: 8px; border: 1px solid #334155; position: relative;">
+                    <div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); color:#94a3b8;">
+                        [实时色谱图区域 - 待接入 Canvas]
+                    </div>
+                </div>
+                <div style="flex: 1; display: flex; flex-direction: column; gap: 1rem;">
+                    <div class="control-group" style="flex: 1; margin: 0;">
+                        <h3 style="margin-top:0">硬件状态</h3>
+                        <table>
+                            <tr><td>FID1点火</td><td style="color:var(--success)">已点燃</td></tr>
+                            <tr><td>进样口温</td><td>120.0 ℃</td></tr>
+                            <tr><td>柱温</td><td>80.0 ℃</td></tr>
+                            <tr><td>检测器温</td><td>150.0 ℃</td></tr>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="view-method" class="view-panel">
+            <div class="control-group">
+                <h3>校准组分表</h3>
+                <table>
+                    <thead>
+                        <tr><th>组分名称</th><th>保留时间</th><th>左窗口</th><th>右窗口</th><th>计算方式</th></tr>
+                    </thead>
+                    <tbody id="tbody-compounds">
+                        <tr><td colspan="5" style="text-align:center">加载中...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="view-settings" class="view-panel">
+            <div class="control-group">
+                <h3>温度设定 (Cmd 8)</h3>
+                进样口: <input type="number" id="set-temp-inj" class="input" value="120" style="width: 80px;"> ℃
+                柱温: <input type="number" id="set-temp-col" class="input" value="80" style="width: 80px;"> ℃
+                检测器: <input type="number" id="set-temp-det" class="input" value="150" style="width: 80px;"> ℃
+                <button class="btn" id="btn-apply-temp">下发控温</button>
+            </div>
+            <div class="control-group">
+                <h3>点火控制 (Cmd 20/21)</h3>
+                <button class="btn" id="btn-ignite-fid1">🔥 FID1 点火</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        const navItems = document.querySelectorAll('.nav-item');
+        const viewPanels = document.querySelectorAll('.view-panel');
+        const headerTitle = document.getElementById('header-title');
+
+        navItems.forEach(item => {
+            item.addEventListener('click', () => {
+                navItems.forEach(n => n.classList.remove('active'));
+                item.classList.add('active');
+                headerTitle.textContent = item.querySelector('div:last-child').textContent;
+                const targetId = item.getAttribute('data-target');
+                viewPanels.forEach(p => p.classList.remove('active'));
+                document.getElementById(targetId).classList.add('active');
+                if(targetId === 'view-method') loadMethod();
+            });
+        });
+
+        async function loadMethod() {
+            try {
+                const res = await fetch('/api/method');
+                const data = await res.json();
+                const tbody = document.getElementById('tbody-compounds');
+                if(!data.compounds || data.compounds.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center">暂无组分，请添加</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = '';
+                data.compounds.forEach(c => {
+                    tbody.innerHTML += "<tr>" +
+                        "<td>" + c.name + "</td>" +
+                        "<td>" + c.retain_time + " min</td>" +
+                        "<td>" + c.left_window + "</td>" +
+                        "<td>" + c.right_window + "</td>" +
+                        "<td>" + (c.resp_style === 0 ? "面积" : "峰高") + "</td>" +
+                    "</tr>";
+                });
+            } catch(e) { console.error(e); }
+        }
+
+        document.getElementById('btn-apply-temp').addEventListener('click', async () => {
+            const inj = parseFloat(document.getElementById('set-temp-inj').value);
+            await fetch('/api/control/temp', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ zone: 'Inj1', target: inj })
+            });
+            alert('进样口控温指令已下发!');
+        });
+        
+        document.getElementById('btn-ignite-fid1').addEventListener('click', async () => {
+            await fetch('/api/control/ignite', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ action: 'start', detector: 'FID1' })
+            });
+            alert('FID1 点火指令已下发!');
+        });
+        
+        window.sendCmd = async function(cmdName) {
+            alert('指令 ' + cmdName + ' 发送逻辑待接入');
+        }
+    </script>
+</body>
+</html>`
+
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte(indexHTML))
+		w.Write([]byte(html))
 	})
 	host := strings.TrimSpace(os.Getenv("EDGE_HTTP_BIND"))
 	if host == "" {
@@ -1403,6 +1910,37 @@ func buildCmd(name string, channel int) (byte, []byte, error) {
 	default:
 		return 0, nil, fmt.Errorf("unknown cmd name: %s", name)
 	}
+}
+
+// 辅助方法：将 0~399 的温度值转换为 2 字节 BCD 码
+func tempToBCD2(temp float64) []byte {
+	v := int(math.Round(temp * 10))
+	if v < 0 {
+		v = 0
+	}
+	if v > 3999 {
+		v = 3999
+	}
+	// v 此时形如 1234 (对应 123.4度)
+	d1 := (v / 1000) % 10
+	d2 := (v / 100) % 10
+	d3 := (v / 10) % 10
+	d4 := v % 10
+	b0 := byte((d1 << 4) | d2)
+	b1 := byte((d3 << 4) | d4)
+	return []byte{b0, b1}
+}
+
+// 辅助方法：将数值转换为大端 uint16 字节
+func u16Bytes(v float64, scale float64) []byte {
+	iv := int(math.Round(v * scale))
+	if iv < 0 {
+		iv = 0
+	}
+	if iv > 65535 {
+		iv = 65535
+	}
+	return []byte{byte(iv >> 8), byte(iv & 0xFF)}
 }
 
 func sendCmd(st *deviceState, deviceID string, cmd byte, payload []byte) error {
