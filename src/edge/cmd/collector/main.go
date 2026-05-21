@@ -1550,16 +1550,17 @@ var indexHTML = `<!doctype html>
             <div class="spacer"></div>
             <span class="label">下限:</span><input id="ylow" class="input mono" style="width:90px" value="0" />
             <span class="label">上限:</span><input id="yhigh" class="input mono" style="width:90px" value="40" />
-            <span class="label">采集时间:</span><input id="acqmin" class="input mono" style="width:70px" value="2" />
-            <input class="input" style="width:48px" value="0" />
-            <span class="label">满屏时间</span><input id="fullmin" class="input mono" style="width:70px" value="2" />
+            <span class="label">采集时间:</span><input id="acqmin" class="input mono" style="width:50px" value="2" />
+            <span class="label">满屏时间:</span><input id="fullmin" class="input mono" style="width:50px" value="2" />
+            <span class="label">循环周期:</span><input id="cyclemin" class="input mono" style="width:50px" value="2" title="下一针自动进样的间隔时间" />
+            <span class="label">循环次数:</span><input id="cyclemax" class="input mono" style="width:50px" value="9999" title="最大循环进样次数" />
           </div>
 
           <div class="row" style="margin-bottom:10px">
             <div id="stat" class="mono">通道1: 0.000 min  0.000 pA  信号1:</div>
             <label class="modeItem"><input id="autoy" type="checkbox" checked /> 峰高自适应</label>
-            <label class="modeItem"><input id="loop" type="checkbox" checked /> 自动出数</label>
-            <input id="name" class="input" placeholder="谱图名称" style="width:260px" />
+            <label class="modeItem"><input id="loop" type="checkbox" checked /> 连续分析</label>
+            <input id="name" class="input" placeholder="谱图名称" style="width:200px" />
             <div class="spacer"></div>
             <div class="kpi"><div class="label">在线</div><div id="status" class="mono">未连接</div></div>
             <div class="kpi"><div class="label">设备</div><select id="device" class="select mono"><option value="">等待 GC...</option></select></div>
