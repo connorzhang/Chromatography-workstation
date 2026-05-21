@@ -48,6 +48,35 @@ func Analyze(trace contracts.Trace, method contracts.Method, gitSHA string, now 
 		out.Pollutants = append(out.Pollutants, r)
 	}
 
+	// 计算峰分组聚合逻辑
+	for _, g := range method.Groups {
+		amount := 0.0
+		// 累加 IncludeCodes
+		for _, inc := range g.IncludeCodes {
+			for _, pr := range out.Pollutants {
+				if pr.Code == inc && pr.Status == "detected" {
+					amount += pr.Amount
+				}
+			}
+		}
+		// 扣减 ExcludeCodes (如非甲 = 总烃 - 甲烷)
+		for _, exc := range g.ExcludeCodes {
+			for _, pr := range out.Pollutants {
+				if pr.Code == exc && pr.Status == "detected" {
+					amount -= pr.Amount
+				}
+			}
+		}
+		if amount < 0 {
+			amount = 0 // 防止负值
+		}
+		out.Groups = append(out.Groups, contracts.GroupResult{
+			Code:   g.Code,
+			Name:   g.Name,
+			Amount: round6(amount),
+		})
+	}
+
 	return out, nil
 }
 
@@ -102,6 +131,48 @@ func calcConcentration(response float64, levels []contracts.Level, curveFunc int
 	return l1.Amount + f*(l2.Amount-l1.Amount)
 }
 
+// smooth 采用与遗留系统等价的滑动平均 (Moving Average) 进行数据平滑，以降低高频噪声
+func smooth(values []float64, windowSize int) []float64 {
+	n := len(values)
+	if n == 0 || windowSize <= 1 {
+		return values
+	}
+	if windowSize > n {
+		windowSize = n
+	}
+
+	smoothed := make([]float64, n)
+	sum := 0.0
+
+	// 初始窗口
+	for i := 0; i < windowSize; i++ {
+		sum += values[i]
+	}
+
+	half := windowSize / 2
+	for i := 0; i < n; i++ {
+		if i > half && i+windowSize-half-1 < n {
+			sum = sum - values[i-half-1] + values[i+windowSize-half-1]
+		} else if i <= half {
+			// 前端边缘保持不变或使用已有的sum平均
+			// 严格对齐老系统的话，此处可以不减不加，直接算当前有效窗口内的平均
+		}
+		
+		// 为了严谨，计算实际的窗口大小 (防止边缘越界)
+		start := i - half
+		end := i + (windowSize - half)
+		if start < 0 { start = 0 }
+		if end > n { end = n }
+		
+		localSum := 0.0
+		for j := start; j < end; j++ {
+			localSum += values[j]
+		}
+		smoothed[i] = localSum / float64(end-start)
+	}
+	return smoothed
+}
+
 func analyzeOne(trace contracts.Trace, p contracts.PollutantSpec) (contracts.PollutantResult, error) {
 	if p.StartS < 0 || p.EndS < 0 || p.EndS < p.StartS {
 		return contracts.PollutantResult{}, errors.New("invalid startS/endS")
@@ -121,8 +192,22 @@ func analyzeOne(trace contracts.Trace, p contracts.PollutantSpec) (contracts.Pol
 		i1 = minInt(i0+1, len(trace.Values)-1)
 	}
 
-	y0 := trace.Values[i0]
-	y1 := trace.Values[i1]
+	// 1. 数据平滑：使用 16 个采样点的窗口进行平滑 (对齐老系统的默认平滑)
+	smoothedVals := smooth(trace.Values, 16)
+
+	// 2. 基线计算：实现多种基线模式
+	// 默认使用线性基线 (General) 连接峰起点和终点
+	y0 := smoothedVals[i0]
+	y1 := smoothedVals[i1]
+	
+	// 如果配置了水平前延或水平后延基线 (Horizontal)
+	if p.BaselineMode == "ForwHorz" {
+		y1 = y0 // 水平向后
+	} else if p.BaselineMode == "BackHorz" {
+		y0 = y1 // 水平向前
+	}
+	// TODO: 谷对谷 (Valley-to-Valley) 和切线 (Tangent) 处理需在全图识别后处理，这里先按窗口局部处理
+
 	t0 := float64(i0) * trace.DtS
 	t1 := float64(i1) * trace.DtS
 	denom := t1 - t0
@@ -130,11 +215,12 @@ func analyzeOne(trace contracts.Trace, p contracts.PollutantSpec) (contracts.Pol
 		denom = trace.DtS
 	}
 
+	// 3. 寻找峰顶
 	peakI := i0
-	peakY := trace.Values[i0]
+	peakY := smoothedVals[i0]
 	for i := i0; i <= i1; i++ {
-		if trace.Values[i] > peakY {
-			peakY = trace.Values[i]
+		if smoothedVals[i] > peakY {
+			peakY = smoothedVals[i]
 			peakI = i
 		}
 	}
@@ -144,26 +230,36 @@ func analyzeOne(trace contracts.Trace, p contracts.PollutantSpec) (contracts.Pol
 		return y0 + (y1-y0)*f
 	}
 
+	// 4. 梯形积分计算面积
 	area := 0.0
 	lastT := float64(i0) * trace.DtS
 	lastB := baselineAt(lastT)
-	lastV := math.Max(0, trace.Values[i0]-lastB)
+	lastV := math.Max(0, smoothedVals[i0]-lastB)
 	for i := i0 + 1; i <= i1; i++ {
 		t := float64(i) * trace.DtS
 		b := baselineAt(t)
-		v := math.Max(0, trace.Values[i]-b)
+		v := math.Max(0, smoothedVals[i]-b)
 		dt := t - lastT
+		
+		// 遗留系统在积分时会过滤掉负峰(除非开启 Add Negative)
+		// 这里默认 v 是 math.Max(0, y-b)，即只积分正峰部分
 		area += (lastV + v) * 0.5 * dt
+		
 		lastT = t
 		lastB = b
-		_ = lastB
 		lastV = v
 	}
+	
+	// C# 代码中面积乘以 60 将单位转化为微伏·秒 (保留时间是分钟)
+	// 这里假设我们的 DtS 已经是秒，因此无需乘 60，但需与遗留单位对齐时，按需求放大。
+	// 这里暂时保留原始秒级积分值。
 
 	peakT := float64(peakI) * trace.DtS
 	peakB := baselineAt(peakT)
 	height := math.Max(0, peakY-peakB)
 	status := "detected"
+	
+	// 5. 检峰条件判断 (阈值过滤)
 	if height < p.Threshold {
 		status = "not_detected"
 		area = 0

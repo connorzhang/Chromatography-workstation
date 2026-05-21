@@ -13,10 +13,17 @@ type Trace struct {
 }
 
 type Method struct {
-	Schema     string          `json:"schema"`
 	MethodID   string          `json:"methodId"`
 	Version    int             `json:"version"`
 	Pollutants []PollutantSpec `json:"pollutants"`
+	Groups     []PeakGroupSpec `json:"groups"` // 峰分组配置
+}
+
+type PeakGroupSpec struct {
+	Code         string   `json:"code"`         // 如 "NMHC"
+	Name         string   `json:"name"`         // 如 "非甲烷总烃"
+	IncludeCodes []string `json:"includeCodes"` // 包含的单峰 Code 列表
+	ExcludeCodes []string `json:"excludeCodes"` // 需要排除的单峰 Code (用于扣减计算，如总烃减去甲烷)
 }
 
 type PollutantSpec struct {
@@ -49,6 +56,13 @@ type Result struct {
 	CreatedAt     string            `json:"createdAt"`
 	Engine        Engine            `json:"engine"`
 	Pollutants    []PollutantResult `json:"pollutants"`
+	Groups        []GroupResult     `json:"groups"` // 聚合结果
+}
+
+type GroupResult struct {
+	Code   string  `json:"code"`
+	Name   string  `json:"name"`
+	Amount float64 `json:"amount"` // 聚合计算出的总浓度
 }
 
 type Engine struct {
