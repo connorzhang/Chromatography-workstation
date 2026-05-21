@@ -31,36 +31,49 @@ func schedulerTick(hub *realtime.Hub, states *sync.Map, method v1.Method) {
 			return true
 		}
 		acqDur := time.Duration(acqMin*60.0*1000.0) * time.Millisecond
+		
+		cycleMin := ui.CycleMin
+		if cycleMin <= 0 {
+			cycleMin = acqMin // fallback if not set
+		}
+		cycleDur := time.Duration(cycleMin*60.0*1000.0) * time.Millisecond
+
 		for ch := 0; ch < 8; ch++ {
 			st.mu.Lock()
 			s := st.sessions[ch]
-			if s == nil || !s.active || s.snapshotDone {
+			if s == nil || !s.active {
 				st.mu.Unlock()
 				continue
 			}
 			started := s.startedAt
+			snapshotDone := s.snapshotDone
 			st.mu.Unlock()
-			if time.Since(started) < acqDur {
-				continue
+			
+			timeSinceStart := time.Since(started)
+
+			// 1. Check if we need to stop acquisition / generate results
+			if !snapshotDone && timeSinceStart >= acqDur {
+				// AcqMin reached: perform snapshot and result calculation
+				_, _ = publishSessionResultSnapshot(hub, st, deviceID, ch, method)
+				
+				// If not looping, we stop here
+				if !ui.Loop {
+					finalizeSession(hub, st, deviceID, ch, method)
+					// Send Stop command to hardware
+					channelMask := byte(1 << uint(ch))
+					_ = sendCmd(st, deviceID, 245, []byte{channelMask})
+				}
 			}
-			
-			// AcqMin reached: perform snapshot and result calculation
-			_, _ = publishSessionResultSnapshot(hub, st, deviceID, ch, method)
-			
-			// Enforce backend scheduling: Stop or Loop
-			if ui.Loop {
-				// Restart session for the next cycle
+
+			// 2. Check if we need to start the next cycle
+			if ui.Loop && timeSinceStart >= cycleDur {
+				// CycleMin reached: Restart session for the next cycle
+				// TODO: Check CycleMax (loop count) if needed in the future
 				resetSession(st, ch)
 				// Send Start command to hardware
 				_ = sendCmd(st, deviceID, 22, []byte{byte(ch)})
 				// Send the secondary start/reset command that frontend used to send
 				_ = sendCmd(st, deviceID, 25, nil)
-			} else {
-				// Finalize and stop
-				finalizeSession(hub, st, deviceID, ch, method)
-				// Send Stop command to hardware
-				channelMask := byte(1 << uint(ch))
-				_ = sendCmd(st, deviceID, 245, []byte{channelMask})
 			}
 		}
 		return true

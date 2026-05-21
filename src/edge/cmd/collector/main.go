@@ -277,6 +277,8 @@ type uiState struct {
 	AutoY           bool    `json:"autoY"`
 	AcqMin          float64 `json:"acqMin"`
 	Loop            bool    `json:"loop"`
+	CycleMin        float64 `json:"cycleMin"`
+	CycleMax        int     `json:"cycleMax"`
 	EpcCarrier      int     `json:"epcCarrier"`
 	EpcH2           int     `json:"epcH2"`
 	EpcAir          int     `json:"epcAir"`
@@ -288,7 +290,7 @@ var uiByDevice = map[string]uiState{}
 var uiLastDevice string
 
 func defaultUIState(deviceID string) uiState {
-	return uiState{DeviceID: deviceID, ActiveTab: "overview", SelectedChannel: 0, FullMin: 2, YLow: 0, YHigh: 40, AutoY: true, AcqMin: 2, Loop: true, EpcCarrier: 0, EpcH2: 1, EpcAir: 2}
+	return uiState{DeviceID: deviceID, ActiveTab: "overview", SelectedChannel: 0, FullMin: 2, YLow: 0, YHigh: 40, AutoY: true, AcqMin: 2, Loop: true, CycleMin: 2, CycleMax: 9999, EpcCarrier: 0, EpcH2: 1, EpcAir: 2}
 }
 
 type resultEvent struct {
@@ -565,6 +567,12 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			}
 			if in.AcqMin < 0 || !isFinite(in.AcqMin) {
 				in.AcqMin = 0
+			}
+			if in.CycleMin < 0 || !isFinite(in.CycleMin) {
+				in.CycleMin = in.AcqMin
+			}
+			if in.CycleMax < 0 {
+				in.CycleMax = 9999
 			}
 			in.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 			uiMu.Lock()
@@ -1806,6 +1814,17 @@ var indexHTML = `<!doctype html>
       };
       loopEl.addEventListener('change', saveLoop);
     }
+    
+    if(cycleminEl){
+      cycleminEl.addEventListener('change', () => {
+        saveUiToBackend(selectedDevice());
+      });
+    }
+    if(cyclemaxEl){
+      cyclemaxEl.addEventListener('change', () => {
+        saveUiToBackend(selectedDevice());
+      });
+    }
 
     const homeStatusEl = document.getElementById('home-status');
     const homeClockEl = document.getElementById('home-clock');
@@ -2964,6 +2983,9 @@ var indexHTML = `<!doctype html>
     yhighEl.addEventListener('change', ()=>{ saveUiToBackend(selectedDevice()); draw(); });
     autoyEl.addEventListener('change', ()=>{ saveUiToBackend(selectedDevice()); draw(); });
 
+    const cycleminEl = document.getElementById('cyclemin');
+    const cyclemaxEl = document.getElementById('cyclemax');
+
     let backendLastDeviceId = '';
     let didInitialRestore = false;
     let suppressUiSave = false;
@@ -2977,6 +2999,8 @@ var indexHTML = `<!doctype html>
       const autoY = !!autoyEl.checked;
       const acqMin = Number(acqminEl.value || '0');
       const loop = !!(loopEl && loopEl.checked);
+      const cycleMin = Number(cycleminEl ? cycleminEl.value : '2');
+      const cycleMax = Number(cyclemaxEl ? cyclemaxEl.value : '9999');
       const epcMap = loadEpcMap();
       return {
         deviceId,
@@ -2988,6 +3012,8 @@ var indexHTML = `<!doctype html>
         autoY,
         acqMin: isFinite(acqMin) ? acqMin : 0,
         loop,
+        cycleMin: isFinite(cycleMin) ? cycleMin : 2,
+        cycleMax: isFinite(cycleMax) ? cycleMax : 9999,
         epcCarrier: Number(epcMap.carrier || 0),
         epcH2: Number(epcMap.h2 || 1),
         epcAir: Number(epcMap.air || 2),
@@ -3014,6 +3040,8 @@ var indexHTML = `<!doctype html>
       if(u.autoY !== undefined) autoyEl.checked = !!u.autoY;
       if(u.acqMin !== undefined) acqminEl.value = String(u.acqMin);
       if(u.loop !== undefined && loopEl) loopEl.checked = !!u.loop;
+      if(u.cycleMin !== undefined && cycleminEl) cycleminEl.value = String(u.cycleMin);
+      if(u.cycleMax !== undefined && cyclemaxEl) cyclemaxEl.value = String(u.cycleMax);
       if(u.selectedChannel !== undefined) chnEl.value = String(u.selectedChannel);
 
       document.getElementById('set-fullmin').value = fullminEl.value;
