@@ -40,9 +40,9 @@ function Ensure-Putty([string]$dir) {
   return $plink
 }
 
-function Get-HostKey([string]$host, [string]$port) {
+function Get-HostKey([string]$sshHost, [string]$port) {
   $tmp = New-TemporaryFile
-  $scan = & ssh-keyscan -p $port -t rsa $host 2>$null
+  $scan = & ssh-keyscan -p $port -t rsa $sshHost 2>$null
   if ([string]::IsNullOrWhiteSpace($scan)) { throw "ssh-keyscan failed" }
   Set-Content -LiteralPath $tmp -Value $scan
   $fp = & ssh-keygen -lf $tmp -E sha256 2>$null
