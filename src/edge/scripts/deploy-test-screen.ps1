@@ -91,11 +91,11 @@ function Run-Remote([string]$cmd) {
 }
 
 function Copy-Remote([string]$src, [string]$dst) {
-  & $putty.Pscp -batch -P $port -pw $pass -hostkey $hostkey $src "$remote:$dst"
+  & $putty.Pscp -batch -P $port -pw $pass -hostkey $hostkey $src "${remote}:$dst"
 }
 
 function Copy-RemoteDir([string]$srcDir, [string]$dstDir) {
-  & $putty.Pscp -batch -r -P $port -pw $pass -hostkey $hostkey $srcDir "$remote:$dstDir"
+  & $putty.Pscp -batch -r -P $port -pw $pass -hostkey $hostkey $srcDir "${remote}:$dstDir"
 }
 
 $stopCmd = "set -e; mkdir -p `"$RemoteDir`"; cd `"$RemoteDir`"; if [ -f collector.pid ]; then kill `$(cat collector.pid) 2>/dev/null || true; rm -f collector.pid; fi"
