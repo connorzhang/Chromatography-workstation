@@ -43,7 +43,25 @@ func schedulerTick(hub *realtime.Hub, states *sync.Map, method v1.Method) {
 			if time.Since(started) < acqDur {
 				continue
 			}
+			
+			// AcqMin reached: perform snapshot and result calculation
 			_, _ = publishSessionResultSnapshot(hub, st, deviceID, ch, method)
+			
+			// Enforce backend scheduling: Stop or Loop
+			if ui.Loop {
+				// Restart session for the next cycle
+				resetSession(st, ch)
+				// Send Start command to hardware
+				_ = sendCmd(st, deviceID, 22, []byte{byte(ch)})
+				// Send the secondary start/reset command that frontend used to send
+				_ = sendCmd(st, deviceID, 25, nil)
+			} else {
+				// Finalize and stop
+				finalizeSession(hub, st, deviceID, ch, method)
+				// Send Stop command to hardware
+				channelMask := byte(1 << uint(ch))
+				_ = sendCmd(st, deviceID, 245, []byte{channelMask})
+			}
 		}
 		return true
 	})
@@ -70,6 +88,10 @@ func getUIForDevice(deviceID string) uiState {
 			if st2.ActiveTab == "" {
 				st2.ActiveTab = "overview"
 			}
+			// Cache the loaded UI state to prevent repetitive disk reads
+			uiMu.Lock()
+			uiByDevice[deviceID] = st2
+			uiMu.Unlock()
 			return st2
 		}
 	}

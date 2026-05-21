@@ -1786,19 +1786,9 @@ var indexHTML = `<!doctype html>
         try { localStorage.setItem(acqMinStorageKey, String(acqminEl.value || '')); } catch {}
       };
       acqminEl.addEventListener('input', saveAcqMin);
-      acqminEl.addEventListener('change', saveAcqMin);
-    }
-
-    if(acqminEl){
       acqminEl.addEventListener('change', ()=>{
-        const sel = selectedDevice();
-        if(!sel) return;
-        const ch = Number(chnEl.value || '0');
-        const s = getStream(sel, ch);
-        applyTargetStopFromUI(s);
-        if(s.loopActive && !s.stopped && !s.stopRequested){
-          armAutoResult(s, true);
-        }
+        saveAcqMin();
+        saveUiToBackend(selectedDevice());
       });
     }
 
@@ -1812,6 +1802,7 @@ var indexHTML = `<!doctype html>
     if(loopEl){
       const saveLoop = ()=>{
         try { localStorage.setItem(loopStorageKey, loopEl.checked ? '1' : '0'); } catch {}
+        saveUiToBackend(selectedDevice());
       };
       loopEl.addEventListener('change', saveLoop);
     }
@@ -2340,52 +2331,7 @@ var indexHTML = `<!doctype html>
       s.stopped = false;
       s.stopRequested = false;
       s.resultRequested = false;
-      applyTargetStopFromUI(s);
-      if(s.loopActive){
-        armAutoResult(s, false);
-      }
       return s;
-    }
-
-    function applyTargetStopFromUI(s){
-      const acqMin = Number(acqminEl.value || '0');
-      if(isFinite(acqMin) && acqMin > 0){
-        s.targetStopS = acqMin * 60;
-      } else {
-        s.targetStopS = null;
-      }
-    }
-
-    function armAutoResult(s, keepStart){
-      if(!(loopEl && loopEl.checked)) return;
-      if(s.autoTimer){
-        try { clearTimeout(s.autoTimer); } catch {}
-      }
-      s.autoTimer = null;
-      if(!keepStart || s.cycleStartedAtMs === null){
-        s.cycleStartedAtMs = Date.now();
-      }
-      if(s.targetStopS === null || !isFinite(s.targetStopS) || s.targetStopS <= 0) return;
-	  const elapsed = Date.now() - (s.cycleStartedAtMs || Date.now());
-	  const remain = Math.round(s.targetStopS * 1000 - elapsed);
-	  if(remain <= 0){
-	    requestResultAtAcqTime(s.deviceId, s.channel);
-	    return;
-	  }
-      s.autoTimer = setTimeout(()=>{
-	    requestResultAtAcqTime(s.deviceId, s.channel);
-      }, Math.max(10, remain));
-    }
-
-    function requestResultAtAcqTime(deviceId, channel){
-      const s = getStream(deviceId, channel);
-      if(s.resultRequested) return;
-      s.resultRequested = true;
-      if(s.autoTimer){
-        try { clearTimeout(s.autoTimer); } catch {}
-      }
-      s.autoTimer = null;
-      localActionFor(deviceId, channel, 'localResult').finally(()=>{});
     }
 
     async function localActionFor(deviceId, channel, action){
@@ -2646,7 +2592,7 @@ var indexHTML = `<!doctype html>
           const sel0 = selectedDevice();
           if(sel0){
             didInitialRestore = true;
-            restoreFromBackend(sel0).finally(()=>{ saveUiToBackend(sel0); });
+            restoreFromBackend(sel0);
           }
         }
         renderDebug();
@@ -2717,12 +2663,11 @@ var indexHTML = `<!doctype html>
 
     document.getElementById('start').addEventListener('click', ()=>{
       const sel = selectedDevice();
+      saveUiToBackend(sel);
       if(sel){
         resetStream(sel, Number(chnEl.value || '0'));
         const s = getStream(sel, Number(chnEl.value || '0'));
         s.loopActive = true;
-	applyTargetStopFromUI(s);
-	armAutoResult(s, false);
         draw();
       }
 	  localAction('localStart').finally(()=>{});
@@ -2753,8 +2698,6 @@ var indexHTML = `<!doctype html>
         resetStream(sel, Number(chnEl.value || '0'));
 	    const s = getStream(sel, Number(chnEl.value || '0'));
 	    s.loopActive = true;
-	applyTargetStopFromUI(s);
-	armAutoResult(s, false);
         draw();
       }
 	  localAction('localStart').finally(()=>{});
@@ -2986,7 +2929,7 @@ var indexHTML = `<!doctype html>
         const run = document.getElementById('home-runCountVal');
         if(run) run.textContent = String(loadNmchHistory(sel).length);
         kickFetchNmhcHistory(sel, null, null, true);
-        restoreFromBackend(sel).finally(()=>{ saveUiToBackend(sel); });
+        restoreFromBackend(sel);
       } else {
         statusEl.textContent = '未选择设备（自动）';
       }
@@ -2999,8 +2942,9 @@ var indexHTML = `<!doctype html>
 
     chnEl.addEventListener('change', ()=>{
       const sel = selectedDevice();
+      saveUiToBackend(sel);
       if(sel){
-        restoreSessionOnly(sel).finally(()=>{ saveUiToBackend(sel); });
+        restoreSessionOnly(sel);
       }
       draw();
       renderDebug();
@@ -3008,6 +2952,7 @@ var indexHTML = `<!doctype html>
 
     fullminEl.addEventListener('change', ()=>{
       const sel = selectedDevice();
+      saveUiToBackend(sel);
       if(sel){
         resetStream(sel, Number(chnEl.value || '0'));
       }
@@ -3015,9 +2960,9 @@ var indexHTML = `<!doctype html>
       renderDebug();
     });
 
-    ylowEl.addEventListener('change', ()=>{ draw(); });
-    yhighEl.addEventListener('change', ()=>{ draw(); });
-    autoyEl.addEventListener('change', ()=>{ draw(); });
+    ylowEl.addEventListener('change', ()=>{ saveUiToBackend(selectedDevice()); draw(); });
+    yhighEl.addEventListener('change', ()=>{ saveUiToBackend(selectedDevice()); draw(); });
+    autoyEl.addEventListener('change', ()=>{ saveUiToBackend(selectedDevice()); draw(); });
 
     let backendLastDeviceId = '';
     let didInitialRestore = false;
