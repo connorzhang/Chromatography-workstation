@@ -60,23 +60,21 @@ function Ensure-Putty([string]$dir) {
 }
 
 function Get-HostKey([string]$sshHost, [string]$port) {
-  $tmp = New-TemporaryFile
-  $scan = & ssh-keyscan -p $port -t rsa $sshHost 2>$null
-  if ([string]::IsNullOrWhiteSpace($scan)) { throw "ssh-keyscan failed" }
-  Set-Content -LiteralPath $tmp -Value $scan
-  $fp = & ssh-keygen -lf $tmp -E sha256 2>$null
-  Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
-  $m = [regex]::Match($fp, '(\d+)\s+SHA256:([A-Za-z0-9+/=]+)')
-  if ($m.Success) { return "ssh-rsa $($m.Groups[1].Value) SHA256:$($m.Groups[2].Value)" }
+  $algos = @("ed25519", "rsa")
+  foreach ($algo in $algos) {
+    $scan = & ssh-keyscan -p $port -t $algo $sshHost 2>$null
+    if ([string]::IsNullOrWhiteSpace($scan)) { continue }
+    $tmp = New-TemporaryFile
+    Set-Content -LiteralPath $tmp -Value $scan
+    $fp = & ssh-keygen -lf $tmp -E sha256 2>$null
+    Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+    $m = [regex]::Match($fp, '(\d+)\s+SHA256:([A-Za-z0-9+/=]+)')
+    if (-not $m.Success) { continue }
 
-  $tmp2 = New-TemporaryFile
-  Set-Content -LiteralPath $tmp2 -Value $scan
-  $fp2 = & ssh-keygen -lf $tmp2 -E md5 2>$null
-  Remove-Item -LiteralPath $tmp2 -Force -ErrorAction SilentlyContinue
-  $m2 = [regex]::Match($fp2, '(\d+)\s+MD5:([0-9a-f:]+)')
-  if ($m2.Success) { return "ssh-rsa $($m2.Groups[1].Value) $($m2.Groups[2].Value)" }
-
-  throw "cannot parse host key fingerprint"
+    if ($algo -eq "ed25519") { return "ssh-ed25519 $($m.Groups[1].Value) SHA256:$($m.Groups[2].Value)" }
+    if ($algo -eq "rsa") { return "ssh-rsa $($m.Groups[1].Value) SHA256:$($m.Groups[2].Value)" }
+  }
+  throw "ssh-keyscan failed"
 }
 
 $localBin = Join-Path $root "publish/edge-collector/collector-linux-arm64"
