@@ -99,7 +99,7 @@ function Copy-RemoteDir([string]$srcDir, [string]$dstDir) {
   if ($LASTEXITCODE -ne 0) { throw "pscp failed ($LASTEXITCODE)" }
 }
 
-$stopCmd = "set -e; mkdir -p `"$RemoteDir`"; cd `"$RemoteDir`"; if [ -f collector.pid ]; then kill `$(cat collector.pid) 2>/dev/null || true; rm -f collector.pid; fi"
+$stopCmd = "set -e; mkdir -p `"$RemoteDir`"; cd `"$RemoteDir`"; if [ -f collector.pid ]; then kill -9 `$(cat collector.pid) 2>/dev/null || true; rm -f collector.pid; fi; pkill -9 -f ./collector || true; sleep 1; rm -f collector"
 Run-Remote $stopCmd
 
 Copy-Remote $localBin "$RemoteDir/collector"
