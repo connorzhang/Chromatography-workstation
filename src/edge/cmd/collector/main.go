@@ -2986,6 +2986,17 @@ var indexHTML = `<!doctype html>
     const cycleminEl = document.getElementById('cyclemin');
     const cyclemaxEl = document.getElementById('cyclemax');
 
+    if(cycleminEl){
+      cycleminEl.addEventListener('change', () => {
+        saveUiToBackend(selectedDevice());
+      });
+    }
+    if(cyclemaxEl){
+      cyclemaxEl.addEventListener('change', () => {
+        saveUiToBackend(selectedDevice());
+      });
+    }
+
     let backendLastDeviceId = '';
     let didInitialRestore = false;
     let suppressUiSave = false;
