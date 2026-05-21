@@ -1492,7 +1492,7 @@ var indexHTML = `<!doctype html>
 <body>
   <div class="shell">
     <header class="topbar">
-      <div class="brand">在线监测</div>
+      <div class="brand">在线监测 <span style="font-size:12px;opacity:0.6;margin-left:10px">v0.1.3</span></div>
       <nav class="tabs" id="tabs">
         <button class="tab active" data-tab="overview"><span class="tabIcon">概</span><span class="tabText">概览</span></button>
         <button class="tab" data-tab="curve"><span class="tabIcon">曲</span><span class="tabText">曲线</span></button>
