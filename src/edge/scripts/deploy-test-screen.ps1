@@ -112,5 +112,5 @@ if ($WithData) {
   Copy-RemoteDir $localRun "$RemoteDir/.run"
 }
 
-$startCmd = "set -e; cd `"$RemoteDir`"; chmod +x ./collector; nohup ./collector > collector.log 2>&1 & echo `$! > collector.pid; sleep 1; tail -n 80 collector.log || true"
+$startCmd = "set -e; cd `"$RemoteDir`"; chmod +x ./collector; EDGE_HTTP_BIND=0.0.0.0 nohup ./collector > collector.log 2>&1 & echo `$! > collector.pid; sleep 1; tail -n 80 collector.log || true"
 Run-Remote $startCmd
