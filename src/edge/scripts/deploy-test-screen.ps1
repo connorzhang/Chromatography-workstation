@@ -88,14 +88,17 @@ $hostkey = Get-HostKey $sshHost $port
 
 function Run-Remote([string]$cmd) {
   & $putty.Plink -batch -ssh -P $port -pw $pass -hostkey $hostkey $remote $cmd
+  if ($LASTEXITCODE -ne 0) { throw "plink failed ($LASTEXITCODE)" }
 }
 
 function Copy-Remote([string]$src, [string]$dst) {
   & $putty.Pscp -batch -P $port -pw $pass -hostkey $hostkey $src "${remote}:$dst"
+  if ($LASTEXITCODE -ne 0) { throw "pscp failed ($LASTEXITCODE)" }
 }
 
 function Copy-RemoteDir([string]$srcDir, [string]$dstDir) {
   & $putty.Pscp -batch -r -P $port -pw $pass -hostkey $hostkey $srcDir "${remote}:$dstDir"
+  if ($LASTEXITCODE -ne 0) { throw "pscp failed ($LASTEXITCODE)" }
 }
 
 $stopCmd = "set -e; mkdir -p `"$RemoteDir`"; cd `"$RemoteDir`"; if [ -f collector.pid ]; then kill `$(cat collector.pid) 2>/dev/null || true; rm -f collector.pid; fi"
