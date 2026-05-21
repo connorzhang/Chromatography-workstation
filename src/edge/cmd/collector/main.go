@@ -21,13 +21,18 @@ import (
 
 	"chromatography-workstation/edge/internal/analyzer"
 	v1 "chromatography-workstation/edge/internal/contracts/v1"
+	"chromatography-workstation/edge/internal/modbusslave"
 	"chromatography-workstation/edge/internal/models"
 	"chromatography-workstation/edge/internal/protocol/chromsend143"
 	"chromatography-workstation/edge/internal/protocol/gckc"
 	"chromatography-workstation/edge/internal/realtime"
+	"chromatography-workstation/edge/internal/telemetry"
 )
 
 var startedAt = time.Now().UTC()
+
+var mbSlave *modbusslave.Server
+var mqttClient *telemetry.MqttClient
 
 var runSessionSeq uint64
 
@@ -776,10 +781,49 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	})
 
-	// 3. 历史记录 (复用并扩展已有的 NMHC 逻辑)
+	// 3. 历史记录 (基于 SQLite)
 	mux.HandleFunc("/api/history/results", func(w http.ResponseWriter, r *http.Request) {
-		// 复用 /api/v1/results/nmhc 的逻辑或者重定向
-		http.Redirect(w, r, "/api/v1/results/nmhc?"+r.URL.RawQuery, http.StatusTemporaryRedirect)
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		deviceID := strings.TrimSpace(r.URL.Query().Get("deviceId"))
+		if deviceID == "" {
+			deviceID = uiLastDevice
+		}
+		if deviceID == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "deviceId required"})
+			return
+		}
+		
+		from, err := parseTimeAny(r.URL.Query().Get("from"))
+		if err != nil {
+			// 默认查最近一天
+			from = time.Now().Add(-24 * time.Hour)
+		}
+		to, err := parseTimeAny(r.URL.Query().Get("to"))
+		if err != nil {
+			to = time.Now()
+		}
+		
+		limit := envIntFromQuery(r, "limit", 1000)
+		
+		if pstore != nil {
+			jsons := pstore.LoadResultsFromDB(deviceID, from, to, limit)
+			// 直接将 JSON 字符串数组拼装为 JSON 数组返回
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("["))
+			for i, j := range jsons {
+				if i > 0 {
+					w.Write([]byte(","))
+				}
+				w.Write([]byte(j))
+			}
+			w.Write([]byte("]"))
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "db not ready"})
 	})
 
 	mux.HandleFunc("/api/history/run/", func(w http.ResponseWriter, r *http.Request) {
@@ -1105,34 +1149,62 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			return
 		}
 	})
-	mux.HandleFunc("/api/v1/results/nmhc/export.csv", func(w http.ResponseWriter, r *http.Request) {
+	// CSV 报表导出功能 (基于 SQLite)
+	mux.HandleFunc("/api/history/export.csv", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 		deviceID := strings.TrimSpace(r.URL.Query().Get("deviceId"))
 		if deviceID == "" {
+			deviceID = uiLastDevice
+		}
+		if deviceID == "" {
 			http.Error(w, "deviceId required", http.StatusBadRequest)
 			return
 		}
 		from, err := parseTimeAny(r.URL.Query().Get("from"))
 		if err != nil {
-			http.Error(w, "invalid from", http.StatusBadRequest)
-			return
+			from = time.Now().Add(-24 * time.Hour)
 		}
 		to, err := parseTimeAny(r.URL.Query().Get("to"))
 		if err != nil {
-			http.Error(w, "invalid to", http.StatusBadRequest)
+			to = time.Now()
+		}
+		
+		if pstore == nil {
+			http.Error(w, "db not ready", http.StatusInternalServerError)
 			return
 		}
-		rs := nmhcStore.Query(deviceID, from, to, 5000)
+
+		jsons := pstore.LoadResultsFromDB(deviceID, from, to, 5000)
+		
 		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-		w.Header().Set("Content-Disposition", "attachment; filename=nmhc_"+deviceID+".csv")
-		_, _ = io.WriteString(w, "time,THC,CH4,NMHC\n")
-		for i := 0; i < len(rs); i++ {
-			line := fmt.Sprintf("%s,%.6f,%.6f,%.6f\n", rs[i].TimeRFC3339, rs[i].THC, rs[i].CH4, rs[i].NMHC)
-			_, _ = io.WriteString(w, line)
+		w.Header().Set("Content-Disposition", "attachment; filename=history_"+deviceID+".csv")
+		
+		// 写入 CSV 表头
+		io.WriteString(w, "Time,TraceID,MethodID,Code,Name,Amount,Status\n")
+		
+		for _, j := range jsons {
+			var res models.Result
+			if err := json.Unmarshal([]byte(j), &res); err == nil {
+				// 导出单组分
+				for _, p := range res.Pollutants {
+					line := fmt.Sprintf("%s,%s,%s,%s,%s,%.6f,%s\n", res.CreatedAt, res.TraceID, res.MethodID, p.Code, p.Name, p.Amount, p.Status)
+					io.WriteString(w, line)
+				}
+				// 导出聚合组分
+				for _, g := range res.Groups {
+					line := fmt.Sprintf("%s,%s,%s,%s,%s,%.6f,%s\n", res.CreatedAt, res.TraceID, res.MethodID, g.Code, g.Name, g.Amount, "OK")
+					io.WriteString(w, line)
+				}
+			}
 		}
+	})
+
+	// 原有的 nmhc csv 导出保持兼容 (重定向到新接口)
+	mux.HandleFunc("/api/v1/results/nmhc/export.csv", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/api/history/export.csv?"+r.URL.RawQuery, http.StatusTemporaryRedirect)
 	})
 	mux.HandleFunc("/api/v1/devices", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -1753,6 +1825,23 @@ func finalizeSession(hub *realtime.Hub, st *deviceState, deviceID string, ch int
 				CH4:         ch4,
 				NMHC:        nmhc,
 			})
+			
+			// 同步更新 Modbus 寄存器
+			if mbSlave != nil {
+				mbSlave.UpdateResults(thc, ch4, nmhc)
+			}
+			
+			// 增量上报 MQTT
+			if mqttClient != nil {
+				polls := make(map[string]float64)
+				for _, p := range res.Pollutants {
+					polls[p.Code] = p.Amount
+				}
+				for _, g := range res.Groups {
+					polls[g.Code] = g.Amount
+				}
+				mqttClient.PublishResult(deviceID, e.At, trace.TraceID, polls)
+			}
 		}
 	}
 	hub.Publish(deviceID, e)
@@ -2522,11 +2611,7 @@ var indexHTML = `<!doctype html>
       if(k1) k1.textContent = f4(thc);
       if(k2) k2.textContent = f4(ch4);
       if(k3){
-        if(isFinite(Number(thc)) && isFinite(Number(ch4))){
-          k3.textContent = (Number(thc) - Number(ch4)).toFixed(4);
-        } else {
-          k3.textContent = '-';
-        }
+        k3.textContent = f4(latest ? latest.nmhc : null);
       }
 
       const table = document.getElementById('tbody');
@@ -2539,11 +2624,7 @@ var indexHTML = `<!doctype html>
           if(name === '总烃') tds[1].textContent = f4(thc);
           if(name === '甲烷') tds[1].textContent = f4(ch4);
           if(name === '非甲烷总烃'){
-            if(isFinite(Number(thc)) && isFinite(Number(ch4))){
-              tds[1].textContent = (Number(thc) - Number(ch4)).toFixed(4);
-            } else {
-              tds[1].textContent = '-';
-            }
+            tds[1].textContent = f4(latest ? latest.nmhc : null);
           }
         }
       }

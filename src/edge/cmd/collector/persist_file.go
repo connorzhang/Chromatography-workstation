@@ -2,11 +2,15 @@ package main
 
 import (
 	"bufio"
+	"database/sql"
 	"encoding/json"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
+
+	_ "modernc.org/sqlite"
 
 	"chromatography-workstation/edge/internal/models"
 )
@@ -15,6 +19,7 @@ type persistStore struct {
 	mu   sync.Mutex
 	root string
 	kv   map[string]string
+	db   *sql.DB
 }
 
 func openPersistStore(root string) (*persistStore, error) {
@@ -22,12 +27,40 @@ func openPersistStore(root string) (*persistStore, error) {
 		root = filepath.Join(".run", "db")
 	}
 	_ = os.MkdirAll(root, 0o755)
-	st := &persistStore{root: root, kv: map[string]string{}}
+	
+	// 初始化 SQLite 数据库
+	dbPath := filepath.Join(root, "history.sqlite")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		return nil, err
+	}
+	
+	// 创建历史结果表
+	createTableSQL := `
+	CREATE TABLE IF NOT EXISTS results (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		trace_id TEXT NOT NULL,
+		device_id TEXT NOT NULL,
+		created_at DATETIME NOT NULL,
+		method_id TEXT,
+		result_json TEXT NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_results_device_time ON results(device_id, created_at);
+	`
+	if _, err := db.Exec(createTableSQL); err != nil {
+		log.Printf("create table failed: %v", err)
+	}
+
+	st := &persistStore{root: root, kv: map[string]string{}, db: db}
 	st.loadKVLocked()
 	return st, nil
 }
 
-func (s *persistStore) Close() {}
+func (s *persistStore) Close() {
+	if s.db != nil {
+		s.db.Close()
+	}
+}
 
 func (s *persistStore) kvPath() string {
 	return filepath.Join(s.root, "kv.json")
@@ -150,7 +183,40 @@ func (s *persistStore) SaveResult(deviceID string, channel int, payload any) {
 	_ = os.WriteFile(filepath.Join(path, "ch"+itoa(channel)+".json"), b, 0o644)
 }
 
-func (s *persistStore) LoadResult(deviceID string, channel int) (map[string]any, bool) {
+func (s *persistStore) SaveResultToDB(deviceID string, traceID string, createdAt time.Time, methodID string, resultJSON string) {
+	if s.db == nil {
+		return
+	}
+	query := `INSERT INTO results (trace_id, device_id, created_at, method_id, result_json) VALUES (?, ?, ?, ?, ?)`
+	_, err := s.db.Exec(query, traceID, deviceID, createdAt.UTC(), methodID, resultJSON)
+	if err != nil {
+		log.Printf("SaveResultToDB error: %v", err)
+	}
+}
+
+func (s *persistStore) LoadResultsFromDB(deviceID string, from time.Time, to time.Time, limit int) []string {
+	if s.db == nil {
+		return nil
+	}
+	query := `SELECT result_json FROM results WHERE device_id = ? AND created_at >= ? AND created_at <= ? ORDER BY created_at DESC LIMIT ?`
+	rows, err := s.db.Query(query, deviceID, from.UTC(), to.UTC(), limit)
+	if err != nil {
+		log.Printf("LoadResultsFromDB query error: %v", err)
+		return nil
+	}
+	defer rows.Close()
+
+	var results []string
+	for rows.Next() {
+		var r string
+		if err := rows.Scan(&r); err == nil {
+			results = append(results, r)
+		}
+	}
+	return results
+}
+
+func (s *persistStore) LoadResult(deviceID string, ch int) (map[string]any, bool) {
 	if deviceID == "" {
 		return nil, false
 	}

@@ -51,6 +51,10 @@ func schedulerTick(hub *realtime.Hub, states *sync.Map, method v1.Method) {
 			
 			timeSinceStart := time.Since(started)
 
+			// 0. 外部事件时间程序调度 (Cmd 10 / Cmd 101 / 多位阀)
+			// TODO: 后续可以精确按秒级对比当前进样时间与事件配置表，进行继电器下发
+			// 目前仅占位
+
 			// 1. Check if we need to stop acquisition / generate results
 			if !snapshotDone && timeSinceStart >= acqDur {
 				// AcqMin reached: perform snapshot and result calculation
