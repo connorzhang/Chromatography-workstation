@@ -1815,17 +1815,6 @@ var indexHTML = `<!doctype html>
       loopEl.addEventListener('change', saveLoop);
     }
     
-    if(cycleminEl){
-      cycleminEl.addEventListener('change', () => {
-        saveUiToBackend(selectedDevice());
-      });
-    }
-    if(cyclemaxEl){
-      cyclemaxEl.addEventListener('change', () => {
-        saveUiToBackend(selectedDevice());
-      });
-    }
-
     const homeStatusEl = document.getElementById('home-status');
     const homeClockEl = document.getElementById('home-clock');
     const homeInjectEl = document.getElementById('home-inject');
