@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -220,7 +221,7 @@ func (s *persistStore) LoadResult(deviceID string, ch int) (map[string]any, bool
 	if deviceID == "" {
 		return nil, false
 	}
-	b, err := os.ReadFile(filepath.Join(s.root, "result", deviceID, "ch"+itoa(channel)+".json"))
+	b, err := os.ReadFile(filepath.Join(s.root, "result", deviceID, "ch"+strconv.Itoa(ch)+".json"))
 	if err != nil {
 		return nil, false
 	}

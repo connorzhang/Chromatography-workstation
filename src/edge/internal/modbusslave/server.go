@@ -1,7 +1,6 @@
 package modbusslave
 
 import (
-	"encoding/binary"
 	"log"
 	"math"
 	"sync"

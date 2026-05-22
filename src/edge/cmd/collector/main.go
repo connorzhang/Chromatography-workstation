@@ -799,17 +799,19 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 		from, err := parseTimeAny(r.URL.Query().Get("from"))
 		if err != nil {
 			// 默认查最近一天
-			from = time.Now().Add(-24 * time.Hour)
+			fromVal := time.Now().Add(-24 * time.Hour)
+			from = &fromVal
 		}
 		to, err := parseTimeAny(r.URL.Query().Get("to"))
 		if err != nil {
-			to = time.Now()
+			toVal := time.Now()
+			to = &toVal
 		}
 		
 		limit := envIntFromQuery(r, "limit", 1000)
 		
 		if pstore != nil {
-			jsons := pstore.LoadResultsFromDB(deviceID, from, to, limit)
+			jsons := pstore.LoadResultsFromDB(deviceID, *from, *to, limit)
 			// 直接将 JSON 字符串数组拼装为 JSON 数组返回
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
@@ -1165,11 +1167,13 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 		}
 		from, err := parseTimeAny(r.URL.Query().Get("from"))
 		if err != nil {
-			from = time.Now().Add(-24 * time.Hour)
+			fromVal := time.Now().Add(-24 * time.Hour)
+			from = &fromVal
 		}
 		to, err := parseTimeAny(r.URL.Query().Get("to"))
 		if err != nil {
-			to = time.Now()
+			toVal := time.Now()
+			to = &toVal
 		}
 		
 		if pstore == nil {
@@ -1177,7 +1181,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			return
 		}
 
-		jsons := pstore.LoadResultsFromDB(deviceID, from, to, 5000)
+		jsons := pstore.LoadResultsFromDB(deviceID, *from, *to, 5000)
 		
 		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 		w.Header().Set("Content-Disposition", "attachment; filename=history_"+deviceID+".csv")
@@ -1186,7 +1190,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 		io.WriteString(w, "Time,TraceID,MethodID,Code,Name,Amount,Status\n")
 		
 		for _, j := range jsons {
-			var res models.Result
+			var res v1.Result
 			if err := json.Unmarshal([]byte(j), &res); err == nil {
 				// 导出单组分
 				for _, p := range res.Pollutants {
@@ -1918,12 +1922,11 @@ func loadMethod() v1.Method {
 	b, err := os.ReadFile(path)
 	if err == nil {
 		var m v1.Method
-		if json.Unmarshal(b, &m) == nil && m.Schema != "" {
+		if json.Unmarshal(b, &m) == nil && m.MethodID != "" {
 			return m
 		}
 	}
 	return v1.Method{
-		Schema:   "voc-method.v1",
 		MethodID: "default",
 		Version:  1,
 		Pollutants: []v1.PollutantSpec{
