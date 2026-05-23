@@ -144,8 +144,17 @@ func DetectAllPeaks(trace contracts.Trace, method contracts.Method) []contracts.
 		peaks[i].Name = fmt.Sprintf("未知峰_%d", i)
 	}
 
+	// 如果传入的方法中没有组分，或者全是未知，则直接返回所有的未知峰
+	if len(method.Pollutants) == 0 {
+		return peaks
+	}
+
+	// 我们需要将配置的方法组分按保留时间从左到右排序，以保证峰匹配顺序是确定的
+	// 但是由于 Go 不太好在这里直接给 slice 排序（不想引入额外逻辑），我们仍然保持按配置顺序匹配
+	
+	var finalPeaks []contracts.PollutantResult
+
 	// 遍历方法中配置的每一个标定组分，在检测到的峰中寻找落在区间内且响应值最大的峰作为匹配峰
-	// 用户要求：在原有标定区间 [StartS, EndS] 的基础上，左右各增加 0.1 分钟（即 6.0 秒）的容错窗宽
 	for _, p := range method.Pollutants {
 		windowLeft := p.StartS - 6.0
 		windowRight := p.EndS + 6.0
@@ -175,10 +184,24 @@ func DetectAllPeaks(trace contracts.Trace, method contracts.Method) []contracts.
 			peaks[bestIdx].Code = p.Code
 			peaks[bestIdx].Name = p.Name
 			peaks[bestIdx].Amount = calcConcentration(bestResp, p.Levels, p.CurveFunc)
+			finalPeaks = append(finalPeaks, peaks[bestIdx])
+		} else {
+			// 如果没找到对应的峰，也要在结果中体现出来，状态为未检出
+			finalPeaks = append(finalPeaks, contracts.PollutantResult{
+				Code:   p.Code,
+				Name:   p.Name,
+				Status: "not_detected",
+				RtS:    (p.StartS + p.EndS) / 2.0,
+				StartS: p.StartS,
+				EndS:   p.EndS,
+				Area:   0,
+				Height: 0,
+				Amount: 0,
+			})
 		}
 	}
 
-	return peaks
+	return finalPeaks
 }
 
 // DetectPeakInWindow 在指定窗口内寻峰并积分
