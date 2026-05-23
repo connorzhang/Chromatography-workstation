@@ -33,8 +33,11 @@ export function initReport() {
         const now = new Date();
         const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
         
-        // Format to YYYY-MM-DDThh:mm
-        const formatDt = (d) => d.toISOString().slice(0, 16);
+        // Format to local YYYY-MM-DDThh:mm
+        const formatDt = (d) => {
+            const pad = (n) => n.toString().padStart(2, '0');
+            return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        };
         
         document.getElementById('report-from').value = formatDt(yesterday);
         document.getElementById('report-to').value = formatDt(now);

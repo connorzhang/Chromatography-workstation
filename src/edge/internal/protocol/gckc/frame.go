@@ -56,7 +56,8 @@ func Decode(frame []byte) (Frame, error) {
 		return Frame{}, errors.New("crc mismatch")
 	}
 	devRaw := body[:16]
-	devRaw = bytes.TrimRight(devRaw, "\x00")
+	// 兼容真实硬件可能填充 \x00 或者 空格 的情况
+	devRaw = bytes.TrimRight(devRaw, "\x00 ")
 	seq := binary.BigEndian.Uint16(body[16:18])
 	cmd := body[18]
 	payload := body[19:]

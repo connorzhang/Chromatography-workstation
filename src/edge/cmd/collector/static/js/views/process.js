@@ -359,10 +359,8 @@ export function initProcess() {
                     deviceIdQuery = `deviceId=${encodeURIComponent(devices[0].deviceId)}&`;
                 }
 
-                // Get the latest history result
-                const from = new Date(Date.now() - 24*3600*1000).toISOString(); 
-                const to = new Date().toISOString();
-                const res = await fetch(`/api/history/results?${deviceIdQuery}from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&limit=1`);
+                // Get the latest history result without time boundary (let backend find the absolute latest)
+                const res = await fetch(`/api/history/results?${deviceIdQuery}limit=1`);
                 const data = await res.json();
                 if (!data || data.length === 0) {
                     window.showToast('暂无最近的历史数据', true);      

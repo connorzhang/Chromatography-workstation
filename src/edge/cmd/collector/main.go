@@ -856,13 +856,14 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 
 		from, err := parseTimeAny(r.URL.Query().Get("from"))
 		if err != nil || from == nil {
-			// 榛樿鏌ユ渶杩戜竴澶?
-			fromVal := time.Now().Add(-24 * time.Hour)
+			// 如果前端没有传 from，为了能捞到最新的记录（防止断电系统时间错误），我们默认放开 from 限制
+			fromVal := time.Time{}
 			from = &fromVal
 		}
 		to, err := parseTimeAny(r.URL.Query().Get("to"))
 		if err != nil || to == nil {
-			toVal := time.Now()
+			// 如果没有传 to，默认放开到未来
+			toVal := time.Now().Add(365 * 24 * time.Hour)
 			to = &toVal
 		}
 
@@ -1188,7 +1189,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 		if preferCh > 7 {
 			preferCh = 7
 		}
-		
+
 		attachResult := func(out map[string]any, ch int, st *deviceState) {
 			if st != nil && st.lastResultByCh != nil {
 				if lr, ok := st.lastResultByCh[ch]; ok && lr.at.Unix() > 0 {
@@ -1646,6 +1647,10 @@ func processFrame(c net.Conn, f gckc.Frame, hub *realtime.Hub, states *sync.Map,
 	}
 
 	for _, parsed := range parsedAll {
+		// 恢复最原始的、完全正确的逻辑：
+		// 实际上，硬件协议里的 freqByte 是 (采样率 / 10)。
+		// 比如 50Hz 的采样率，freqByte 就是 5。所以 parsed.Freq10 (freqByte * 10) 就是真实的 50Hz！
+		// 那么每个点的时间间隔就是 dtS = 1.0 / 50.0 = 0.02 秒。
 		dtS := 1.0 / float64(parsed.Freq10)
 		st.mu.Lock()
 		if st.lastTS == nil {
@@ -1762,7 +1767,7 @@ func finalizeSession(hub *realtime.Hub, st *deviceState, deviceID string, ch int
 	// 每次分析时实时获取最新的方法（包含最新的校准参数）
 	activeMethod := getActiveMethod()
 	res, err := analyzer.Analyze(trace, activeMethod, "dev", time.Now())
-	e := resultEvent{Type: "result", DeviceID: deviceID, Channel: ch, SessionToken: tok, At: time.Now(), Trace: trace, Method: method}
+	e := resultEvent{Type: "result", DeviceID: deviceID, Channel: ch, SessionToken: tok, At: time.Now(), Trace: trace, Method: activeMethod}
 	if err != nil {
 		log.Printf("Analyze error 1: %v", err)
 		e.Error = err.Error()
@@ -1782,7 +1787,7 @@ func finalizeSession(hub *realtime.Hub, st *deviceState, deviceID string, ch int
 			// Save to SQLite History and Disk
 			resBytes, _ := json.Marshal(map[string]any{"device_id": deviceID, "trace_id": trace.TraceID, "created_at": e.At.UTC().Format(time.RFC3339), "result": res})
 			runBytes, _ := json.Marshal(map[string]any{"trace_id": trace.TraceID, "samples": trace.Values, "pollutants": res.Pollutants})
-			pstore.SaveResultToDB(deviceID, trace.TraceID, e.At.UTC(), method.MethodID, string(resBytes), runBytes)
+			pstore.SaveResultToDB(deviceID, trace.TraceID, e.At.UTC(), activeMethod.MethodID, string(resBytes), runBytes)
 		}
 		if thc, ch4, nmhc, ok := extractNMHC(res); ok {
 			nmhcStore.Add(nmhcRecord{
@@ -1840,8 +1845,8 @@ func publishSessionResultSnapshot(hub *realtime.Hub, st *deviceState, deviceID s
 		Values:    snap.Values,
 	}
 
-	e := resultEvent{Type: "result", DeviceID: deviceID, Channel: ch, SessionToken: tok, At: time.Now().UTC(), Trace: trace, Method: method}
 	activeMethod := getActiveMethod()
+	e := resultEvent{Type: "result", DeviceID: deviceID, Channel: ch, SessionToken: tok, At: time.Now().UTC(), Trace: trace, Method: activeMethod}
 	res, err := analyzer.Analyze(trace, activeMethod, deviceID, time.Now())
 	if err != nil {
 		log.Printf("Analyze error 2: %v", err)
@@ -1856,7 +1861,13 @@ func publishSessionResultSnapshot(hub *realtime.Hub, st *deviceState, deviceID s
 		st.lastResultByCh[ch] = lastResult{token: tok, at: e.At.UTC(), res: res}
 		st.mu.Unlock()
 		if pstore != nil {
+			// Save the latest result for UI summary
 			pstore.SaveResult(deviceID, ch, map[string]any{"deviceId": deviceID, "channel": ch, "sessionToken": tok, "at": e.At.UTC().Format(time.RFC3339), "result": res})
+
+			// Save to SQLite History and Disk
+			resBytes, _ := json.Marshal(map[string]any{"device_id": deviceID, "trace_id": trace.TraceID, "created_at": e.At.UTC().Format(time.RFC3339), "result": res})
+			runBytes, _ := json.Marshal(map[string]any{"trace_id": trace.TraceID, "samples": trace.Values, "pollutants": res.Pollutants})
+			pstore.SaveResultToDB(deviceID, trace.TraceID, e.At.UTC(), activeMethod.MethodID, string(resBytes), runBytes)
 		}
 		if thc, ch4, nmhc, ok := extractNMHC(res); ok {
 			nmhcStore.Add(nmhcRecord{
@@ -1867,6 +1878,23 @@ func publishSessionResultSnapshot(hub *realtime.Hub, st *deviceState, deviceID s
 				CH4:         ch4,
 				NMHC:        nmhc,
 			})
+
+			// 同步更新 Modbus 寄存器
+			if mbSlave != nil {
+				mbSlave.UpdateFullResult(res)
+			}
+
+			// 增量上报 MQTT
+			if mqttClient != nil {
+				polls := make(map[string]float64)
+				for _, p := range res.Pollutants {
+					polls[p.Code] = p.Amount
+				}
+				for _, g := range res.Groups {
+					polls[g.Code] = g.Amount
+				}
+				mqttClient.PublishResult(deviceID, e.At, trace.TraceID, polls)
+			}
 		}
 	}
 	hub.Publish(deviceID, e)

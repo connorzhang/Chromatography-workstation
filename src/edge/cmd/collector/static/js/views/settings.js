@@ -2,6 +2,12 @@ export function initSettings() {
     const container = document.getElementById('view-settings');
     container.innerHTML = `
         <div class="control-group">
+            <h3>时间设定 (Cmd 23)</h3>
+            采集时间(AcqMin): <input type="number" id="set-time-acq" class="input" value="2" style="width: 80px;"> min
+            循环周期(CycleMin): <input type="number" id="set-time-cycle" class="input" value="2" style="width: 80px;"> min
+            <button class="btn" id="btn-apply-time">保存设定</button>
+        </div>
+        <div class="control-group">
             <h3>温度设定 (Cmd 8)</h3>
             进样口(Inj1): <input type="number" id="set-temp-inj" class="input" value="120" style="width: 80px;"> ℃
             柱温箱(Col): <input type="number" id="set-temp-col" class="input" value="80" style="width: 80px;"> ℃
@@ -22,6 +28,52 @@ export function initSettings() {
     `;
 
     setTimeout(() => {
+        // 加载初始设置
+        fetch('/api/v1/devices')
+            .then(res => res.json())
+            .then(data => {
+                if(data && data.length > 0) {
+                    const devId = data[0].deviceId;
+                    fetch('/api/v1/ui?deviceId=' + encodeURIComponent(devId))
+                        .then(r => r.json())
+                        .then(ui => {
+                            if (ui && ui.acqMin) document.getElementById('set-time-acq').value = ui.acqMin;
+                            if (ui && ui.cycleMin) document.getElementById('set-time-cycle').value = ui.cycleMin;
+                        }).catch(e => console.error(e));
+                }
+            }).catch(e => console.error(e));
+
+        document.getElementById('btn-apply-time').addEventListener('click', async () => {
+            const acq = parseFloat(document.getElementById('set-time-acq').value) || 2;
+            const cycle = parseFloat(document.getElementById('set-time-cycle').value) || 2;
+            
+            try {
+                // Get current deviceId
+                const devRes = await fetch('/api/v1/devices');
+                const devices = await devRes.json();
+                const deviceId = (devices && devices.length > 0) ? devices[0].deviceId : "DEV001";
+
+                const res = await fetch('/api/v1/ui', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ 
+                        deviceId: deviceId,
+                        acqMin: acq,
+                        cycleMin: cycle,
+                        loop: true
+                    })
+                });
+                const data = await res.json();
+                if(res.ok) {
+                    window.showToast('时间设定已保存!');
+                } else {
+                    window.showToast('保存失败: ' + data.error, true);
+                }
+            } catch(e) {
+                window.showToast('异常: ' + e.message, true);
+            }
+        });
+
         document.getElementById('btn-apply-temp').addEventListener('click', async () => {
             const inj = parseFloat(document.getElementById('set-temp-inj').value) || 0;
             const col = parseFloat(document.getElementById('set-temp-col').value) || 0;

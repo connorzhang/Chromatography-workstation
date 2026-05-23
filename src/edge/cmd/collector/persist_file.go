@@ -189,7 +189,7 @@ func (s *persistStore) SaveResultToDB(deviceID string, traceID string, createdAt
 		return
 	}
 	query := `INSERT INTO results (trace_id, device_id, created_at, method_id, result_json) VALUES (?, ?, ?, ?, ?)`
-	_, err := s.db.Exec(query, traceID, deviceID, createdAt.UTC(), methodID, resultJSON)
+	_, err := s.db.Exec(query, traceID, deviceID, createdAt.UTC().Format(time.RFC3339), methodID, resultJSON)
 	if err != nil {
 		log.Printf("SaveResultToDB error: %v", err)
 	}
@@ -220,11 +220,22 @@ func (s *persistStore) LoadResultsFromDB(deviceID string, from time.Time, to tim
 	var err error
 
 	if deviceID != "" {
-		query = `SELECT trace_id, device_id, created_at, result_json FROM results WHERE device_id = ? AND created_at >= ? AND created_at <= ? ORDER BY created_at DESC LIMIT ?`
-		rows, err = s.db.Query(query, deviceID, from.UTC(), to.UTC(), limit)
+		// 如果前端传了极大的范围（如1970年），说明是想无条件查询最新的一条记录
+		if from.Year() <= 1 {
+			query = `SELECT trace_id, device_id, created_at, result_json FROM results WHERE device_id = ? ORDER BY rowid DESC LIMIT ?`
+			rows, err = s.db.Query(query, deviceID, limit)
+		} else {
+			query = `SELECT trace_id, device_id, created_at, result_json FROM results WHERE device_id = ? AND created_at >= ? AND created_at <= ? ORDER BY rowid DESC LIMIT ?`
+			rows, err = s.db.Query(query, deviceID, from.UTC().Format(time.RFC3339), to.UTC().Format(time.RFC3339), limit)
+		}
 	} else {
-		query = `SELECT trace_id, device_id, created_at, result_json FROM results WHERE created_at >= ? AND created_at <= ? ORDER BY created_at DESC LIMIT ?`
-		rows, err = s.db.Query(query, from.UTC(), to.UTC(), limit)
+		if from.Year() <= 1 {
+			query = `SELECT trace_id, device_id, created_at, result_json FROM results WHERE 1=1 ORDER BY rowid DESC LIMIT ?`
+			rows, err = s.db.Query(query, limit)
+		} else {
+			query = `SELECT trace_id, device_id, created_at, result_json FROM results WHERE created_at >= ? AND created_at <= ? ORDER BY rowid DESC LIMIT ?`
+			rows, err = s.db.Query(query, from.UTC().Format(time.RFC3339), to.UTC().Format(time.RFC3339), limit)
+		}
 	}
 
 	if err != nil {
@@ -236,15 +247,13 @@ func (s *persistStore) LoadResultsFromDB(deviceID string, from time.Time, to tim
 	var results []string
 	for rows.Next() {
 		var traceID, devID string
-		var createdAt time.Time
+		var createdAtStr string
 		var resJSON string
-		if err := rows.Scan(&traceID, &devID, &createdAt, &resJSON); err == nil {
-			// 组装成包含元数据的 JSON
-			// 注意：resJSON 是原始结果字符串，我们需要把它嵌进去
+		if err := rows.Scan(&traceID, &devID, &createdAtStr, &resJSON); err == nil {
 			rowObj := map[string]interface{}{
 				"trace_id":   traceID,
 				"device_id":  devID,
-				"created_at": createdAt.Format(time.RFC3339),
+				"created_at": createdAtStr,
 			}
 
 			// 将 resJSON 解析回 map，以便重新打包
