@@ -60,6 +60,8 @@ function Ensure-Putty([string]$dir) {
 }
 
 function Get-HostKey([string]$sshHost, [string]$port) {
+  $oldPref = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
   $algos = @("ed25519", "rsa")
   foreach ($algo in $algos) {
     $scan = & ssh-keyscan -p $port -t $algo $sshHost 2>$null
@@ -71,9 +73,11 @@ function Get-HostKey([string]$sshHost, [string]$port) {
     $m = [regex]::Match($fp, '(\d+)\s+SHA256:([A-Za-z0-9+/=]+)')
     if (-not $m.Success) { continue }
 
+    $ErrorActionPreference = $oldPref
     if ($algo -eq "ed25519") { return "ssh-ed25519 $($m.Groups[1].Value) SHA256:$($m.Groups[2].Value)" }
     if ($algo -eq "rsa") { return "ssh-rsa $($m.Groups[1].Value) SHA256:$($m.Groups[2].Value)" }
   }
+  $ErrorActionPreference = $oldPref
   throw "ssh-keyscan failed"
 }
 
@@ -85,21 +89,22 @@ $putty = Ensure-Putty (Join-Path $root "src/edge/.run/tools/putty")
 $hostkey = Get-HostKey $sshHost $port
 
 function Run-Remote([string]$cmd) {
-  & $putty.Plink -batch -ssh -P $port -pw $pass -hostkey $hostkey $remote $cmd
+  Write-Host "Running: $cmd"
+  & $putty.Plink -batch -ssh -P $port -pw $pass $remote $cmd
   if ($LASTEXITCODE -ne 0) { throw "plink failed ($LASTEXITCODE)" }
 }
 
 function Copy-Remote([string]$src, [string]$dst) {
-  & $putty.Pscp -batch -P $port -pw $pass -hostkey $hostkey $src "${remote}:$dst"
+  "" | & $putty.Pscp -batch -P $port -pw $pass $src "${remote}:$dst"
   if ($LASTEXITCODE -ne 0) { throw "pscp failed ($LASTEXITCODE)" }
 }
 
 function Copy-RemoteDir([string]$srcDir, [string]$dstDir) {
-  & $putty.Pscp -batch -r -P $port -pw $pass -hostkey $hostkey $srcDir "${remote}:$dstDir"
+  "" | & $putty.Pscp -batch -r -P $port -pw $pass $srcDir "${remote}:$dstDir"
   if ($LASTEXITCODE -ne 0) { throw "pscp failed ($LASTEXITCODE)" }
 }
 
-$stopCmd = "set -e; mkdir -p `"$RemoteDir`"; cd `"$RemoteDir`"; if [ -f collector.pid ]; then kill -9 `$(cat collector.pid) 2>/dev/null || true; rm -f collector.pid; fi; pkill -9 -f ./collector || true; sleep 1; rm -f collector"
+$stopCmd = "set -e; mkdir -p `"$RemoteDir`"; cd `"$RemoteDir`"; if [ -f collector.pid ]; then kill -9 `$(cat collector.pid) 2>/dev/null || true; rm -f collector.pid; fi; killall -9 collector 2>/dev/null || true; sleep 1; rm -f collector"
 Run-Remote $stopCmd
 
 Copy-Remote $localBin "$RemoteDir/collector"
@@ -110,5 +115,5 @@ if ($WithData) {
   Copy-RemoteDir $localRun "$RemoteDir/.run"
 }
 
-$startCmd = "set -e; cd `"$RemoteDir`"; chmod +x ./collector; EDGE_HTTP_BIND=0.0.0.0 nohup ./collector > collector.log 2>&1 & echo `$! > collector.pid; sleep 1; tail -n 80 collector.log || true"
+$startCmd = "set -e; cd `"$RemoteDir`"; chmod +x ./collector; EDGE_HTTP_BIND=0.0.0.0 EDGE_ALLOW_CONTROL=1 nohup ./collector > collector.log 2>&1 & echo `$! > collector.pid; sleep 1; tail -n 80 collector.log || true"
 Run-Remote $startCmd

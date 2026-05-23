@@ -40,13 +40,8 @@ func Analyze(trace contracts.Trace, method contracts.Method, gitSHA string, now 
 		},
 	}
 
-	for _, p := range method.Pollutants {
-		r, err := analyzeOne(trace, p)
-		if err != nil {
-			return contracts.Result{}, err
-		}
-		out.Pollutants = append(out.Pollutants, r)
-	}
+	// 统一使用全局盲寻峰逻辑
+	out.Pollutants = DetectAllPeaks(trace, method)
 
 	// 计算峰分组聚合逻辑
 	for _, g := range method.Groups {

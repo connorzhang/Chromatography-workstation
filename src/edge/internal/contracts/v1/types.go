@@ -76,6 +76,8 @@ type PollutantResult struct {
 	Name   string  `json:"name"`
 	Status string  `json:"status"`
 	RtS    float64 `json:"rtS"`
+	StartS float64 `json:"startS"` // 峰起点时间 (秒)
+	EndS   float64 `json:"endS"`   // 峰终点时间 (秒)
 	Area   float64 `json:"area"`
 	Height float64 `json:"height"`
 	Amount float64 `json:"amount"` // 计算出的浓度

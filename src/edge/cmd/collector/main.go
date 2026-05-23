@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,6 +30,9 @@ import (
 	"chromatography-workstation/edge/internal/telemetry"
 )
 
+//go:embed static/*
+var staticFS embed.FS
+
 var startedAt = time.Now().UTC()
 
 var mbSlave *modbusslave.Server
@@ -37,15 +41,15 @@ var mqttClient *telemetry.MqttClient
 var runSessionSeq uint64
 
 type deviceState struct {
-	mu       sync.Mutex
-	lastTS   map[int]float64
-	lastSeen time.Time
-	lastCmd  byte
-	cmdCnt   map[byte]uint64
-	conn     net.Conn
-	seq      uint32
-	last143  time.Time
-	sessions map[int]*runSession
+	mu             sync.Mutex
+	lastTS         map[int]float64
+	lastSeen       time.Time
+	lastCmd        byte
+	cmdCnt         map[byte]uint64
+	conn           net.Conn
+	seq            uint32
+	last143        time.Time
+	sessions       map[int]*runSession
 	lastResultByCh map[int]lastResult
 }
 
@@ -56,13 +60,13 @@ type lastResult struct {
 }
 
 type runSession struct {
-	token      string
-	active     bool
-	startedAt  time.Time
+	token        string
+	active       bool
+	startedAt    time.Time
 	snapshotDone bool
-	dtS        float64
-	values     []float64
-	lastSample float64
+	dtS          float64
+	values       []float64
+	lastSample   float64
 }
 
 func newRunSession() *runSession {
@@ -75,11 +79,11 @@ type event struct {
 	DeviceID string    `json:"deviceId"`
 	At       time.Time `json:"at"`
 
-	Channel       int       `json:"channel"`
-	SessionToken  string    `json:"sessionToken"`
-	DTs           float64   `json:"dtS"`
-	T0s           float64   `json:"t0S"`
-	Values        []float64 `json:"values"`
+	Channel      int       `json:"channel"`
+	SessionToken string    `json:"sessionToken"`
+	DTs          float64   `json:"dtS"`
+	T0s          float64   `json:"t0S"`
+	Values       []float64 `json:"values"`
 }
 
 type sessionSnapshot struct {
@@ -256,17 +260,30 @@ func extractNMHC(res v1.Result) (thc, ch4, nmhc float64, ok bool) {
 		p := res.Pollutants[i]
 		switch p.Code {
 		case "THC":
-			thc = p.Height
+			thc = p.Amount
 			thcOK = true
 		case "CH4":
-			ch4 = p.Height
+			ch4 = p.Amount
 			ch4OK = true
 		}
 	}
 	if !thcOK || !ch4OK {
 		return 0, 0, 0, false
 	}
-	return thc, ch4, thc - ch4, true
+
+	// 从 Groups 中提取计算好的 NMHC
+	var nmhcOK bool
+	for _, g := range res.Groups {
+		if g.Code == "NMHC" {
+			nmhc = g.Amount
+			nmhcOK = true
+			break
+		}
+	}
+	if !nmhcOK {
+		nmhc = thc - ch4
+	}
+	return thc, ch4, nmhc, true
 }
 
 var nmhcStore = newNMHCHistoryStore(filepath.Join(".run", "results_nmch.jsonl"))
@@ -300,15 +317,15 @@ func defaultUIState(deviceID string) uiState {
 }
 
 type resultEvent struct {
-	Type     string    `json:"type"`
-	DeviceID string    `json:"deviceId"`
-	Channel  int       `json:"channel"`
-	SessionToken string `json:"sessionToken"`
-	At       time.Time `json:"at"`
-	Result   v1.Result `json:"result"`
-	Trace    v1.Trace  `json:"trace"`
-	Method   v1.Method `json:"method"`
-	Error    string    `json:"error,omitempty"`
+	Type         string    `json:"type"`
+	DeviceID     string    `json:"deviceId"`
+	Channel      int       `json:"channel"`
+	SessionToken string    `json:"sessionToken"`
+	At           time.Time `json:"at"`
+	Result       v1.Result `json:"result"`
+	Trace        v1.Trace  `json:"trace"`
+	Method       v1.Method `json:"method"`
+	Error        string    `json:"error,omitempty"`
 }
 
 type telemetryEvent struct {
@@ -449,6 +466,25 @@ func main() {
 	cfg := chromsend143.Config{ShuaiJian1: 1, ShuaiJian2: 1, ShuaiJian3: 1}
 	method := loadMethod()
 	nmhcStore.Load()
+
+	// Initialize Modbus Server
+	mbDeviceID := os.Getenv("EDGE_MODBUS_DEVICE_ID")
+	if mbDeviceID == "" {
+		mbDeviceID = "69000000001ABCDEFG123456"
+	}
+	mbRTUPort := os.Getenv("EDGE_MODBUS_RTU_PORT") // e.g. COM1 or /dev/ttyUSB0
+	if srv, err := modbusslave.NewServer(1502, mbDeviceID, mbRTUPort); err == nil {
+		mbSlave = srv
+		go func() {
+			log.Printf("Starting Modbus TCP (1502) and RTU (%s)", mbRTUPort)
+			if err := mbSlave.Start(); err != nil {
+				log.Printf("Modbus slave failed: %v", err)
+			}
+		}()
+	} else {
+		log.Printf("Failed to init Modbus slave: %v", err)
+	}
+
 	if ps, err := openPersistStore(filepath.Join(".run", "db")); err == nil {
 		pstore = ps
 		if v, ok := ps.LoadLastDeviceID(); ok {
@@ -499,10 +535,10 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "startedAt": startedAt.Format(time.RFC3339)})
 	})
-	
-	// --- 新版 API_DESIGN 约定的 RESTful 接口 ---
-	
-	// 1. 分析方法与校准
+
+	// --- 鏂扮増 API_DESIGN 绾﹀畾鐨?RESTful 鎺ュ彛 ---
+
+	// 1. 鍒嗘瀽鏂规硶涓庢牎鍑?
 	mux.HandleFunc("/api/method", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -512,7 +548,17 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 					return
 				}
 			}
-			writeJSON(w, http.StatusOK, map[string]any{"error": "method not found"})
+			// Return a default method if not found
+			defaultMethod := models.Method{
+				ID:   "default",
+				Name: "默认分析方法",
+				Compounds: []models.Compound{
+					{Name: "THC", RetainTime: 0.15, LeftWindow: 0.05, RightWindow: 0.05, RespStyle: 0},
+					{Name: "CH4", RetainTime: 0.50, LeftWindow: 0.05, RightWindow: 0.05, RespStyle: 0},
+					{Name: "NMHC", RetainTime: 0.00, LeftWindow: 0, RightWindow: 0, RespStyle: 0}, // NMHC is calculated
+				},
+			}
+			writeJSON(w, http.StatusOK, defaultMethod)
 		case http.MethodPost:
 			var in models.Method
 			if json.NewDecoder(r.Body).Decode(&in) != nil {
@@ -535,8 +581,8 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 		}
 		var in struct {
 			Level  int     `json:"level"`
-			Amount float64 `json:"amount"` // 此次标气注入的实际浓度
-			RunID  string  `json:"run_id"` // 使用哪个进样批次的结果来标定
+			Amount float64 `json:"amount"` // 姝ゆ鏍囨皵娉ㄥ叆鐨勫疄闄呮祿搴?
+			RunID  string  `json:"run_id"` // 浣跨敤鍝釜杩涙牱鎵规鐨勭粨鏋滄潵鏍囧畾
 		}
 		if json.NewDecoder(r.Body).Decode(&in) != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
@@ -548,25 +594,25 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			return
 		}
 
-		// 1. 获取当前方法
+		// 1. 鑾峰彇褰撳墠鏂规硶
 		method, ok := pstore.LoadMethod("default")
 		if !ok {
 			writeJSON(w, http.StatusNotFound, map[string]any{"error": "method not found"})
 			return
 		}
 
-		// 2. TODO: 根据 RunID 从历史数据库中查出对应的分析结果 (各组分面积)
-		// 暂且用伪代码模拟查到的响应值，后续打通 SQLite 后补全
+		// 2. TODO: 鏍规嵁 RunID 浠庡巻鍙叉暟鎹簱涓煡鍑哄搴旂殑鍒嗘瀽缁撴灉 (鍚勭粍鍒嗛潰绉?
+		// 鏆備笖鐢ㄤ吉浠ｇ爜妯℃嫙鏌ュ埌鐨勫搷搴斿€硷紝鍚庣画鎵撻€?SQLite 鍚庤ˉ鍏?
 		mockResponses := map[string]float64{
 			"THC":  12345.6,
 			"CH4":  2345.6,
 			"NMHC": 10000.0,
 		}
 
-		// 3. 将对应组分的响应值存入 Method 的 Level 中
+		// 3. 灏嗗搴旂粍鍒嗙殑鍝嶅簲鍊煎瓨鍏?Method 鐨?Level 涓?
 		for i, cmpd := range method.Compounds {
 			if resp, ok := mockResponses[cmpd.Name]; ok {
-				// 查找是否已存在该级别
+				// 鏌ユ壘鏄惁宸插瓨鍦ㄨ绾у埆
 				found := false
 				for j, lvl := range cmpd.Levels {
 					if lvl.LevelIndex == in.Level {
@@ -583,20 +629,20 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 						Response:   resp,
 					})
 				}
-				// 保证 Levels 按响应值升序，方便插值计算
+				// 淇濊瘉 Levels 鎸夊搷搴斿€煎崌搴忥紝鏂逛究鎻掑€艰绠?
 				sort.Slice(method.Compounds[i].Levels, func(a, b int) bool {
 					return method.Compounds[i].Levels[a].Response < method.Compounds[i].Levels[b].Response
 				})
 			}
 		}
 
-		// 4. 持久化保存
+		// 4. 鎸佷箙鍖栦繚瀛?
 		pstore.SaveMethod("default", method)
 
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "calibrate updated"})
 	})
 
-	// 2. 硬件反控
+	// 2. 纭欢鍙嶆帶
 	mux.HandleFunc("/api/control/temp", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -607,14 +653,15 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			return
 		}
 		var in struct {
-			Zone   string  `json:"zone"`
-			Target float64 `json:"target"`
+			Zone    string             `json:"zone"` // 兼容老的单一下发
+			Target  float64            `json:"target"`
+			Targets map[string]float64 `json:"targets"` // 支持批量下发
 		}
 		if json.NewDecoder(r.Body).Decode(&in) != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
 			return
 		}
-		
+
 		deviceID := uiLastDevice
 		stAny, ok := states.Load(deviceID)
 		if !ok {
@@ -625,12 +672,19 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 
 		// Cmd 8: 恒温控制参数下发
 		// Payload: 12字节 (Inj1, Col, Det1, 保留, Inj2, 保留) 每个2字节BCD
-		// 这里简单实现：先读取现有持久化的 hwconfig，合并后下发
 		hw, _ := pstore.LoadHardwareConfig(deviceID)
 		if hw.Temperatures == nil {
 			hw.Temperatures = make(map[string]float64)
 		}
-		hw.Temperatures[in.Zone] = in.Target
+
+		if in.Zone != "" {
+			hw.Temperatures[in.Zone] = in.Target
+		}
+		if in.Targets != nil {
+			for k, v := range in.Targets {
+				hw.Temperatures[k] = v
+			}
+		}
 		pstore.SaveHardwareConfig(deviceID, hw)
 
 		payload := make([]byte, 12)
@@ -663,12 +717,12 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
 			return
 		}
-		// 根据 API_DESIGN，转换为 Cmd 20 / 21
-		deviceID := uiLastDevice // 获取当前设备ID，这里暂用全局变量
+		// 鏍规嵁 API_DESIGN锛岃浆鎹负 Cmd 20 / 21
+		deviceID := uiLastDevice // 鑾峰彇褰撳墠璁惧ID锛岃繖閲屾殏鐢ㄥ叏灞€鍙橀噺
 		stAny, ok := states.Load(deviceID)
 		if ok {
 			st := stAny.(*deviceState)
-			cmd := byte(20) // 默认 FID1
+			cmd := byte(20) // 榛樿 FID1
 			if in.Detector == "FID2" {
 				cmd = byte(21)
 			}
@@ -689,8 +743,9 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			return
 		}
 		var in struct {
-			Channel  string  `json:"channel"`
-			Pressure float64 `json:"pressure"`
+			Channel  string             `json:"channel"`
+			Pressure float64            `json:"pressure"`
+			Targets  map[string]float64 `json:"targets"`
 		}
 		if json.NewDecoder(r.Body).Decode(&in) != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
@@ -710,18 +765,25 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 		if hw.EPCs == nil {
 			hw.EPCs = make(map[string]float64)
 		}
-		hw.EPCs[in.Channel] = in.Pressure
+		if in.Channel != "" {
+			hw.EPCs[in.Channel] = in.Pressure
+		}
+		if in.Targets != nil {
+			for k, v := range in.Targets {
+				hw.EPCs[k] = v
+			}
+		}
 		pstore.SaveHardwareConfig(deviceID, hw)
 
-		// Cmd 34 (0x22): 气路压力流量设定
-		// 简单假设目前仅支持前 3 路 (载气, H2, Air)，每路占 8 字节
-		// 格式: 压力设定(2B), 流量设定(2B), 分流比(2B), 状态(1B), 气体类型(1B)
+		// Cmd 34 (0x22): 姘旇矾鍘嬪姏娴侀噺璁惧畾
+		// 绠€鍗曞亣璁剧洰鍓嶄粎鏀寔鍓?3 璺?(杞芥皵, H2, Air)锛屾瘡璺崰 8 瀛楄妭
+		// 鏍煎紡: 鍘嬪姏璁惧畾(2B), 娴侀噺璁惧畾(2B), 鍒嗘祦姣?2B), 鐘舵€?1B), 姘斾綋绫诲瀷(1B)
 		payload := make([]byte, 24)
-		
+
 		cPsi := u16Bytes(hw.EPCs["Carrier1"], 100)
 		h2Psi := u16Bytes(hw.EPCs["H2"], 100)
 		airPsi := u16Bytes(hw.EPCs["Air"], 100)
-		
+
 		copy(payload[0:2], cPsi)
 		copy(payload[8:10], h2Psi)
 		copy(payload[16:18], airPsi)
@@ -747,7 +809,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
 			return
 		}
-		
+
 		deviceID := uiLastDevice
 		stAny, ok := states.Load(deviceID)
 		if !ok {
@@ -760,15 +822,17 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 		hw.Events = in
 		pstore.SaveHardwareConfig(deviceID, hw)
 
-		// Cmd 10 (0x0A): 下发外部事件时间程序
-		// 格式: 事件数量(1B) + N * [时间(2B BCD) + 事件位状态(2B)]
+		// Cmd 10 (0x0A): 涓嬪彂澶栭儴浜嬩欢鏃堕棿绋嬪簭
+		// 鏍煎紡: 浜嬩欢鏁伴噺(1B) + N * [鏃堕棿(2B BCD) + 浜嬩欢浣嶇姸鎬?2B)]
 		n := len(in)
-		if n > 20 { n = 20 }
+		if n > 20 {
+			n = 20
+		}
 		payload := make([]byte, 1+n*4)
 		payload[0] = byte(n)
 		for i := 0; i < n; i++ {
 			off := 1 + i*4
-			copy(payload[off:off+2], tempToBCD2(in[i].Time)) // 时间同样用 BCD 编码
+			copy(payload[off:off+2], tempToBCD2(in[i].Time)) // 鏃堕棿鍚屾牱鐢?BCD 缂栫爜
 			mask := in[i].EventMask
 			payload[off+2] = byte(mask >> 8)
 			payload[off+3] = byte(mask & 0xFF)
@@ -781,38 +845,32 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	})
 
-	// 3. 历史记录 (基于 SQLite)
+	// 3. 鍘嗗彶璁板綍 (鍩轰簬 SQLite)
 	mux.HandleFunc("/api/history/results", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 		deviceID := strings.TrimSpace(r.URL.Query().Get("deviceId"))
-		if deviceID == "" {
-			deviceID = uiLastDevice
-		}
-		if deviceID == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "deviceId required"})
-			return
-		}
-		
+		// Allow empty deviceID to query all history
+
 		from, err := parseTimeAny(r.URL.Query().Get("from"))
-		if err != nil {
-			// 默认查最近一天
+		if err != nil || from == nil {
+			// 榛樿鏌ユ渶杩戜竴澶?
 			fromVal := time.Now().Add(-24 * time.Hour)
 			from = &fromVal
 		}
 		to, err := parseTimeAny(r.URL.Query().Get("to"))
-		if err != nil {
+		if err != nil || to == nil {
 			toVal := time.Now()
 			to = &toVal
 		}
-		
+
 		limit := envIntFromQuery(r, "limit", 1000)
-		
+
 		if pstore != nil {
 			jsons := pstore.LoadResultsFromDB(deviceID, *from, *to, limit)
-			// 直接将 JSON 字符串数组拼装为 JSON 数组返回
+			// 鐩存帴灏?JSON 瀛楃涓叉暟缁勬嫾瑁呬负 JSON 鏁扮粍杩斿洖
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte("["))
@@ -833,8 +891,107 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		// TODO: 返回完整的单次进样谱图和 Peak 列表
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "run history stub"})
+		traceID := strings.TrimPrefix(r.URL.Path, "/api/history/run/")
+		if traceID == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "traceId required"})
+			return
+		}
+		if pstore != nil {
+			if b, ok := pstore.LoadRunJSON(traceID); ok {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				w.Write(b)
+				return
+			}
+		}
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "run not found"})
+	})
+
+	// --- 数据处理 API (脱离前端) ---
+	mux.HandleFunc("/api/process/detect_all", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req struct {
+			TraceID string `json:"trace_id"`
+		}
+		if json.NewDecoder(r.Body).Decode(&req) != nil || req.TraceID == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid trace_id"})
+			return
+		}
+		b, ok := pstore.LoadRunJSON(req.TraceID)
+		if !ok {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "run not found"})
+			return
+		}
+		var runData struct {
+			Samples []float64 `json:"samples"`
+			DtS     float64   `json:"dtS"`
+		}
+		if json.Unmarshal(b, &runData) != nil || len(runData.Samples) == 0 {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "invalid run data"})
+			return
+		}
+		dtS := runData.DtS
+		if dtS <= 0 {
+			dtS = 0.05
+		}
+		tr := v1.Trace{
+			Values: runData.Samples,
+			DtS:    dtS,
+		}
+		activeMethod := getActiveMethod()
+		peaks := analyzer.DetectAllPeaks(tr, activeMethod)
+		writeJSON(w, http.StatusOK, peaks)
+	})
+
+	mux.HandleFunc("/api/process/detect_window", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req struct {
+			TraceID string  `json:"trace_id"`
+			StartS  float64 `json:"start_s"`
+			EndS    float64 `json:"end_s"`
+			Name    string  `json:"name"`
+		}
+		if json.NewDecoder(r.Body).Decode(&req) != nil || req.TraceID == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid req"})
+			return
+		}
+		if req.Name == "" {
+			req.Name = "Custom_Peak"
+		}
+		b, ok := pstore.LoadRunJSON(req.TraceID)
+		if !ok {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "run not found"})
+			return
+		}
+		var runData struct {
+			Samples []float64 `json:"samples"`
+			DtS     float64   `json:"dtS"`
+		}
+		if json.Unmarshal(b, &runData) != nil || len(runData.Samples) == 0 {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "invalid run data"})
+			return
+		}
+		dtS := runData.DtS
+		if dtS <= 0 {
+			dtS = 0.05
+		}
+		tr := v1.Trace{
+			Values: runData.Samples,
+			DtS:    dtS,
+		}
+		activeMethod := getActiveMethod()
+		peak := analyzer.DetectPeakInWindow(tr, activeMethod, req.StartS, req.EndS, req.Name)
+		if peak == nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "no peak found"})
+			return
+		}
+		writeJSON(w, http.StatusOK, peak)
 	})
 
 	// --- 原有 API 继续保留 ---
@@ -979,17 +1136,17 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			vals = vals[len(vals)-200000:]
 		}
 		out := map[string]any{
-			"deviceId":      deviceID,
-			"channel":       ch,
-			"sessionToken":  s.token,
-			"active":        s.active,
-			"startedAt":     s.startedAt.UTC().Format(time.RFC3339),
-			"dtS":           s.dtS,
-			"timeSpanS":     float64(len(vals)-1) * s.dtS,
-			"values":        vals,
-			"lastSample":    s.lastSample,
-			"valuesCount":   len(vals),
-			"totalCount":    len(s.values),
+			"deviceId":     deviceID,
+			"channel":      ch,
+			"sessionToken": s.token,
+			"active":       s.active,
+			"startedAt":    s.startedAt.UTC().Format(time.RFC3339),
+			"dtS":          s.dtS,
+			"timeSpanS":    float64(len(vals)-1) * s.dtS,
+			"values":       vals,
+			"lastSample":   s.lastSample,
+			"valuesCount":  len(vals),
+			"totalCount":   len(s.values),
 		}
 		if st.lastResultByCh != nil {
 			if lr, ok := st.lastResultByCh[ch]; ok && lr.token == s.token && lr.at.Unix() > 0 {
@@ -1031,10 +1188,28 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 		if preferCh > 7 {
 			preferCh = 7
 		}
+		
+		attachResult := func(out map[string]any, ch int, st *deviceState) {
+			if st != nil && st.lastResultByCh != nil {
+				if lr, ok := st.lastResultByCh[ch]; ok && lr.at.Unix() > 0 {
+					out["resultAt"] = lr.at.UTC().Format(time.RFC3339)
+					out["result"] = lr.res
+					return
+				}
+			}
+			if pstore != nil {
+				if rr, ok2 := pstore.LoadResult(deviceID, ch); ok2 {
+					out["resultAt"] = rr["at"]
+					out["result"] = rr["result"]
+				}
+			}
+		}
+
 		stAny, ok := states.Load(deviceID)
 		if !ok {
 			if pstore != nil {
 				if out, ok2 := pstore.LoadSession(deviceID, preferCh); ok2 {
+					attachResult(out, preferCh, nil)
 					writeJSON(w, http.StatusOK, out)
 					return
 				}
@@ -1065,26 +1240,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 				"valuesCount":  len(vals),
 				"totalCount":   len(s.values),
 			}
-			if st.lastResultByCh != nil {
-				if lr, ok := st.lastResultByCh[ch]; ok && lr.token == s.token && lr.at.Unix() > 0 {
-					out["resultAt"] = lr.at.UTC().Format(time.RFC3339)
-					out["result"] = lr.res
-				} else if pstore != nil {
-					if rr, ok2 := pstore.LoadResult(deviceID, ch); ok2 {
-						if tok, _ := rr["sessionToken"].(string); tok == s.token {
-							out["resultAt"] = rr["at"]
-							out["result"] = rr["result"]
-						}
-					}
-				}
-			} else if pstore != nil {
-				if rr, ok2 := pstore.LoadResult(deviceID, ch); ok2 {
-					if tok, _ := rr["sessionToken"].(string); tok == s.token {
-						out["resultAt"] = rr["at"]
-						out["result"] = rr["result"]
-					}
-				}
-			}
+			attachResult(out, ch, st)
 			return out, true
 		}
 		st.mu.Lock()
@@ -1103,6 +1259,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 		st.mu.Unlock()
 		if pstore != nil {
 			if out, ok2 := pstore.LoadSession(deviceID, preferCh); ok2 {
+				attachResult(out, preferCh, nil)
 				writeJSON(w, http.StatusOK, out)
 				return
 			}
@@ -1151,53 +1308,48 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			return
 		}
 	})
-	// CSV 报表导出功能 (基于 SQLite)
+	// CSV 鎶ヨ〃瀵煎嚭鍔熻兘 (鍩轰簬 SQLite)
 	mux.HandleFunc("/api/history/export.csv", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 		deviceID := strings.TrimSpace(r.URL.Query().Get("deviceId"))
-		if deviceID == "" {
-			deviceID = uiLastDevice
-		}
-		if deviceID == "" {
-			http.Error(w, "deviceId required", http.StatusBadRequest)
-			return
-		}
+		// Allow empty deviceID to export all history
+
 		from, err := parseTimeAny(r.URL.Query().Get("from"))
-		if err != nil {
+		if err != nil || from == nil {
 			fromVal := time.Now().Add(-24 * time.Hour)
 			from = &fromVal
 		}
 		to, err := parseTimeAny(r.URL.Query().Get("to"))
-		if err != nil {
+		if err != nil || to == nil {
 			toVal := time.Now()
 			to = &toVal
 		}
-		
+
 		if pstore == nil {
 			http.Error(w, "db not ready", http.StatusInternalServerError)
 			return
 		}
 
 		jsons := pstore.LoadResultsFromDB(deviceID, *from, *to, 5000)
-		
+
 		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 		w.Header().Set("Content-Disposition", "attachment; filename=history_"+deviceID+".csv")
-		
-		// 写入 CSV 表头
+
+		// 鍐欏叆 CSV 琛ㄥご
 		io.WriteString(w, "Time,TraceID,MethodID,Code,Name,Amount,Status\n")
-		
+
 		for _, j := range jsons {
 			var res v1.Result
 			if err := json.Unmarshal([]byte(j), &res); err == nil {
-				// 导出单组分
+				// 瀵煎嚭鍗曠粍鍒?
 				for _, p := range res.Pollutants {
 					line := fmt.Sprintf("%s,%s,%s,%s,%s,%.6f,%s\n", res.CreatedAt, res.TraceID, res.MethodID, p.Code, p.Name, p.Amount, p.Status)
 					io.WriteString(w, line)
 				}
-				// 导出聚合组分
+				// 瀵煎嚭鑱氬悎缁勫垎
 				for _, g := range res.Groups {
 					line := fmt.Sprintf("%s,%s,%s,%s,%s,%.6f,%s\n", res.CreatedAt, res.TraceID, res.MethodID, g.Code, g.Name, g.Amount, "OK")
 					io.WriteString(w, line)
@@ -1206,7 +1358,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 		}
 	})
 
-	// 原有的 nmhc csv 导出保持兼容 (重定向到新接口)
+	// 鍘熸湁鐨?nmhc csv 瀵煎嚭淇濇寔鍏煎 (閲嶅畾鍚戝埌鏂版帴鍙?
 	mux.HandleFunc("/api/v1/results/nmhc/export.csv", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/api/history/export.csv?"+r.URL.RawQuery, http.StatusTemporaryRedirect)
 	})
@@ -1358,217 +1510,19 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 		}
 	})
+	mux.Handle("/static/", http.FileServer(http.FS(staticFS)))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
 			return
 		}
-		html := `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VOCs 色谱边缘工作站 v1.0</title>
-    <style>
-        :root { --bg: #0f172a; --panel: #1e293b; --text: #f8fafc; --accent: #3b82f6; --success: #10b981; --danger: #ef4444; }
-        body { margin: 0; font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); display: flex; height: 100vh; overflow: hidden; }
-        .sidebar { width: 80px; background: var(--panel); border-right: 1px solid #334155; display: flex; flex-direction: column; align-items: center; padding-top: 1rem; }
-        .nav-item { width: 60px; height: 60px; display: flex; flex-direction: column; align-items: center; justify-content: center; margin-bottom: 1rem; border-radius: 8px; cursor: pointer; color: #94a3b8; font-size: 12px; transition: all 0.2s; }
-        .nav-item:hover { background: #334155; color: var(--text); }
-        .nav-item.active { background: var(--accent); color: white; }
-        .nav-icon { font-size: 24px; margin-bottom: 4px; }
-        
-        .main-content { flex: 1; display: flex; flex-direction: column; padding: 1rem; overflow-y: auto; }
-        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid #334155; }
-        
-        .view-panel { display: none; height: 100%; }
-        .view-panel.active { display: flex; flex-direction: column; }
-        
-        .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem; }
-        .card { background: var(--panel); padding: 1.5rem; border-radius: 8px; border: 1px solid #334155; text-align: center; }
-        .card-title { font-size: 14px; color: #94a3b8; margin-bottom: 0.5rem; }
-        .card-value { font-size: 3rem; font-weight: bold; color: var(--success); font-family: monospace; }
-        .card-unit { font-size: 1rem; color: #94a3b8; }
-        
-        table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
-        th, td { padding: 0.75rem; text-align: left; border-bottom: 1px solid #334155; }
-        th { color: #94a3b8; font-weight: normal; }
-        
-        .control-group { background: var(--panel); padding: 1rem; border-radius: 8px; margin-bottom: 1rem; }
-        .input { background: #0f172a; border: 1px solid #334155; color: white; padding: 0.5rem; border-radius: 4px; margin-right: 0.5rem; }
-        .btn { background: var(--accent); color: white; border: none; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; }
-        .btn:hover { background: #2563eb; }
-        .btn-danger { background: var(--danger); }
-        .btn-danger:hover { background: #dc2626; }
-    </style>
-</head>
-<body>
-    <div class="sidebar">
-        <div class="nav-item active" data-target="view-dashboard">
-            <div class="nav-icon">📊</div><div>大屏</div>
-        </div>
-        <div class="nav-item" data-target="view-live">
-            <div class="nav-icon">📈</div><div>谱图</div>
-        </div>
-        <div class="nav-item" data-target="view-method">
-            <div class="nav-icon">🧪</div><div>方法</div>
-        </div>
-        <div class="nav-item" data-target="view-settings">
-            <div class="nav-icon">⚙️</div><div>设置</div>
-        </div>
-    </div>
-
-    <div class="main-content">
-        <div class="header">
-            <h2><span id="header-title">实时概览</span> <span style="font-size:12px;color:#94a3b8;margin-left:10px;">v1.0-Edge</span></h2>
-            <div id="status-badge" style="color:var(--success)">● 设备已连接</div>
-        </div>
-
-        <div id="view-dashboard" class="view-panel active">
-            <div class="card-grid">
-                <div class="card">
-                    <div class="card-title">非甲烷总烃 (NMHC)</div>
-                    <div class="card-value" id="val-nmhc">0.00</div>
-                    <div class="card-unit">mg/m³</div>
-                </div>
-                <div class="card">
-                    <div class="card-title">总烃 (THC)</div>
-                    <div class="card-value" id="val-thc">0.00</div>
-                    <div class="card-unit">mg/m³</div>
-                </div>
-                <div class="card">
-                    <div class="card-title">甲烷 (CH4)</div>
-                    <div class="card-value" id="val-ch4">0.00</div>
-                    <div class="card-unit">mg/m³</div>
-                </div>
-            </div>
-            
-            <div class="control-group" style="margin-top: 2rem; display: flex; gap: 1rem; align-items: center;">
-                <button class="btn" id="btn-start-analysis" onclick="sendCmd('startAll')">▶ 开始分析</button>
-                <button class="btn btn-danger" id="btn-stop-analysis" onclick="sendCmd('stopAll')">■ 停止分析</button>
-                <div style="margin-left: 2rem; color: #94a3b8;">
-                    循环状态: <span id="cycle-status" style="color: white;">等待中</span>
-                </div>
-            </div>
-        </div>
-
-        <div id="view-live" class="view-panel">
-            <div style="display: flex; height: 100%; gap: 1rem;">
-                <div style="flex: 3; background: var(--panel); border-radius: 8px; border: 1px solid #334155; position: relative;">
-                    <div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); color:#94a3b8;">
-                        [实时色谱图区域 - 待接入 Canvas]
-                    </div>
-                </div>
-                <div style="flex: 1; display: flex; flex-direction: column; gap: 1rem;">
-                    <div class="control-group" style="flex: 1; margin: 0;">
-                        <h3 style="margin-top:0">硬件状态</h3>
-                        <table>
-                            <tr><td>FID1点火</td><td style="color:var(--success)">已点燃</td></tr>
-                            <tr><td>进样口温</td><td>120.0 ℃</td></tr>
-                            <tr><td>柱温</td><td>80.0 ℃</td></tr>
-                            <tr><td>检测器温</td><td>150.0 ℃</td></tr>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div id="view-method" class="view-panel">
-            <div class="control-group">
-                <h3>校准组分表</h3>
-                <table>
-                    <thead>
-                        <tr><th>组分名称</th><th>保留时间</th><th>左窗口</th><th>右窗口</th><th>计算方式</th></tr>
-                    </thead>
-                    <tbody id="tbody-compounds">
-                        <tr><td colspan="5" style="text-align:center">加载中...</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        <div id="view-settings" class="view-panel">
-            <div class="control-group">
-                <h3>温度设定 (Cmd 8)</h3>
-                进样口: <input type="number" id="set-temp-inj" class="input" value="120" style="width: 80px;"> ℃
-                柱温: <input type="number" id="set-temp-col" class="input" value="80" style="width: 80px;"> ℃
-                检测器: <input type="number" id="set-temp-det" class="input" value="150" style="width: 80px;"> ℃
-                <button class="btn" id="btn-apply-temp">下发控温</button>
-            </div>
-            <div class="control-group">
-                <h3>点火控制 (Cmd 20/21)</h3>
-                <button class="btn" id="btn-ignite-fid1">🔥 FID1 点火</button>
-            </div>
-        </div>
-    </div>
-
-    <script type="module">
-        const navItems = document.querySelectorAll('.nav-item');
-        const viewPanels = document.querySelectorAll('.view-panel');
-        const headerTitle = document.getElementById('header-title');
-
-        navItems.forEach(item => {
-            item.addEventListener('click', () => {
-                navItems.forEach(n => n.classList.remove('active'));
-                item.classList.add('active');
-                headerTitle.textContent = item.querySelector('div:last-child').textContent;
-                const targetId = item.getAttribute('data-target');
-                viewPanels.forEach(p => p.classList.remove('active'));
-                document.getElementById(targetId).classList.add('active');
-                if(targetId === 'view-method') loadMethod();
-            });
-        });
-
-        async function loadMethod() {
-            try {
-                const res = await fetch('/api/method');
-                const data = await res.json();
-                const tbody = document.getElementById('tbody-compounds');
-                if(!data.compounds || data.compounds.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center">暂无组分，请添加</td></tr>';
-                    return;
-                }
-                tbody.innerHTML = '';
-                data.compounds.forEach(c => {
-                    tbody.innerHTML += "<tr>" +
-                        "<td>" + c.name + "</td>" +
-                        "<td>" + c.retain_time + " min</td>" +
-                        "<td>" + c.left_window + "</td>" +
-                        "<td>" + c.right_window + "</td>" +
-                        "<td>" + (c.resp_style === 0 ? "面积" : "峰高") + "</td>" +
-                    "</tr>";
-                });
-            } catch(e) { console.error(e); }
-        }
-
-        document.getElementById('btn-apply-temp').addEventListener('click', async () => {
-            const inj = parseFloat(document.getElementById('set-temp-inj').value);
-            await fetch('/api/control/temp', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ zone: 'Inj1', target: inj })
-            });
-            alert('进样口控温指令已下发!');
-        });
-        
-        document.getElementById('btn-ignite-fid1').addEventListener('click', async () => {
-            await fetch('/api/control/ignite', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ action: 'start', detector: 'FID1' })
-            });
-            alert('FID1 点火指令已下发!');
-        });
-        
-        window.sendCmd = async function(cmdName) {
-            alert('指令 ' + cmdName + ' 发送逻辑待接入');
-        }
-    </script>
-</body>
-</html>`
-
+		content, err := staticFS.ReadFile("static/index.html")
+		if err != nil {
+			http.Error(w, "index.html not found", http.StatusInternalServerError)
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write([]byte(html))
+		w.Write(content)
 	})
 	host := strings.TrimSpace(os.Getenv("EDGE_HTTP_BIND"))
 	if host == "" {
@@ -1649,7 +1603,7 @@ func processFrame(c net.Conn, f gckc.Frame, hub *realtime.Hub, states *sync.Map,
 	case 150:
 		// stop/complete ack: do not reset session here; the next start ack (146) defines a new session
 	case 147:
-			finalizeAllSessions(hub, st, f.DeviceID, method)
+		finalizeAllSessions(hub, st, f.DeviceID, method)
 	case 151:
 		if len(f.Payload) > 0 {
 			ch := int(f.Payload[0])
@@ -1805,11 +1759,15 @@ func finalizeSession(hub *realtime.Hub, st *deviceState, deviceID string, ch int
 	s.active = false
 	st.mu.Unlock()
 
-	res, err := analyzer.Analyze(trace, method, "dev", time.Now())
+	// 每次分析时实时获取最新的方法（包含最新的校准参数）
+	activeMethod := getActiveMethod()
+	res, err := analyzer.Analyze(trace, activeMethod, "dev", time.Now())
 	e := resultEvent{Type: "result", DeviceID: deviceID, Channel: ch, SessionToken: tok, At: time.Now(), Trace: trace, Method: method}
 	if err != nil {
+		log.Printf("Analyze error 1: %v", err)
 		e.Error = err.Error()
 	} else {
+		log.Printf("Analyze success 1, saving to DB...")
 		e.Result = res
 		st.mu.Lock()
 		if st.lastResultByCh == nil {
@@ -1818,7 +1776,13 @@ func finalizeSession(hub *realtime.Hub, st *deviceState, deviceID string, ch int
 		st.lastResultByCh[ch] = lastResult{token: tok, at: e.At.UTC(), res: res}
 		st.mu.Unlock()
 		if pstore != nil {
+			// Save the latest result for UI summary
 			pstore.SaveResult(deviceID, ch, map[string]any{"deviceId": deviceID, "channel": ch, "sessionToken": tok, "at": e.At.UTC().Format(time.RFC3339), "result": res})
+
+			// Save to SQLite History and Disk
+			resBytes, _ := json.Marshal(map[string]any{"device_id": deviceID, "trace_id": trace.TraceID, "created_at": e.At.UTC().Format(time.RFC3339), "result": res})
+			runBytes, _ := json.Marshal(map[string]any{"trace_id": trace.TraceID, "samples": trace.Values, "pollutants": res.Pollutants})
+			pstore.SaveResultToDB(deviceID, trace.TraceID, e.At.UTC(), method.MethodID, string(resBytes), runBytes)
 		}
 		if thc, ch4, nmhc, ok := extractNMHC(res); ok {
 			nmhcStore.Add(nmhcRecord{
@@ -1829,13 +1793,13 @@ func finalizeSession(hub *realtime.Hub, st *deviceState, deviceID string, ch int
 				CH4:         ch4,
 				NMHC:        nmhc,
 			})
-			
+
 			// 同步更新 Modbus 寄存器
 			if mbSlave != nil {
-				mbSlave.UpdateResults(thc, ch4, nmhc)
+				mbSlave.UpdateFullResult(res)
 			}
-			
-			// 增量上报 MQTT
+
+			// 澧為噺涓婃姤 MQTT
 			if mqttClient != nil {
 				polls := make(map[string]float64)
 				for _, p := range res.Pollutants {
@@ -1877,10 +1841,13 @@ func publishSessionResultSnapshot(hub *realtime.Hub, st *deviceState, deviceID s
 	}
 
 	e := resultEvent{Type: "result", DeviceID: deviceID, Channel: ch, SessionToken: tok, At: time.Now().UTC(), Trace: trace, Method: method}
-	res, err := analyzer.Analyze(trace, method, deviceID, time.Now())
+	activeMethod := getActiveMethod()
+	res, err := analyzer.Analyze(trace, activeMethod, deviceID, time.Now())
 	if err != nil {
+		log.Printf("Analyze error 2: %v", err)
 		e.Error = err.Error()
 	} else {
+		log.Printf("Analyze success 2, saving to DB...")
 		e.Result = res
 		st.mu.Lock()
 		if st.lastResultByCh == nil {
@@ -1917,15 +1884,56 @@ func isFinite(v float64) bool {
 	return !math.IsNaN(v) && !math.IsInf(v, 0)
 }
 
-func loadMethod() v1.Method {
-	path := filepath.Join(".run", "method.json")
-	b, err := os.ReadFile(path)
-	if err == nil {
-		var m v1.Method
-		if json.Unmarshal(b, &m) == nil && m.MethodID != "" {
-			return m
+func getActiveMethod() v1.Method {
+	if pstore != nil {
+		if m, ok := pstore.LoadMethod("default"); ok {
+			out := v1.Method{
+				MethodID: m.ID,
+				Version:  1,
+			}
+			for _, c := range m.Compounds {
+				// 转换 levels
+				var v1Levels []v1.Level
+				for _, l := range c.Levels {
+					v1Levels = append(v1Levels, v1.Level{
+						LevelIndex: l.LevelIndex,
+						Amount:     l.Amount,
+						Response:   l.Response,
+					})
+				}
+				out.Pollutants = append(out.Pollutants, v1.PollutantSpec{
+					Code:      c.Name,
+					Name:      c.Name,
+					StartS:    (c.RetainTime - c.LeftWindow) * 60.0,
+					EndS:      (c.RetainTime + c.RightWindow) * 60.0,
+					PaddingS:  2,
+					Threshold: 0,
+					RespStyle: c.RespStyle,
+					CurveFunc: c.CurveFunc,
+					Levels:    v1Levels,
+				})
+			}
+			// 确保有基本的出峰时间，如果没有，给默认值
+			for i, p := range out.Pollutants {
+				if p.StartS < 0 {
+					out.Pollutants[i].StartS = 0
+				}
+				if p.EndS <= p.StartS {
+					out.Pollutants[i].EndS = out.Pollutants[i].StartS + 10
+				}
+			}
+			out.Groups = []v1.PeakGroupSpec{
+				{
+					Code:         "NMHC",
+					Name:         "非甲烷总烃",
+					IncludeCodes: []string{"THC"},
+					ExcludeCodes: []string{"CH4"},
+				},
+			}
+			return out
 		}
 	}
+
 	return v1.Method{
 		MethodID: "default",
 		Version:  1,
@@ -1933,7 +1941,19 @@ func loadMethod() v1.Method {
 			{Code: "THC", Name: "总烃", StartS: 0, EndS: 20, PaddingS: 2, Threshold: 0},
 			{Code: "CH4", Name: "甲烷", StartS: 20, EndS: 80, PaddingS: 2, Threshold: 0},
 		},
+		Groups: []v1.PeakGroupSpec{
+			{
+				Code:         "NMHC",
+				Name:         "非甲烷总烃",
+				IncludeCodes: []string{"THC"},
+				ExcludeCodes: []string{"CH4"},
+			},
+		},
 	}
+}
+
+func loadMethod() v1.Method {
+	return getActiveMethod()
 }
 
 func getState(states *sync.Map, deviceID string) *deviceState {
@@ -2004,7 +2024,7 @@ func buildCmd(name string, channel int) (byte, []byte, error) {
 	}
 }
 
-// 辅助方法：将 0~399 的温度值转换为 2 字节 BCD 码
+// 杈呭姪鏂规硶锛氬皢 0~399 鐨勬俯搴﹀€艰浆鎹负 2 瀛楄妭 BCD 鐮?
 func tempToBCD2(temp float64) []byte {
 	v := int(math.Round(temp * 10))
 	if v < 0 {
@@ -2013,7 +2033,7 @@ func tempToBCD2(temp float64) []byte {
 	if v > 3999 {
 		v = 3999
 	}
-	// v 此时形如 1234 (对应 123.4度)
+	// v 姝ゆ椂褰㈠ 1234 (瀵瑰簲 123.4搴?
 	d1 := (v / 1000) % 10
 	d2 := (v / 100) % 10
 	d3 := (v / 10) % 10
@@ -2023,7 +2043,7 @@ func tempToBCD2(temp float64) []byte {
 	return []byte{b0, b1}
 }
 
-// 辅助方法：将数值转换为大端 uint16 字节
+// 杈呭姪鏂规硶锛氬皢鏁板€艰浆鎹负澶х uint16 瀛楄妭
 func u16Bytes(v float64, scale float64) []byte {
 	iv := int(math.Round(v * scale))
 	if iv < 0 {
@@ -2122,50 +2142,50 @@ var indexHTML = `<!doctype html>
 <body>
   <div class="shell">
     <header class="topbar">
-      <div class="brand">在线监测 <span style="font-size:12px;opacity:0.6;margin-left:10px">v0.1.3</span></div>
+      <div class="brand">鍦ㄧ嚎鐩戞祴 <span style="font-size:12px;opacity:0.6;margin-left:10px">v0.1.3</span></div>
       <nav class="tabs" id="tabs">
-        <button class="tab active" data-tab="overview"><span class="tabIcon">概</span><span class="tabText">概览</span></button>
-        <button class="tab" data-tab="curve"><span class="tabIcon">曲</span><span class="tabText">曲线</span></button>
-        <button class="tab" data-tab="result"><span class="tabIcon">果</span><span class="tabText">结果</span></button>
-        <button class="tab" data-tab="events"><span class="tabIcon">事</span><span class="tabText">事件</span></button>
-        <button class="tab" data-tab="logs"><span class="tabIcon">志</span><span class="tabText">日志</span></button>
-        <button class="tab" data-tab="settings"><span class="tabIcon">设</span><span class="tabText">设置</span></button>
+        <button class="tab active" data-tab="overview"><span class="tabIcon">姒?/span><span class="tabText">姒傝</span></button>
+        <button class="tab" data-tab="curve"><span class="tabIcon">鏇?/span><span class="tabText">鏇茬嚎</span></button>
+        <button class="tab" data-tab="result"><span class="tabIcon">鏋?/span><span class="tabText">缁撴灉</span></button>
+        <button class="tab" data-tab="events"><span class="tabIcon">浜?/span><span class="tabText">浜嬩欢</span></button>
+        <button class="tab" data-tab="logs"><span class="tabIcon">蹇?/span><span class="tabText">鏃ュ織</span></button>
+        <button class="tab" data-tab="settings"><span class="tabIcon">璁?/span><span class="tabText">璁剧疆</span></button>
       </nav>
-      <div class="flame" title="告警"><div class="flameInner"></div></div>
+      <div class="flame" title="鍛婅"><div class="flameInner"></div></div>
     </header>
 
     <main class="main">
       <section id="view-overview" class="view active">
         <div class="card cardPad" style="max-width:980px">
           <div class="homeGrid">
-            <div class="blueCard"><div class="blueTitle">总烃</div><div class="blueValue mono" id="kpi-thc">-</div></div>
-            <div class="blueCard"><div class="blueTitle" style="opacity:0.0">占位</div><div class="blueValue mono" id="kpi-thc2"> </div></div>
-            <div class="blueCard"><div class="blueTitle">甲烷</div><div class="blueValue mono" id="kpi-ch4">-</div></div>
-            <div class="blueCard"><div class="blueTitle" style="opacity:0.0">占位</div><div class="blueValue mono" id="kpi-ch4b"> </div></div>
-            <div class="blueCard"><div class="blueTitle">非甲烷总烃</div><div class="blueValue mono" id="kpi-nmhc">-</div></div>
-            <div class="blueCard"><div class="blueTitle" style="opacity:0.0">占位</div><div class="blueValue mono" id="kpi-nmhc2"> </div></div>
+            <div class="blueCard"><div class="blueTitle">鎬荤儍</div><div class="blueValue mono" id="kpi-thc">-</div></div>
+            <div class="blueCard"><div class="blueTitle" style="opacity:0.0">鍗犱綅</div><div class="blueValue mono" id="kpi-thc2"> </div></div>
+            <div class="blueCard"><div class="blueTitle">鐢茬兎</div><div class="blueValue mono" id="kpi-ch4">-</div></div>
+            <div class="blueCard"><div class="blueTitle" style="opacity:0.0">鍗犱綅</div><div class="blueValue mono" id="kpi-ch4b"> </div></div>
+            <div class="blueCard"><div class="blueTitle">闈炵敳鐑锋€荤儍</div><div class="blueValue mono" id="kpi-nmhc">-</div></div>
+            <div class="blueCard"><div class="blueTitle" style="opacity:0.0">鍗犱綅</div><div class="blueValue mono" id="kpi-nmhc2"> </div></div>
           </div>
 
           <div class="bottomBar">
             <div>
-              <div class="statusStrip mono" id="home-status">时间: 0.000 min   信号: 0.000 pA</div>
+              <div class="statusStrip mono" id="home-status">鏃堕棿: 0.000 min   淇″彿: 0.000 pA</div>
               <div style="margin-top:10px" class="ctrlStrip">
-                <button class="ctrlBtn">运行次数</button>
+                <button class="ctrlBtn">杩愯娆℃暟</button>
                 <div class="ctrlVal mono" id="home-runCountVal">1720</div>
-                <button class="ctrlBtn">单位</button>
-                <div class="ctrlVal mono" id="home-unitVal">mg/m³</div>
-                <button class="ctrlAction" id="home-inject">进样</button>
+                <button class="ctrlBtn">鍗曚綅</button>
+                <div class="ctrlVal mono" id="home-unitVal">mg/m鲁</div>
+                <button class="ctrlAction" id="home-inject">杩涙牱</button>
               </div>
             </div>
-            <div class="flame" title="状态"><div class="flameInner"></div></div>
+            <div class="flame" title="鐘舵€?><div class="flameInner"></div></div>
             <div class="clock mono" id="home-clock">0000-00-00 00:00:00</div>
           </div>
         </div>
         <div class="card cardPad" style="max-width:980px;margin-top:12px">
-          <div id="tblTitle">设备列表</div>
+          <div id="tblTitle">璁惧鍒楄〃</div>
           <table>
-            <thead><tr><th>设备</th><th>在线</th><th>lastSeen</th><th>143</th><th>last143</th></tr></thead>
-            <tbody id="overview-devices"><tr><td class="mono" colspan="5" style="color:var(--muted)">等待 GC...</td></tr></tbody>
+            <thead><tr><th>璁惧</th><th>鍦ㄧ嚎</th><th>lastSeen</th><th>143</th><th>last143</th></tr></thead>
+            <tbody id="overview-devices"><tr><td class="mono" colspan="5" style="color:var(--muted)">绛夊緟 GC...</td></tr></tbody>
           </table>
         </div>
       </section>
@@ -2173,31 +2193,31 @@ var indexHTML = `<!doctype html>
       <section id="view-curve" class="view">
         <div class="card cardPad" style="max-width:1240px">
           <div class="row" style="margin-bottom:10px">
-            <button class="btn dark">通道1结束</button>
-            <label class="modeItem"><span class="dot" style="background:var(--ok)"></span><input type="radio" name="mode" checked /> 正常进样</label>
-            <label class="modeItem"><span class="dot" style="background:#B7C0CF"></span><input type="radio" name="mode" /> 零气反标</label>
-            <label class="modeItem"><span class="dot" style="background:#B7C0CF"></span><input type="radio" name="mode" /> 标气反标</label>
+            <button class="btn dark">閫氶亾1缁撴潫</button>
+            <label class="modeItem"><span class="dot" style="background:var(--ok)"></span><input type="radio" name="mode" checked /> 姝ｅ父杩涙牱</label>
+            <label class="modeItem"><span class="dot" style="background:#B7C0CF"></span><input type="radio" name="mode" /> 闆舵皵鍙嶆爣</label>
+            <label class="modeItem"><span class="dot" style="background:#B7C0CF"></span><input type="radio" name="mode" /> 鏍囨皵鍙嶆爣</label>
             <div class="spacer"></div>
-            <span class="label">下限:</span><input id="ylow" class="input mono" style="width:90px" value="0" />
-            <span class="label">上限:</span><input id="yhigh" class="input mono" style="width:90px" value="40" />
-            <span class="label">采集时间:</span><input id="acqmin" class="input mono" style="width:50px" value="2" />
-            <span class="label">满屏时间:</span><input id="fullmin" class="input mono" style="width:50px" value="2" />
-            <span class="label">循环周期:</span><input id="cyclemin" class="input mono" style="width:50px" value="2" title="下一针自动进样的间隔时间" />
-            <span class="label">循环次数:</span><input id="cyclemax" class="input mono" style="width:50px" value="9999" title="最大循环进样次数" />
+            <span class="label">涓嬮檺:</span><input id="ylow" class="input mono" style="width:90px" value="0" />
+            <span class="label">涓婇檺:</span><input id="yhigh" class="input mono" style="width:90px" value="40" />
+            <span class="label">閲囬泦鏃堕棿:</span><input id="acqmin" class="input mono" style="width:50px" value="2" />
+            <span class="label">婊″睆鏃堕棿:</span><input id="fullmin" class="input mono" style="width:50px" value="2" />
+            <span class="label">寰幆鍛ㄦ湡:</span><input id="cyclemin" class="input mono" style="width:50px" value="2" title="涓嬩竴閽堣嚜鍔ㄨ繘鏍风殑闂撮殧鏃堕棿" />
+            <span class="label">寰幆娆℃暟:</span><input id="cyclemax" class="input mono" style="width:50px" value="9999" title="鏈€澶у惊鐜繘鏍锋鏁? />
           </div>
 
           <div class="row" style="margin-bottom:10px">
-            <div id="stat" class="mono">通道1: 0.000 min  0.000 pA  信号1:</div>
-            <label class="modeItem"><input id="autoy" type="checkbox" checked /> 峰高自适应</label>
-            <label class="modeItem"><input id="loop" type="checkbox" checked /> 连续分析</label>
-            <input id="name" class="input" placeholder="谱图名称" style="width:200px" />
+            <div id="stat" class="mono">閫氶亾1: 0.000 min  0.000 pA  淇″彿1:</div>
+            <label class="modeItem"><input id="autoy" type="checkbox" checked /> 宄伴珮鑷€傚簲</label>
+            <label class="modeItem"><input id="loop" type="checkbox" checked /> 杩炵画鍒嗘瀽</label>
+            <input id="name" class="input" placeholder="璋卞浘鍚嶇О" style="width:200px" />
             <div class="spacer"></div>
-            <div class="kpi"><div class="label">在线</div><div id="status" class="mono">未连接</div></div>
-            <div class="kpi"><div class="label">设备</div><select id="device" class="select mono"><option value="">等待 GC...</option></select></div>
+            <div class="kpi"><div class="label">鍦ㄧ嚎</div><div id="status" class="mono">鏈繛鎺?/div></div>
+            <div class="kpi"><div class="label">璁惧</div><select id="device" class="select mono"><option value="">绛夊緟 GC...</option></select></div>
             <div class="kpi"><div class="label">Channel</div><select id="chn" class="select mono"><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option></select></div>
-            <button class="btn primary" id="start">开始</button>
-            <button class="btn" id="stop">停止</button>
-            <button class="btn" id="clear">清屏</button>
+            <button class="btn primary" id="start">寮€濮?/button>
+            <button class="btn" id="stop">鍋滄</button>
+            <button class="btn" id="clear">娓呭睆</button>
           </div>
 
           <div id="panel">
@@ -2206,40 +2226,40 @@ var indexHTML = `<!doctype html>
             </div>
             <div>
               <div id="right">
-                <div id="tblTitle">名称 | 含量(mg/m³)</div>
+                <div id="tblTitle">鍚嶇О | 鍚噺(mg/m鲁)</div>
                 <table>
-                  <thead><tr><th>名称</th><th>含量(mg/m³)</th></tr></thead>
+                  <thead><tr><th>鍚嶇О</th><th>鍚噺(mg/m鲁)</th></tr></thead>
                   <tbody id="tbody">
-                    <tr><td>总烃</td><td class="mono">-</td></tr>
-                    <tr><td>甲烷</td><td class="mono">-</td></tr>
-                    <tr><td>非甲烷总烃</td><td class="mono">-</td></tr>
+                    <tr><td>鎬荤儍</td><td class="mono">-</td></tr>
+                    <tr><td>鐢茬兎</td><td class="mono">-</td></tr>
+                    <tr><td>闈炵敳鐑锋€荤儍</td><td class="mono">-</td></tr>
                   </tbody>
                 </table>
               </div>
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
                 <div class="card" style="border-radius:10px;overflow:hidden">
-                  <div id="tblTitle">实测</div>
+                  <div id="tblTitle">瀹炴祴</div>
                   <table>
                     <tbody>
-                      <tr><td>载气</td><td class="mono" id="gas-carrier">-</td></tr>
-                      <tr><td>氢气</td><td class="mono" id="gas-h2">-</td></tr>
-                      <tr><td>空气</td><td class="mono" id="gas-air">-</td></tr>
+                      <tr><td>杞芥皵</td><td class="mono" id="gas-carrier">-</td></tr>
+                      <tr><td>姘㈡皵</td><td class="mono" id="gas-h2">-</td></tr>
+                      <tr><td>绌烘皵</td><td class="mono" id="gas-air">-</td></tr>
                     </tbody>
                   </table>
                 </div>
                 <div class="card" style="border-radius:10px;overflow:hidden">
-                  <div id="tblTitle">实测℃</div>
+                  <div id="tblTitle">瀹炴祴鈩?/div>
                   <table>
                     <tbody>
-                      <tr><td>柱箱</td><td class="mono" id="temp-col">-</td></tr>
-                      <tr><td>阀温</td><td class="mono" id="temp-inj1">-</td></tr>
-                      <tr><td>检测1</td><td class="mono" id="temp-det1">-</td></tr>
-                      <tr><td>进样2</td><td class="mono" id="temp-inj2">-</td></tr>
+                      <tr><td>鏌辩</td><td class="mono" id="temp-col">-</td></tr>
+                      <tr><td>闃€娓?/td><td class="mono" id="temp-inj1">-</td></tr>
+                      <tr><td>妫€娴?</td><td class="mono" id="temp-det1">-</td></tr>
+                      <tr><td>杩涙牱2</td><td class="mono" id="temp-inj2">-</td></tr>
                     </tbody>
                   </table>
                 </div>
               </div>
-              <div class="flame" style="margin-top:12px" title="状态"><div class="flameInner"></div></div>
+              <div class="flame" style="margin-top:12px" title="鐘舵€?><div class="flameInner"></div></div>
               <div id="dbg" class="mono" style="margin-top:10px;color:var(--muted)"></div>
             </div>
           </div>
@@ -2249,18 +2269,18 @@ var indexHTML = `<!doctype html>
       <section id="view-result" class="view">
         <div class="card cardPad" style="max-width:1240px">
           <div class="row" style="margin-bottom:10px">
-            <div class="label">NMHC 结果历史（总烃/甲烷/非甲烷总烃）</div>
+            <div class="label">NMHC 缁撴灉鍘嗗彶锛堟€荤儍/鐢茬兎/闈炵敳鐑锋€荤儍锛?/div>
             <div class="spacer"></div>
-            <span class="label">开始</span><input id="res-from" class="input mono" style="width:220px" placeholder="YYYY-MM-DD HH:mm:ss" />
-            <span class="label">结束</span><input id="res-to" class="input mono" style="width:220px" placeholder="YYYY-MM-DD HH:mm:ss" />
-            <button class="btn dark" id="res-export">导出CSV</button>
-            <button class="btn dark" id="res-delete">删除时间段</button>
+            <span class="label">寮€濮?/span><input id="res-from" class="input mono" style="width:220px" placeholder="YYYY-MM-DD HH:mm:ss" />
+            <span class="label">缁撴潫</span><input id="res-to" class="input mono" style="width:220px" placeholder="YYYY-MM-DD HH:mm:ss" />
+            <button class="btn dark" id="res-export">瀵煎嚭CSV</button>
+            <button class="btn dark" id="res-delete">鍒犻櫎鏃堕棿娈?/button>
           </div>
           <div class="card" style="border-radius:10px;overflow:hidden">
-            <div id="tblTitle">记录报表</div>
+            <div id="tblTitle">璁板綍鎶ヨ〃</div>
             <table>
-              <thead><tr><th>时间</th><th>总烃</th><th>甲烷</th><th>非甲烷总烃</th></tr></thead>
-              <tbody id="res-tbody"><tr><td class="mono" colspan="4" style="color:var(--muted)">暂无数据</td></tr></tbody>
+              <thead><tr><th>鏃堕棿</th><th>鎬荤儍</th><th>鐢茬兎</th><th>闈炵敳鐑锋€荤儍</th></tr></thead>
+              <tbody id="res-tbody"><tr><td class="mono" colspan="4" style="color:var(--muted)">鏆傛棤鏁版嵁</td></tr></tbody>
             </table>
           </div>
         </div>
@@ -2269,15 +2289,15 @@ var indexHTML = `<!doctype html>
       <section id="view-events" class="view">
         <div class="card cardPad" style="max-width:1240px">
           <div class="row" style="margin-bottom:10px">
-            <label class="modeItem"><input id="evt-only-selected" type="checkbox" checked /> 仅当前设备</label>
+            <label class="modeItem"><input id="evt-only-selected" type="checkbox" checked /> 浠呭綋鍓嶈澶?/label>
             <div class="spacer"></div>
-            <button class="btn dark" id="evt-clear">清空</button>
+            <button class="btn dark" id="evt-clear">娓呯┖</button>
           </div>
           <div class="card" style="border-radius:10px;overflow:hidden">
-            <div id="tblTitle">事件流</div>
+            <div id="tblTitle">浜嬩欢娴?/div>
             <table>
-              <thead><tr><th>时间</th><th>设备</th><th>类型</th><th>摘要</th></tr></thead>
-              <tbody id="evt-tbody"><tr><td class="mono" colspan="4" style="color:var(--muted)">暂无数据</td></tr></tbody>
+              <thead><tr><th>鏃堕棿</th><th>璁惧</th><th>绫诲瀷</th><th>鎽樿</th></tr></thead>
+              <tbody id="evt-tbody"><tr><td class="mono" colspan="4" style="color:var(--muted)">鏆傛棤鏁版嵁</td></tr></tbody>
             </table>
           </div>
         </div>
@@ -2285,36 +2305,36 @@ var indexHTML = `<!doctype html>
 
       <section id="view-logs" class="view">
         <div class="card cardPad" style="max-width:1240px">
-          <div id="tblTitle">调试日志</div>
+          <div id="tblTitle">璋冭瘯鏃ュ織</div>
           <pre id="logs-pre" class="mono" style="margin:0;padding:12px;white-space:pre-wrap"></pre>
         </div>
       </section>
 
       <section id="view-settings" class="view">
         <div class="card cardPad" style="max-width:980px">
-          <div id="tblTitle">设置</div>
+          <div id="tblTitle">璁剧疆</div>
           <div class="row" style="margin-top:12px">
-            <div><div class="label">默认满屏时间(min)</div><input id="set-fullmin" class="input mono" style="width:120px" value="2" /></div>
-            <div><div class="label">默认下限</div><input id="set-ylow" class="input mono" style="width:120px" value="0" /></div>
-            <div><div class="label">默认上限</div><input id="set-yhigh" class="input mono" style="width:120px" value="40" /></div>
-            <div><div class="label">默认峰高自适应</div><label class="modeItem"><input id="set-autoy" type="checkbox" checked /> 启用</label></div>
-            <div><div class="label">默认采集时间(min)</div><input id="set-acqmin" class="input mono" style="width:120px" value="2" /></div>
+            <div><div class="label">榛樿婊″睆鏃堕棿(min)</div><input id="set-fullmin" class="input mono" style="width:120px" value="2" /></div>
+            <div><div class="label">榛樿涓嬮檺</div><input id="set-ylow" class="input mono" style="width:120px" value="0" /></div>
+            <div><div class="label">榛樿涓婇檺</div><input id="set-yhigh" class="input mono" style="width:120px" value="40" /></div>
+            <div><div class="label">榛樿宄伴珮鑷€傚簲</div><label class="modeItem"><input id="set-autoy" type="checkbox" checked /> 鍚敤</label></div>
+            <div><div class="label">榛樿閲囬泦鏃堕棿(min)</div><input id="set-acqmin" class="input mono" style="width:120px" value="2" /></div>
             <div class="spacer"></div>
-            <button class="btn primary" id="set-save">保存</button>
+            <button class="btn primary" id="set-save">淇濆瓨</button>
           </div>
           <div class="row" style="margin-top:12px">
-            <div><div class="label">载气 EPC idx</div><select id="set-epc-carrier" class="select mono" style="width:120px"></select></div>
-            <div><div class="label">氢气 EPC idx</div><select id="set-epc-h2" class="select mono" style="width:120px"></select></div>
-            <div><div class="label">空气 EPC idx</div><select id="set-epc-air" class="select mono" style="width:120px"></select></div>
+            <div><div class="label">杞芥皵 EPC idx</div><select id="set-epc-carrier" class="select mono" style="width:120px"></select></div>
+            <div><div class="label">姘㈡皵 EPC idx</div><select id="set-epc-h2" class="select mono" style="width:120px"></select></div>
+            <div><div class="label">绌烘皵 EPC idx</div><select id="set-epc-air" class="select mono" style="width:120px"></select></div>
             <div class="spacer"></div>
-            <div class="label">提示：idx 来自 Cmd=159 EPC 上报的条目序号（从 0 开始）</div>
+            <div class="label">鎻愮ず锛歩dx 鏉ヨ嚜 Cmd=159 EPC 涓婃姤鐨勬潯鐩簭鍙凤紙浠?0 寮€濮嬶級</div>
           </div>
           <div class="row" style="margin-top:12px">
-            <button class="btn dark" id="set-open-method">方法</button>
-            <button class="btn dark" id="set-open-processing">谱图处理</button>
-            <button class="btn dark" id="set-open-reports">高级报表</button>
+            <button class="btn dark" id="set-open-method">鏂规硶</button>
+            <button class="btn dark" id="set-open-processing">璋卞浘澶勭悊</button>
+            <button class="btn dark" id="set-open-reports">楂樼骇鎶ヨ〃</button>
             <div class="spacer"></div>
-            <div class="label" style="color:var(--muted)">二级入口占位：不占用顶栏标签</div>
+            <div class="label" style="color:var(--muted)">浜岀骇鍏ュ彛鍗犱綅锛氫笉鍗犵敤椤舵爮鏍囩</div>
           </div>
         </div>
       </section>
@@ -2624,9 +2644,9 @@ var indexHTML = `<!doctype html>
           const tds = tr.querySelectorAll('td');
           if(tds.length < 2) continue;
           const name = (tds[0].textContent || '').trim();
-          if(name === '总烃') tds[1].textContent = f4(thc);
-          if(name === '甲烷') tds[1].textContent = f4(ch4);
-          if(name === '非甲烷总烃'){
+          if(name === '鎬荤儍') tds[1].textContent = f4(thc);
+          if(name === '鐢茬兎') tds[1].textContent = f4(ch4);
+          if(name === '闈炵敳鐑锋€荤儍'){
             tds[1].textContent = f4(latest ? latest.nmhc : null);
           }
         }
@@ -2648,7 +2668,7 @@ var indexHTML = `<!doctype html>
       }
       rows.sort((a,b)=> String(a.id).localeCompare(String(b.id)));
       if(rows.length === 0){
-        overviewDevicesEl.innerHTML = '<tr><td class="mono" colspan="5" style="color:var(--muted)">等待 GC...</td></tr>';
+        overviewDevicesEl.innerHTML = '<tr><td class="mono" colspan="5" style="color:var(--muted)">绛夊緟 GC...</td></tr>';
         return;
       }
       overviewDevicesEl.innerHTML = rows.map(r=>{
@@ -2666,7 +2686,7 @@ var indexHTML = `<!doctype html>
       if(!resTbodyEl) return;
       const sel = selectedDevice();
       if(!sel){
-        resTbodyEl.innerHTML = '<tr><td class="mono" colspan="4" style="color:var(--muted)">未选择设备</td></tr>';
+        resTbodyEl.innerHTML = '<tr><td class="mono" colspan="4" style="color:var(--muted)">鏈€夋嫨璁惧</td></tr>';
         return;
       }
       const fromD = parseTimeText(resFromEl && resFromEl.value);
@@ -2675,7 +2695,7 @@ var indexHTML = `<!doctype html>
       const arr = loadNmchHistory(sel);
       const fetchSt = getNmhcFetchState(sel);
       if(arr.length === 0 && fetchSt.inFlight){
-        resTbodyEl.innerHTML = '<tr><td class="mono" colspan="4" style="color:var(--muted)">加载中...</td></tr>';
+        resTbodyEl.innerHTML = '<tr><td class="mono" colspan="4" style="color:var(--muted)">鍔犺浇涓?..</td></tr>';
         return;
       }
       const fromT = fromD ? fromD.getTime() : null;
@@ -2691,7 +2711,7 @@ var indexHTML = `<!doctype html>
       }
       items.sort((a,b)=> b.t.getTime() - a.t.getTime());
       if(items.length === 0){
-        resTbodyEl.innerHTML = '<tr><td class="mono" colspan="4" style="color:var(--muted)">暂无数据</td></tr>';
+        resTbodyEl.innerHTML = '<tr><td class="mono" colspan="4" style="color:var(--muted)">鏆傛棤鏁版嵁</td></tr>';
         return;
       }
       resTbodyEl.innerHTML = items.slice(0, 2000).map(x=>{
@@ -2712,7 +2732,7 @@ var indexHTML = `<!doctype html>
       const sel = selectedDevice();
       const items = onlySel && sel ? evtBuf.filter(e=> e.deviceId === sel) : evtBuf.slice();
       if(items.length === 0){
-        evtTbodyEl.innerHTML = '<tr><td class="mono" colspan="4" style="color:var(--muted)">暂无数据</td></tr>';
+        evtTbodyEl.innerHTML = '<tr><td class="mono" colspan="4" style="color:var(--muted)">鏆傛棤鏁版嵁</td></tr>';
         return;
       }
       evtTbodyEl.innerHTML = items.slice(-300).reverse().map(e=>{
@@ -2809,16 +2829,16 @@ var indexHTML = `<!doctype html>
       const fromD = parseTimeText(resFromEl && resFromEl.value);
       const toD = parseTimeText(resToEl && resToEl.value);
       if(!fromD || !toD){
-        alert('请填写开始与结束时间');
+        alert('璇峰～鍐欏紑濮嬩笌缁撴潫鏃堕棿');
         return;
       }
       const fromT = fromD.getTime();
       const toT = toD.getTime();
       if(!(toT >= fromT)){
-        alert('结束时间必须大于开始时间');
+        alert('缁撴潫鏃堕棿蹇呴』澶т簬寮€濮嬫椂闂?);
         return;
       }
-      if(!confirm('确认删除该时间段内的记录？')) return;
+      if(!confirm('纭鍒犻櫎璇ユ椂闂存鍐呯殑璁板綍锛?)) return;
       const qs = new URLSearchParams();
       qs.set('deviceId', sel);
       qs.set('from', fromD.toISOString());
@@ -2826,7 +2846,7 @@ var indexHTML = `<!doctype html>
       const res = await fetch('/api/v1/results/nmhc?' + qs.toString(), {method:'DELETE'});
       const j = await res.json().catch(()=>({}));
       if(!res.ok){
-        alert(j && j.error ? String(j.error) : '删除失败');
+        alert(j && j.error ? String(j.error) : '鍒犻櫎澶辫触');
         return;
       }
       kickFetchNmhcHistory(sel, null, null, true);
@@ -2887,7 +2907,7 @@ var indexHTML = `<!doctype html>
       ctx.rotate(-Math.PI/2);
       ctx.fillStyle = '#2B6DFF';
       ctx.font = '14px system-ui';
-      ctx.fillText('信号(pA)', -28, 0);
+      ctx.fillText('淇″彿(pA)', -28, 0);
       ctx.restore();
     }
 
@@ -2989,7 +3009,7 @@ var indexHTML = `<!doctype html>
       if(!sel){
         ctx.fillStyle = '#777';
         ctx.font = '14px system-ui';
-        ctx.fillText('等待选择设备', 12, 22);
+        ctx.fillText('绛夊緟閫夋嫨璁惧', 12, 22);
         return;
       }
 
@@ -2997,7 +3017,7 @@ var indexHTML = `<!doctype html>
       if(!s.pts || s.pts.length < 2){
         ctx.fillStyle = '#777';
         ctx.font = '14px system-ui';
-        ctx.fillText('暂无实时数据（等待主板发送 143 数据流）', 12, 22);
+        ctx.fillText('鏆傛棤瀹炴椂鏁版嵁锛堢瓑寰呬富鏉垮彂閫?143 鏁版嵁娴侊級', 12, 22);
         return;
       }
 
@@ -3123,7 +3143,7 @@ var indexHTML = `<!doctype html>
       ctx.rotate(-Math.PI/2);
       ctx.fillStyle = '#1F5CFF';
       ctx.font = '700 14px system-ui';
-      ctx.fillText('信号(pA)', -32, 0);
+      ctx.fillText('淇″彿(pA)', -32, 0);
       ctx.restore();
 
       ctx.strokeStyle = '#1F5CFF';
@@ -3213,7 +3233,7 @@ var indexHTML = `<!doctype html>
           }
           if(prefer){
             deviceEl.value = prefer;
-            statusEl.textContent = '在线: ' + prefer;
+            statusEl.textContent = '鍦ㄧ嚎: ' + prefer;
             const run = document.getElementById('home-runCountVal');
             if(run) run.textContent = String(loadNmchHistory(prefer).length);
           }
@@ -3252,7 +3272,7 @@ var indexHTML = `<!doctype html>
       }
       const d = deviceInfo.get(cur);
       if(!d){
-        dbg.textContent = '设备: ' + cur + '（未获取到统计信息）';
+        dbg.textContent = '璁惧: ' + cur + '锛堟湭鑾峰彇鍒扮粺璁′俊鎭級';
         setButtonsEnabled(false);
         return;
       }
@@ -3271,14 +3291,14 @@ var indexHTML = `<!doctype html>
       if(serverInfo && serverInfo.pid){
         sinfo = ' | pid=' + serverInfo.pid;
       }
-      dbg.textContent = '设备: ' + cur + ' | lastCmd=' + d.lastCmd + ' | 143=' + c143 + ' | lastSeen=' + (seenAgo>=0 ? (seenAgo+'s') : '-') + ' | last143=' + (d143Ago>=0 ? (d143Ago+'s') : '-') + ' | control=' + (d.allowControl ? 'on' : 'off') + extra + sinfo;
+      dbg.textContent = '璁惧: ' + cur + ' | lastCmd=' + d.lastCmd + ' | 143=' + c143 + ' | lastSeen=' + (seenAgo>=0 ? (seenAgo+'s') : '-') + ' | last143=' + (d143Ago>=0 ? (d143Ago+'s') : '-') + ' | control=' + (d.allowControl ? 'on' : 'off') + extra + sinfo;
 	  setButtonsEnabled(!!d.connected);
     }
 
     async function sendCmd(name){
       const sel = selectedDevice();
       if(!sel){
-        alert('请选择设备');
+        alert('璇烽€夋嫨璁惧');
         return;
       }
       const channel = Number(chnEl.value || '0');
@@ -3286,7 +3306,7 @@ var indexHTML = `<!doctype html>
       const res = await fetch(url, {method:'POST'});
       const j = await res.json().catch(()=>({}));
       if(!res.ok){
-        alert(j.error || '发送失败');
+        alert(j.error || '鍙戦€佸け璐?);
         return;
       }
       await refreshDevices();
@@ -3434,13 +3454,13 @@ var indexHTML = `<!doctype html>
               const tds = tr.querySelectorAll('td');
               if(tds.length < 2) continue;
               const name = (tds[0].textContent || '').trim();
-              if(name === '总烃'){
+              if(name === '鎬荤儍'){
                 tds[1].textContent = thc && isFinite(thc.height) ? Number(thc.height).toFixed(4) : '-';
               }
-              if(name === '甲烷'){
+              if(name === '鐢茬兎'){
                 tds[1].textContent = ch4 && isFinite(ch4.height) ? Number(ch4.height).toFixed(4) : '-';
               }
-              if(name === '非甲烷总烃'){
+              if(name === '闈炵敳鐑锋€荤儍'){
                 if(thc && ch4 && isFinite(thc.height) && isFinite(ch4.height)){
                   tds[1].textContent = (Number(thc.height) - Number(ch4.height)).toFixed(4);
                 } else {
@@ -3467,10 +3487,10 @@ var indexHTML = `<!doctype html>
         const sel = selectedDevice();
         if(sel === ''){
           if(String(msg.deviceId).startsWith('GC')){
-            statusEl.textContent = '在线: ' + msg.deviceId + '（自动）';
+            statusEl.textContent = '鍦ㄧ嚎: ' + msg.deviceId + '锛堣嚜鍔級';
           }
         } else if(sel === msg.deviceId){
-          statusEl.textContent = '在线: ' + msg.deviceId;
+          statusEl.textContent = '鍦ㄧ嚎: ' + msg.deviceId;
         }
         if(views.events && views.events.classList.contains('active')) renderEvents();
         return;
@@ -3488,7 +3508,7 @@ var indexHTML = `<!doctype html>
 
       if(!sel){
         deviceEl.value = msg.deviceId;
-        statusEl.textContent = '在线: ' + msg.deviceId;
+        statusEl.textContent = '鍦ㄧ嚎: ' + msg.deviceId;
       }
 
       let s = getStream(msg.deviceId, msgChannel);
@@ -3522,8 +3542,8 @@ var indexHTML = `<!doctype html>
 
       const minText = (s.lastElapsedS/60).toFixed(3);
       const vText = (s.lastValue === null ? '0.000' : Number(s.lastValue).toFixed(3));
-      statEl.textContent = '通道' + (Number(chnEl.value||'0')+1) + ': ' + minText + ' min   ' + vText + ' pA';
-      homeStatusEl.textContent = '时间: ' + minText + ' min   信号: ' + vText + ' pA';
+      statEl.textContent = '閫氶亾' + (Number(chnEl.value||'0')+1) + ': ' + minText + ' min   ' + vText + ' pA';
+      homeStatusEl.textContent = '鏃堕棿: ' + minText + ' min   淇″彿: ' + vText + ' pA';
       draw();
       renderDebug();
     };
@@ -3545,24 +3565,24 @@ var indexHTML = `<!doctype html>
     es.onerror = ()=>{
       const sel = selectedDevice();
       if(sel){
-        statusEl.textContent = '连接断开: ' + sel;
+        statusEl.textContent = '杩炴帴鏂紑: ' + sel;
       } else if(lastActiveDevice){
-        statusEl.textContent = '连接断开: ' + lastActiveDevice;
+        statusEl.textContent = '杩炴帴鏂紑: ' + lastActiveDevice;
       } else {
-        statusEl.textContent = '连接断开';
+        statusEl.textContent = '杩炴帴鏂紑';
       }
     };
 
     deviceEl.addEventListener('change', ()=>{
       const sel = selectedDevice();
       if(sel){
-        statusEl.textContent = '在线: ' + sel;
+        statusEl.textContent = '鍦ㄧ嚎: ' + sel;
         const run = document.getElementById('home-runCountVal');
         if(run) run.textContent = String(loadNmchHistory(sel).length);
         kickFetchNmhcHistory(sel, null, null, true);
         restoreFromBackend(sel);
       } else {
-        statusEl.textContent = '未选择设备（自动）';
+        statusEl.textContent = '鏈€夋嫨璁惧锛堣嚜鍔級';
       }
       draw();
       renderDebug();
@@ -3710,8 +3730,8 @@ var indexHTML = `<!doctype html>
       trimPointsToWindow(s);
       const minText = (s.lastElapsedS/60).toFixed(3);
       const vText = (s.lastValue === null ? '0.000' : Number(s.lastValue).toFixed(3));
-      statEl.textContent = '通道' + (Number(chnEl.value||'0')+1) + ': ' + minText + ' min   ' + vText + ' pA';
-      homeStatusEl.textContent = '时间: ' + minText + ' min   信号: ' + vText + ' pA';
+      statEl.textContent = '閫氶亾' + (Number(chnEl.value||'0')+1) + ': ' + minText + ' min   ' + vText + ' pA';
+      homeStatusEl.textContent = '鏃堕棿: ' + minText + ' min   淇″彿: ' + vText + ' pA';
     }
 
     async function restoreFromBackend(deviceId){
@@ -3843,11 +3863,11 @@ var indexHTML = `<!doctype html>
     if(setEpcAirEl) setEpcAirEl.addEventListener('change', ()=>{ saveEpcMap({ carrier: Number(setEpcCarrierEl && setEpcCarrierEl.value || '0'), h2: Number(setEpcH2El && setEpcH2El.value || '1'), air: Number(setEpcAirEl.value||'2') }); const sel = selectedDevice(); saveUiToBackend(sel); });
 
     const openPlaceholder = (title)=>{
-      alert(title + '：待实现');
+      alert(title + '锛氬緟瀹炵幇');
     };
-    if(setOpenMethodEl) setOpenMethodEl.addEventListener('click', ()=>openPlaceholder('方法'));
-    if(setOpenProcessingEl) setOpenProcessingEl.addEventListener('click', ()=>openPlaceholder('谱图处理'));
-    if(setOpenReportsEl) setOpenReportsEl.addEventListener('click', ()=>openPlaceholder('高级报表'));
+    if(setOpenMethodEl) setOpenMethodEl.addEventListener('click', ()=>openPlaceholder('鏂规硶'));
+    if(setOpenProcessingEl) setOpenProcessingEl.addEventListener('click', ()=>openPlaceholder('璋卞浘澶勭悊'));
+    if(setOpenReportsEl) setOpenReportsEl.addEventListener('click', ()=>openPlaceholder('楂樼骇鎶ヨ〃'));
   </script>
 </body>
 </html>`

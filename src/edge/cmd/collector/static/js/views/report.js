@@ -44,7 +44,15 @@ export function initReport() {
             const to = new Date(document.getElementById('report-to').value).toISOString();
             
             try {
-                const res = await fetch(\`/api/history/results?from=\${encodeURIComponent(from)}&to=\${encodeURIComponent(to)}&limit=100\`);
+                // Try to get current device ID, if offline, fallback to recent history without filter
+                const devRes = await fetch('/api/v1/devices');
+                const devices = await devRes.json();
+                let deviceIdQuery = '';
+                if (devices && devices.length > 0) {
+                    deviceIdQuery = `deviceId=${encodeURIComponent(devices[0].deviceId)}&`;
+                }
+
+                const res = await fetch(`/api/history/results?${deviceIdQuery}from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&limit=100`);
                 const data = await res.json();
                 
                 const tbody = document.getElementById('tbody-report');
@@ -56,26 +64,28 @@ export function initReport() {
                 tbody.innerHTML = '';
                 data.forEach(row => {
                     let thc = 0, ch4 = 0, nmhc = 0;
-                    if(row.pollutants) {
-                        row.pollutants.forEach(p => {
+                    const resObj = (row.result && row.result.result) ? row.result.result : (row.result || row);
+                    
+                    if(resObj.pollutants) {
+                        resObj.pollutants.forEach(p => {
                             if(p.code === 'THC') thc = p.amount;
                             if(p.code === 'CH4') ch4 = p.amount;
                         });
                     }
-                    if(row.groups) {
-                        row.groups.forEach(g => {
+                    if(resObj.groups) {
+                        resObj.groups.forEach(g => {
                             if(g.code === 'NMHC') nmhc = g.amount;
                         });
                     }
-                    
-                    tbody.innerHTML += \`<tr>
-                        <td>\${new Date(row.created_at).toLocaleString()}</td>
-                        <td>\${row.device_id}</td>
-                        <td>\${row.trace_id.substring(0, 8)}...</td>
-                        <td>\${thc.toFixed(2)}</td>
-                        <td>\${ch4.toFixed(2)}</td>
-                        <td>\${nmhc.toFixed(2)}</td>
-                    </tr>\`;
+
+                    tbody.innerHTML += `<tr>
+                        <td>${new Date(row.created_at).toLocaleString()}</td>
+                        <td>${row.device_id}</td>
+                        <td>${row.trace_id.substring(0, 8)}...</td>
+                        <td>${thc.toFixed(2)}</td>
+                        <td>${ch4.toFixed(2)}</td>
+                        <td>${nmhc.toFixed(2)}</td>
+                    </tr>`;
                 });
             } catch(e) {
                 console.error(e);
@@ -83,10 +93,21 @@ export function initReport() {
             }
         });
 
-        document.getElementById('btn-export-report').addEventListener('click', () => {
-            const from = new Date(document.getElementById('report-from').value).toISOString();
-            const to = new Date(document.getElementById('report-to').value).toISOString();
-            window.location.href = \`/api/v1/results/nmhc/export.csv?from=\${encodeURIComponent(from)}&to=\${encodeURIComponent(to)}\`;
+        document.getElementById('btn-export-report').addEventListener('click', async () => {
+            try {
+                const devRes = await fetch('/api/v1/devices');
+                const devices = await devRes.json();
+                let deviceIdQuery = '';
+                if (devices && devices.length > 0) {
+                    deviceIdQuery = `deviceId=${encodeURIComponent(devices[0].deviceId)}&`;
+                }
+                
+                const from = new Date(document.getElementById('report-from').value).toISOString();
+                const to = new Date(document.getElementById('report-to').value).toISOString();
+                window.location.href = `/api/v1/results/nmhc/export.csv?${deviceIdQuery}from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+            } catch(e) {
+                window.showToast('导出失败: ' + e.message, true);
+            }
         });
     }, 0);
 }
