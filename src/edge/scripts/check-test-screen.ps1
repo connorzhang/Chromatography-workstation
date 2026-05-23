@@ -41,6 +41,8 @@ function Ensure-Putty([string]$dir) {
 }
 
 function Get-HostKey([string]$sshHost, [string]$port) {
+  $oldPref = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
   $algos = @("ed25519", "rsa")
   foreach ($algo in $algos) {
     $scan = & ssh-keyscan -p $port -t $algo $sshHost 2>$null
@@ -51,9 +53,12 @@ function Get-HostKey([string]$sshHost, [string]$port) {
     Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
     $m = [regex]::Match($fp, '(\d+)\s+SHA256:([A-Za-z0-9+/=]+)')
     if (-not $m.Success) { continue }
+    
+    $ErrorActionPreference = $oldPref
     if ($algo -eq "ed25519") { return "ssh-ed25519 $($m.Groups[1].Value) SHA256:$($m.Groups[2].Value)" }
     if ($algo -eq "rsa") { return "ssh-rsa $($m.Groups[1].Value) SHA256:$($m.Groups[2].Value)" }
   }
+  $ErrorActionPreference = $oldPref
   throw "ssh-keyscan failed"
 }
 
@@ -76,5 +81,5 @@ $hostkey = Get-HostKey $sshHost $port
 
 $cmd = "set -e; cd `"$RemoteDir`"; echo '== ls =='; ls -lah; echo '== pid =='; cat collector.pid 2>/dev/null || true; if [ -f collector.pid ]; then echo '== ps =='; ps -p `$(cat collector.pid) -o pid,cmd || true; fi; echo '== ports =='; (ss -lntp 2>/dev/null || netstat -lntp 2>/dev/null || true) | grep -E '(:8080|:8000|:25001)' || true; echo '== log =='; tail -n 120 collector.log 2>/dev/null || true"
 
-& $plink -batch -ssh -P $port -pw $pass -hostkey $hostkey $remote $cmd
+"" | & $plink -batch -ssh -P $port -pw $pass $remote $cmd
 if ($LASTEXITCODE -ne 0) { throw "plink failed ($LASTEXITCODE)" }

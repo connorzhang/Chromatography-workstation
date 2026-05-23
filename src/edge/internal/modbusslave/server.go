@@ -7,27 +7,26 @@ import (
 	"time"
 
 	"github.com/simonvetter/modbus"
+	contracts "chromatography-workstation/edge/internal/contracts/v1"
 )
 
 type Server struct {
-	srv      *modbus.ModbusServer
+	srvTCP   *modbus.ModbusServer
 	mu       sync.RWMutex
 	regs     [65536]uint16
 	deviceID string
 }
 
-func NewServer(port int, deviceID string) (*Server, error) {
+func NewServer(port int, deviceID string, rtuPort string) (*Server, error) {
 	s := &Server{
 		deviceID: deviceID,
 	}
 
 	// 填入 24 字节 ASCII 标识 (寄存器 800 - 811)
-	// 默认值: "69000000001ABCDEFG123456" (对应长度24)
 	defaultID := "69000000001ABCDEFG123456"
 	if len(deviceID) >= 24 {
 		defaultID = deviceID[:24]
 	} else {
-		// 补齐空格
 		defaultID = deviceID
 		for len(defaultID) < 24 {
 			defaultID += " "
@@ -35,26 +34,29 @@ func NewServer(port int, deviceID string) (*Server, error) {
 	}
 	s.setASCII(800, defaultID)
 
-	srv, err := modbus.NewServer(&modbus.ServerConfiguration{
+	srvTCP, err := modbus.NewServer(&modbus.ServerConfiguration{
 		URL:        "tcp://0.0.0.0:1502", // 固定使用 1502
 		Timeout:    30 * time.Second,
 		MaxClients: 5,
 	}, s)
-
 	if err != nil {
 		return nil, err
 	}
+	s.srvTCP = srvTCP
 
-	s.srv = srv
+	if rtuPort != "" {
+		log.Printf("Note: RTU server on %s is requested, but current modbus library only supports TCP server. Please use Modbus TCP (port 1502).", rtuPort)
+	}
+
 	return s, nil
 }
 
 func (s *Server) Start() error {
-	return s.srv.Start()
+	return s.srvTCP.Start()
 }
 
 func (s *Server) Stop() error {
-	return s.srv.Stop()
+	return s.srvTCP.Stop()
 }
 
 // 供主程序实时更新浓度等数据 (寄存器 100 起)
@@ -64,6 +66,50 @@ func (s *Server) UpdateResults(thc, ch4, nmhc float64) {
 	s.setFloat32(100, float32(thc))
 	s.setFloat32(102, float32(ch4))
 	s.setFloat32(104, float32(nmhc))
+}
+
+// 供主程序更新完整的积分结果
+func (s *Server) UpdateFullResult(res contracts.Result) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	
+	// 首先保留原有的 100 102 104 逻辑
+	var thc, ch4, nmhc float64
+	for _, p := range res.Pollutants {
+		if p.Code == "THC" {
+			thc = p.Amount
+		}
+		if p.Code == "CH4" {
+			ch4 = p.Amount
+		}
+	}
+	for _, g := range res.Groups {
+		if g.Code == "NMHC" {
+			nmhc = g.Amount
+		}
+	}
+	s.setFloat32(100, float32(thc))
+	s.setFloat32(102, float32(ch4))
+	s.setFloat32(104, float32(nmhc))
+
+	// 寄存器 200 起，按顺序记录每个 Pollutant 的详细积分信息
+	// 每个组分占用 10 个寄存器：
+	// +0: 浓度 (Float32, 2 regs)
+	// +2: 保留时间 (Float32, 2 regs)
+	// +4: 面积 (Float32, 2 regs)
+	// +6: 高度 (Float32, 2 regs)
+	// +8: 预留
+	baseAddr := uint16(200)
+	for i, p := range res.Pollutants {
+		if i >= 20 { // 最多支持 20 个组分
+			break
+		}
+		addr := baseAddr + uint16(i*10)
+		s.setFloat32(addr+0, float32(p.Amount))
+		s.setFloat32(addr+2, float32(p.RtS/60.0)) // 保留时间转回分钟
+		s.setFloat32(addr+4, float32(p.Area))
+		s.setFloat32(addr+6, float32(p.Height))
+	}
 }
 
 func (s *Server) setFloat32(addr uint16, v float32) {
