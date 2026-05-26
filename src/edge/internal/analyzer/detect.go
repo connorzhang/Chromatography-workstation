@@ -24,67 +24,124 @@ func DetectAllPeaks(trace contracts.Trace, method contracts.Method) []contracts.
 			maxY = v
 		}
 	}
-	// 用户要求最小峰高默认 0.1。为了防止极大峰导致全局 1% 阈值过高而漏掉小峰，我们将动态比例调小，或者直接主要依赖绝对峰高 0.1
-	threshold := math.Max((maxY - minY) * 0.002, 0.1) 
+	// 获取用户配置的积分参数，并设置兜底默认值
+	minHeight := method.Integration.MinHeight
+	if minHeight <= 0 {
+		minHeight = 0.1 // 默认 0.1
+	}
+	minWidth := method.Integration.MinWidth
+	if minWidth <= 0 {
+		minWidth = 1.5 // 默认 1.5 秒
+	}
+	slope := method.Integration.Slope
+	if slope <= 0 {
+		slope = 0 // 目前作为容差储备
+	}
+
+	// 动态全局极差比例作为辅助阈值（防止单点极高导致所有峰消失，比例设为极小 0.2%）
+	dynThreshold := math.Max((maxY - minY) * 0.002, minHeight)
+	threshold := dynThreshold
 
 	var peaks []contracts.PollutantResult
 
 	for i := 1; i < len(smoothed)-1; i++ {
 		// 寻找局部极大值
 		if smoothed[i] > smoothed[i-1] && smoothed[i] >= smoothed[i+1] {
-			// 向左找谷底：直到不再下降
-			left := i
-			for left > 0 {
-				if smoothed[left-1] < smoothed[left] {
-					left--
-				} else {
-					// 可能是平坦基线或微小噪声起伏，往左展望 15 个点看是否还会继续下降
-					foundLower := false
-					for k := 1; k <= 15 && left-k >= 0; k++ {
-						if smoothed[left-k] < smoothed[left] {
-							left = left - k
-							foundLower = true
-							break
-						}
-						// 如果往左展望时发现上升超过了阈值的一小部分，说明遇到了另一个峰，立即停止
-						if smoothed[left-k]-smoothed[left] > threshold*0.2 {
-							break
-						}
-					}
-					if !foundLower {
-						break
-					}
+			// 1. 寻找原始的物理谷底（单调下降结束点）
+			leftValley := i
+			for j := i - 1; j > 0; j-- {
+				if smoothed[j-1] > smoothed[j] { // 遇到上升，说明到达谷底
+					break
+				}
+				leftValley = j
+			}
+
+			// 2. 寻找左侧的最大斜率（拐点）
+			maxSlopeLeft := 0.0
+			for j := i; j > leftValley; j-- {
+				s := smoothed[j] - smoothed[j-1]
+				if s > maxSlopeLeft {
+					maxSlopeLeft = s
 				}
 			}
 
-			// 向右找谷底：直到不再下降
-			right := i
-			for right < len(smoothed)-1 {
-				if smoothed[right+1] < smoothed[right] {
-					right++
-				} else {
-					// 往右展望 15 个点
-					foundLower := false
-					for k := 1; k <= 15 && right+k < len(smoothed); k++ {
-						if smoothed[right+k] < smoothed[right] {
-							right = right + k
-							foundLower = true
-							break
-						}
-						if smoothed[right+k]-smoothed[right] > threshold*0.2 {
-							break
-						}
-					}
-					if !foundLower {
-						break
-					}
+			// 3. 动态计算截断斜率阈值
+			// 采用专业色谱软件的一阶导数阈值法：使用最大斜率的 3% 作为截止条件
+			// 这样能自动适应大峰和小峰：大峰斜率大，截止点自然靠外；小峰斜率小，截止点自然紧凑
+			cutoffLeft := maxSlopeLeft * 0.01
+			if method.Integration.Slope > 0 {
+				cutoffLeft = method.Integration.Slope * trace.DtS
+			}
+			if cutoffLeft < dynThreshold*0.01 {
+				cutoffLeft = dynThreshold * 0.01
+			}
+
+			// 4. 从峰顶向左寻找截断点
+			left := leftValley
+			passedInfLeft := false
+			for j := i - 1; j >= leftValley; j-- {
+				s := smoothed[j+1] - smoothed[j]
+				// 只要经过了最大斜率的 50%，就认为越过了拐点
+				if s >= maxSlopeLeft*0.5 {
+					passedInfLeft = true
 				}
+				// 越过拐点后，如果斜率降到了截止阈值以下，就截断
+				if passedInfLeft && s <= cutoffLeft {
+					left = j
+					break
+				}
+			}
+			// 兜底：如果没触发截断（比如峰很窄，很快就到底了），就用物理谷底
+			if !passedInfLeft || left == leftValley {
+				left = leftValley
+			}
+
+			// --- 右侧同理 ---
+			rightValley := i
+			for j := i + 1; j < len(smoothed)-1; j++ {
+				if smoothed[j+1] > smoothed[j] {
+					break
+				}
+				rightValley = j
+			}
+
+			maxSlopeRight := 0.0
+			for j := i; j < rightValley; j++ {
+				s := smoothed[j] - smoothed[j+1]
+				if s > maxSlopeRight {
+					maxSlopeRight = s
+				}
+			}
+
+			cutoffRight := maxSlopeRight * 0.01
+			if method.Integration.Slope > 0 {
+				cutoffRight = method.Integration.Slope * trace.DtS
+			}
+			if cutoffRight < dynThreshold*0.01 {
+				cutoffRight = dynThreshold * 0.01
+			}
+
+			right := rightValley
+			passedInfRight := false
+			for j := i + 1; j <= rightValley; j++ {
+				s := smoothed[j-1] - smoothed[j]
+				if s >= maxSlopeRight*0.5 {
+					passedInfRight = true
+				}
+				if passedInfRight && s <= cutoffRight {
+					right = j
+					break
+				}
+			}
+			if !passedInfRight || right == rightValley {
+				right = rightValley
 			}
 
 			// 如果两边谷底太不平衡，很可能是跨了其他峰的宽基线
-			if smoothed[i]-smoothed[left] < threshold || smoothed[i]-smoothed[right] < threshold {
-				continue
-			}
+			// 但也不能直接 continue 丢弃，而是应该记录下来
+			// if smoothed[i]-smoothed[left] < threshold || smoothed[i]-smoothed[right] < threshold {
+			// 	continue
+			// }
 
 			y0 := smoothed[left]
 			y1 := smoothed[right]
@@ -93,8 +150,8 @@ func DetectAllPeaks(trace contracts.Trace, method contracts.Method) []contracts.
 			t0 := float64(left) * trace.DtS
 			t1 := float64(right) * trace.DtS
 
-			// 过滤掉积分区间太窄的假峰 (宽度小于 1.5 秒)
-			if t1-t0 < 1.5 {
+			// 过滤掉积分区间太窄的假峰
+			if t1-t0 < minWidth {
 				continue
 			}
 
@@ -156,8 +213,14 @@ func DetectAllPeaks(trace contracts.Trace, method contracts.Method) []contracts.
 
 	// 遍历方法中配置的每一个标定组分，在检测到的峰中寻找落在区间内且响应值最大的峰作为匹配峰
 	for _, p := range method.Pollutants {
-		windowLeft := p.StartS - 6.0
-		windowRight := p.EndS + 6.0
+		// 这里必须用 p.StartS 和 p.EndS 来约束匹配窗口
+		// 注意：如果之前标定的时候没有生成 StartS 和 EndS，我们要退回使用保留时间和 PaddingS
+		windowLeft := p.StartS
+		windowRight := p.EndS
+		if windowLeft <= 0 || windowRight <= 0 || windowLeft == windowRight {
+			windowLeft = p.RtS - (p.PaddingS / 2.0)
+			windowRight = p.RtS + (p.PaddingS / 2.0)
+		}
 		
 		bestIdx := -1
 		bestResp := -1.0
@@ -168,6 +231,7 @@ func DetectAllPeaks(trace contracts.Trace, method contracts.Method) []contracts.
 				continue
 			}
 			
+			// 匹配条件：该峰的顶点保留时间 (RtS) 必须落在该组分的窗宽内
 			if pk.RtS >= windowLeft && pk.RtS <= windowRight {
 				resp := pk.Area
 				if p.RespStyle == 1 {
@@ -191,7 +255,7 @@ func DetectAllPeaks(trace contracts.Trace, method contracts.Method) []contracts.
 				Code:   p.Code,
 				Name:   p.Name,
 				Status: "not_detected",
-				RtS:    (p.StartS + p.EndS) / 2.0,
+				RtS:    p.RtS,
 				StartS: p.StartS,
 				EndS:   p.EndS,
 				Area:   0,
@@ -200,6 +264,13 @@ func DetectAllPeaks(trace contracts.Trace, method contracts.Method) []contracts.
 			})
 		}
 	}
+
+	// // 将未被匹配的未知峰也追加到最终结果中
+	// for _, pk := range peaks {
+	// 	if pk.Code != "" && len(pk.Code) > 4 && pk.Code[:4] == "Unk_" {
+	// 		finalPeaks = append(finalPeaks, pk)
+	// 	}
+	// }
 
 	return finalPeaks
 }

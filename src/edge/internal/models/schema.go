@@ -49,6 +49,7 @@ type Integration struct {
 	MinArea   float64 `json:"min_area"`   // 最小峰面积阈值 (过滤噪声)
 	MinHeight float64 `json:"min_height"` // 最小峰高阈值
 	Slope     float64 `json:"slope"`      // 斜率阈值 (识别峰起点/终点)
+	MinWidth  float64 `json:"min_width"`  // 最小峰宽
 }
 
 // EventRow 外部事件与多位阀切换时间程序
@@ -59,8 +60,27 @@ type EventRow struct {
 
 // HardwareConfig 仪器控制参数，保存当前的控温、点火及气路设定值
 type HardwareConfig struct {
-	Temperatures map[string]float64 `json:"temperatures"` // key: "Inj1", "Col", "Det1"
-	EPCs         map[string]float64 `json:"epcs"`         // key: "Carrier1", "H2", "Air"
+	Temperatures map[string]float64 `json:"temperatures"` // key: "Inj1", "Col", "Det1", "Valve", "Inj2", "Det2", "Protect"
+	EPCs         map[string]float64 `json:"epcs"`         // key: "Carrier1", "H2_1", "Air1", "Aux", "Carrier2", "H2_2", "Air2"
 	Ignite       bool               `json:"ignite"`       // FID 点火状态
+	IgniteThreshold1 float64        `json:"igniteThreshold1"`
+	IgniteThreshold2 float64        `json:"igniteThreshold2"`
+	IgniteDuration   float64        `json:"igniteDuration"`
 	Events       []EventRow         `json:"events"`       // 外部事件序列
+}
+
+// UploadConfig 上传与数采仪配置
+type UploadConfig struct {
+	Ranges          map[string][]float64 `json:"ranges"`          // key: 组分名, value: [下限, 上限1, 上限2]
+	Use420mA        bool                 `json:"use420mA"`        // 是否使用 4-20mA
+	EnrichTemp      float64              `json:"enrichTemp"`      // 富集温度
+	DesorbTemp      float64              `json:"desorbTemp"`      // 解析温度
+	SampleFlow      float64              `json:"sampleFlow"`      // 样品流量
+	EnrichTime      float64              `json:"enrichTime"`      // 富集时长
+	DesorbTime      float64              `json:"desorbTime"`      // 解析时长
+	DeviceNo        string               `json:"deviceNo"`        // 设备号
+	UploadIP        string               `json:"uploadIP"`        // 上传IP
+	UploadPort      int                  `json:"uploadPort"`      // 上传端口
+	ChromatographIP string               `json:"chromatographIP"` // 色谱IP
+	EnableUpload    bool                 `json:"enableUpload"`    // 是否启用上传
 }
