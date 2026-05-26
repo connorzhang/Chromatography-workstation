@@ -1092,6 +1092,64 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			return
 		}
 	})
+
+	mux.HandleFunc("/api/v1/hardware", func(w http.ResponseWriter, r *http.Request) {
+		deviceID := strings.TrimSpace(r.URL.Query().Get("deviceId"))
+		if deviceID == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "deviceId required"})
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			hw, ok := pstore.LoadHardwareConfig(deviceID)
+			if !ok {
+				hw = models.HardwareConfig{}
+			}
+			writeJSON(w, http.StatusOK, hw)
+			return
+		case http.MethodPost:
+			var hw models.HardwareConfig
+			if json.NewDecoder(r.Body).Decode(&hw) != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+				return
+			}
+			pstore.SaveHardwareConfig(deviceID, hw)
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+			return
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+	})
+
+	mux.HandleFunc("/api/v1/uploadconfig", func(w http.ResponseWriter, r *http.Request) {
+		deviceID := strings.TrimSpace(r.URL.Query().Get("deviceId"))
+		if deviceID == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "deviceId required"})
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			cfg, ok := pstore.LoadUploadConfig(deviceID)
+			if !ok {
+				cfg = models.UploadConfig{}
+			}
+			writeJSON(w, http.StatusOK, cfg)
+			return
+		case http.MethodPost:
+			var cfg models.UploadConfig
+			if json.NewDecoder(r.Body).Decode(&cfg) != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+				return
+			}
+			pstore.SaveUploadConfig(deviceID, cfg)
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+			return
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+	})
 	mux.HandleFunc("/api/v1/session", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1786,7 +1844,7 @@ func finalizeSession(hub *realtime.Hub, st *deviceState, deviceID string, ch int
 
 			// Save to SQLite History and Disk
 			resBytes, _ := json.Marshal(map[string]any{"device_id": deviceID, "trace_id": trace.TraceID, "created_at": e.At.UTC().Format(time.RFC3339), "result": res})
-			runBytes, _ := json.Marshal(map[string]any{"trace_id": trace.TraceID, "samples": trace.Values, "pollutants": res.Pollutants})
+			runBytes, _ := json.Marshal(map[string]any{"trace_id": trace.TraceID, "dtS": trace.DtS, "samples": trace.Values, "pollutants": res.Pollutants})
 			pstore.SaveResultToDB(deviceID, trace.TraceID, e.At.UTC(), activeMethod.MethodID, string(resBytes), runBytes)
 		}
 		if thc, ch4, nmhc, ok := extractNMHC(res); ok {
@@ -1866,7 +1924,7 @@ func publishSessionResultSnapshot(hub *realtime.Hub, st *deviceState, deviceID s
 
 			// Save to SQLite History and Disk
 			resBytes, _ := json.Marshal(map[string]any{"device_id": deviceID, "trace_id": trace.TraceID, "created_at": e.At.UTC().Format(time.RFC3339), "result": res})
-			runBytes, _ := json.Marshal(map[string]any{"trace_id": trace.TraceID, "samples": trace.Values, "pollutants": res.Pollutants})
+			runBytes, _ := json.Marshal(map[string]any{"trace_id": trace.TraceID, "dtS": trace.DtS, "samples": trace.Values, "pollutants": res.Pollutants})
 			pstore.SaveResultToDB(deviceID, trace.TraceID, e.At.UTC(), activeMethod.MethodID, string(resBytes), runBytes)
 		}
 		if thc, ch4, nmhc, ok := extractNMHC(res); ok {
@@ -1932,9 +1990,10 @@ func getActiveMethod() v1.Method {
 				out.Pollutants = append(out.Pollutants, v1.PollutantSpec{
 					Code:      c.Name,
 					Name:      c.Name,
+					RtS:       c.RetainTime * 60.0,
 					StartS:    (c.RetainTime - c.LeftWindow) * 60.0,
 					EndS:      (c.RetainTime + c.RightWindow) * 60.0,
-					PaddingS:  2,
+					PaddingS:  (c.LeftWindow + c.RightWindow) * 60.0,
 					Threshold: 0,
 					RespStyle: c.RespStyle,
 					CurveFunc: c.CurveFunc,
@@ -1947,7 +2006,7 @@ func getActiveMethod() v1.Method {
 					out.Pollutants[i].StartS = 0
 				}
 				if p.EndS <= p.StartS {
-					out.Pollutants[i].EndS = out.Pollutants[i].StartS + 10
+					out.Pollutants[i].EndS = out.Pollutants[i].StartS
 				}
 			}
 			out.Groups = []v1.PeakGroupSpec{
@@ -1957,6 +2016,11 @@ func getActiveMethod() v1.Method {
 					IncludeCodes: []string{"THC"},
 					ExcludeCodes: []string{"CH4"},
 				},
+			}
+			out.Integration = v1.IntegrationSpec{
+				MinHeight: m.Integration.MinHeight,
+				Slope:     m.Integration.Slope,
+				MinWidth:  m.Integration.MinWidth,
 			}
 			return out
 		}

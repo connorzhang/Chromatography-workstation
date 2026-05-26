@@ -45,7 +45,7 @@ export function initProcess() {
     let dragCurrent = null;
     let methodData = null;
 
-    const renderTable = () => {
+        const renderTable = () => {
         const tbody = document.getElementById('tbody-process-results'); 
         tbody.innerHTML = '';
         let hasData = false;
@@ -77,15 +77,20 @@ export function initProcess() {
                   }
 
                   // 构建下拉选择框
-                  let selectHtml = `<select class="calib-name-select input" data-index="${i}" style="padding: 2px 4px;">`;
+                  let selectHtml = `<select class="calib-name-select input" data-index="${i}" style="padding: 2px 4px; background: var(--panel);">`;
                   let isCustom = true;
+                  let currentCode = p.code || p.name;
+                  if (currentCode && currentCode.startsWith('Custom_')) currentCode = ''; // Reset default custom names
+                  
+                  selectHtml += `<option value="">- 请选择 -</option>`;
+                  
                   availablePeakNames.forEach(name => {
-                      const selected = (p.code || p.name) === name ? 'selected' : '';
+                      const selected = currentCode === name ? 'selected' : '';
                       if (selected) isCustom = false;
                       selectHtml += `<option value="${name}" ${selected}>${name}</option>`;
                   });
-                  if (isCustom) {
-                      selectHtml += `<option value="${p.code || p.name}" selected>${p.code || p.name}</option>`;
+                  if (isCustom && currentCode) {
+                      selectHtml += `<option value="${currentCode}" selected>${currentCode}</option>`;
                   }
                   selectHtml += `</select>`;
 
@@ -255,7 +260,10 @@ export function initProcess() {
                                 throw new Error(err.error || '添加失败');
                             }
                             const newPeak = await res.json();
+                            // Ensure peak data format matches for table rendering
+                            if(newPeak.retain_time === undefined) newPeak.retain_time = newPeak.rtS / 60.0;
                             currentRunData.pollutants.push(newPeak);
+                            currentRunData.pollutants.sort((a,b) => (a.rtS || a.retain_time*60.0) - (b.rtS || b.retain_time*60.0));
                             window.showToast('已添加新峰');
                             
                             renderTable();
@@ -449,19 +457,33 @@ export function initProcess() {
                     if (!p || p.status === 'calculated') continue;
 
                     const code = nameSelects[i].value;
+                    if (!code) continue; // Skip unassigned peaks
+                    
                     activeCodes.push(code);
 
                     let comp = method.compounds.find(c => c.name === code);     
 
                     let newAmount = parseFloat(amountInputs[i].value) || 10.0;
+                    
+                    // 计算窗宽
+                    let rtS = p.retain_time !== undefined ? p.retain_time * 60.0 : p.rtS;
+                    let lw = (rtS - p.start_time*60.0) / 60.0;
+                    if (p.startS !== undefined) lw = (rtS - p.startS) / 60.0;
+                    
+                    let rw = (p.end_time*60.0 - rtS) / 60.0;
+                    if (p.endS !== undefined) rw = (p.endS - rtS) / 60.0;
+                    
+                    if (lw < 0 || isNaN(lw)) lw = 0.1;
+                    if (rw < 0 || isNaN(rw)) rw = 0.1;
+                    const rtMin = rtS / 60.0;
 
                     if (!comp) {
                         // Create new compound if not exists
                         comp = {
                             name: code,
-                            retain_time: p.retain_time !== undefined ? p.retain_time : (p.rtS ? p.rtS / 60.0 : 0),
-                            left_window: 0.1,
-                            right_window: 0.1,
+                            retain_time: rtMin,
+                            left_window: lw,
+                            right_window: rw,
                             resp_style: 0, // default area
                             levels: [{ level_index: 1, amount: newAmount, response: 0 }]
                         };
@@ -477,12 +499,15 @@ export function initProcess() {
                     comp.levels[0].response = val;
                     comp.levels[0].amount = newAmount;
 
-                    // Update retain time to the latest actual RT
-                    comp.retain_time = p.retain_time !== undefined ? p.retain_time : (p.rtS ? p.rtS / 60.0 : comp.retain_time);
+                    // Update retain time to the latest actual RT and windows
+                    comp.retain_time = rtMin;
+                    comp.left_window = lw;
+                    comp.right_window = rw;
+                    
                     updatedCount++;
                 }
 
-                // 4. 清理旧的方法：只保留当前页面实际标定下来的这些峰（例如清掉之前的 Unk_X）
+                // 4. 清理旧的方法：只保留当前页面实际标定下来的这些峰
                 method.compounds = method.compounds.filter(c => activeCodes.includes(c.name));
 
                 // 5. Save method back

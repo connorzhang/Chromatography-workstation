@@ -3,41 +3,102 @@ export function initLiveChromatogram() {
     container.innerHTML = `
         <div style="display: flex; height: 100%; gap: 1rem;">
             <div style="flex: 3; background: var(--panel); border-radius: 8px; border: 1px solid #334155; position: relative; display: flex; flex-direction: column;">
-                <div style="padding: 10px; border-bottom: 1px solid #334155; display: flex; gap: 10px; align-items: center;">
-                    <span style="color: #94a3b8;">进样类型:</span>
-                    <label><input type="radio" name="injType" value="normal" checked> 正常</label>
-                    <label><input type="radio" name="injType" value="zero"> 零气</label>
-                    <label><input type="radio" name="injType" value="span"> 标气</label>
+                <!-- 第一行：进样类型、控制按钮、点火图标 -->
+                <div style="padding: 10px; border-bottom: 1px solid #334155; display: flex; gap: 10px; align-items: center; justify-content: space-between;">
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <span style="color: #94a3b8;">进样类型:</span>
+                        <label><input type="radio" name="injType" value="normal" checked> 正常</label>
+                        <label><input type="radio" name="injType" value="zero"> 零气</label>
+                        <label><input type="radio" name="injType" value="span"> 标气</label>
+                        
+                        <div style="margin-left: 20px; display: flex; gap: 10px;">
+                            <button class="btn" onclick="window.sendCmd('startAll')">▶ 开始分析</button>
+                            <button class="btn btn-danger" onclick="window.sendCmd('stopAll')">⏹ 停止分析</button>
+                        </div>
+                    </div>
                     
-                    <div style="margin-left: auto; display: flex; gap: 10px;">
-                        <button class="btn" onclick="window.sendCmd('startAll')">▶ 开始分析</button>
-                        <button class="btn btn-danger" onclick="window.sendCmd('stopAll')">⏹ 停止分析</button>
+                    <!-- 点火图标 -->
+                    <div id="live-ignite-icon" style="font-size: 28px; cursor: pointer; color: #64748b; transition: color 0.3s;" title="点击发送点火指令">
+                        🔥
                     </div>
                 </div>
+
+                <!-- 第二行：图表配置项 -->
+                <div style="padding: 10px; border-bottom: 1px solid #334155; display: flex; gap: 15px; align-items: center; background: rgba(0,0,0,0.2);">
+                    <div style="display: flex; align-items: center; gap: 5px;">
+                        <span style="color: #94a3b8;">下限:</span>
+                        <input type="number" id="live-y-low" class="input" value="0" style="width: 60px; padding: 2px 5px;">
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 5px;">
+                        <span style="color: #94a3b8;">上限:</span>
+                        <input type="number" id="live-y-high" class="input" value="40" style="width: 60px; padding: 2px 5px;">
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 5px;">
+                        <span style="color: #94a3b8;">采集时间:</span>
+                        <input type="number" id="live-acq-min" class="input" value="2" step="0.1" style="width: 60px; padding: 2px 5px;">
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 5px;">
+                        <span style="color: #94a3b8;">满屏时间:</span>
+                        <input type="number" id="live-full-min" class="input" value="2" style="width: 60px; padding: 2px 5px;">
+                    </div>
+                    <button class="btn" id="btn-apply-live-settings" style="padding: 2px 10px; font-size: 12px;">应用</button>
+                </div>
+
+                <!-- 第三行：实时状态与自适应配置 -->
+                <div style="padding: 5px 10px; border-bottom: 1px solid #334155; display: flex; gap: 15px; align-items: center; font-size: 13px; background: rgba(0,0,0,0.1);">
+                    <span style="color: #94a3b8;">通道1:</span>
+                    <span id="live-current-time" style="font-family: monospace; font-weight: bold;">0.000</span> <span style="color: #94a3b8;">min</span>
+                    <span id="live-current-signal" style="font-family: monospace; font-weight: bold; margin-left: 10px;">0.000</span> <span style="color: #94a3b8;">pA</span>
+                    
+                    <span style="color: #94a3b8; margin-left: 10px;">信号1:</span>
+                    <label style="display: flex; align-items: center; gap: 5px; color: #10b981; cursor: pointer;">
+                        <input type="checkbox" id="live-auto-y"> 峰高自适应
+                    </label>
+                </div>
+
+                <!-- 图表区 -->
                 <div style="flex: 1; position: relative;">
                     <canvas id="chromatogram-canvas" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></canvas>
                 </div>
             </div>
             <div style="flex: 1; display: flex; flex-direction: column; gap: 1rem;">
                 <div class="control-group" style="flex: 1; margin: 0; overflow-y: auto;">
-                    <h3 style="margin-top:0">硬件状态</h3>
-                    <table>
-                        <tr><td>FID1点火</td><td style="color:var(--success)">已点燃</td></tr>
-                        <tr><td>进样口温</td><td>120.0 ℃</td></tr>
-                        <tr><td>柱温</td><td>80.0 ℃</td></tr>
-                        <tr><td>检测器温</td><td>150.0 ℃</td></tr>
-                    </table>
-                </div>
-                <div class="control-group" style="flex: 1; margin: 0; overflow-y: auto;">
                     <h3 style="margin-top:0">实时结果</h3>
                     <table id="live-results-table">
                         <thead>
-                            <tr><th>组分</th><th>浓度(mg/m³)</th></tr>
+                            <tr><th>名称</th><th>含量(mg/m³)</th></tr>
                         </thead>
                         <tbody>
                             <tr><td colspan="2" style="text-align:center; color:#94a3b8">等待分析...</td></tr>
                         </tbody>
                     </table>
+                </div>
+                <div style="flex: 1; display: flex; gap: 1rem;">
+                    <div class="control-group" style="flex: 1; margin: 0; overflow-y: auto;">
+                        <table id="live-pressure-table" style="font-size: 13px;">
+                            <thead>
+                                <tr><th>实测(psi)</th></tr>
+                            </thead>
+                            <tbody>
+                                <tr><td>载气 <span style="float:right" id="val-carrier">0.00</span></td></tr>
+                                <tr><td>氢气 <span style="float:right" id="val-h2">0.00</span></td></tr>
+                                <tr><td>空气 <span style="float:right" id="val-air">0.00</span></td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="control-group" style="flex: 1; margin: 0; overflow-y: auto;">
+                        <table id="live-temp-table" style="font-size: 13px;">
+                            <thead>
+                                <tr><th>实测(℃)</th></tr>
+                            </thead>
+                            <tbody>
+                                <tr><td>柱箱 <span style="float:right" id="val-col">0.0</span></td></tr>
+                                <tr><td>阀温 <span style="float:right" id="val-valve">0.0</span></td></tr>
+                                <tr><td>检测1 <span style="float:right" id="val-det1">0.0</span></td></tr>
+                                <tr><td>进样1 <span style="float:right" id="val-inj1">0.0</span></td></tr>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>
@@ -65,7 +126,129 @@ function setupCanvas() {
     // For auto Y smoothing
     let lastMin = null;
     let lastMax = null;
-    
+
+    // Local UI settings
+    let uiSettings = {
+        yLow: 0,
+        yHigh: 40,
+        acqMin: 2,
+        fullMin: 2,
+        autoY: true
+    };
+
+    let isIgnited = false;
+
+    // Load initial UI settings
+    fetch('/api/v1/devices')
+        .then(res => res.json())
+        .then(data => {
+            if(data && data.length > 0) {
+                const devId = data[0].deviceId;
+                fetch('/api/v1/ui?deviceId=' + encodeURIComponent(devId))
+                    .then(r => r.json())
+                    .then(ui => {
+                        if (ui) {
+                            uiSettings = ui; // 保存完整的 ui 对象，防止 POST 覆盖丢失字段
+                            if (ui.yLow !== undefined) uiSettings.yLow = ui.yLow;
+                            if (ui.yHigh !== undefined) uiSettings.yHigh = ui.yHigh;
+                            if (ui.acqMin !== undefined) uiSettings.acqMin = ui.acqMin;
+                            if (ui.fullMin !== undefined) uiSettings.fullMin = ui.fullMin;
+                            if (ui.autoY !== undefined) uiSettings.autoY = ui.autoY;
+                            
+                            document.getElementById('live-y-low').value = uiSettings.yLow;
+                            document.getElementById('live-y-high').value = uiSettings.yHigh;
+                            document.getElementById('live-acq-min').value = uiSettings.acqMin;
+                            document.getElementById('live-full-min').value = uiSettings.fullMin;
+                            const autoYEl = document.getElementById('live-auto-y');
+                            if (autoYEl) autoYEl.checked = uiSettings.autoY;
+                            draw();
+                        }
+                    }).catch(e => console.error(e));
+            }
+        }).catch(e => console.error(e));
+
+    // Handle Apply button
+    document.getElementById('btn-apply-live-settings').addEventListener('click', async () => {
+        const yLow = parseFloat(document.getElementById('live-y-low').value) || 0;
+        const yHigh = parseFloat(document.getElementById('live-y-high').value) || 40;
+        const acqMin = parseFloat(document.getElementById('live-acq-min').value) || 0;
+        const fullMin = parseFloat(document.getElementById('live-full-min').value) || 2;
+
+        uiSettings.yLow = yLow;
+        uiSettings.yHigh = yHigh;
+        uiSettings.acqMin = acqMin;
+        uiSettings.fullMin = fullMin;
+        const autoYEl = document.getElementById('live-auto-y');
+        if (autoYEl) uiSettings.autoY = autoYEl.checked;
+
+        try {
+            const devRes = await fetch('/api/v1/devices');
+            const devices = await devRes.json();
+            const deviceId = (devices && devices.length > 0) ? devices[0].deviceId : "DEV001";
+
+            uiSettings.deviceId = deviceId;
+
+            const res = await fetch('/api/v1/ui', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(uiSettings)
+            });
+            if(res.ok) {
+                window.showToast('图表配置已应用!');
+                draw();
+            } else {
+                window.showToast('应用失败', true);
+            }
+        } catch(e) {
+            window.showToast('异常: ' + e.message, true);
+        }
+    });
+
+    // Handle Auto Y toggle
+    const autoYEl = document.getElementById('live-auto-y');
+    if (autoYEl) {
+        autoYEl.addEventListener('change', async (e) => {
+            uiSettings.autoY = e.target.checked;
+            try {
+                const devRes = await fetch('/api/v1/devices');
+                const devices = await devRes.json();
+                uiSettings.deviceId = (devices && devices.length > 0) ? devices[0].deviceId : "DEV001";
+                await fetch('/api/v1/ui', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(uiSettings)
+                });
+            } catch(err) {
+                console.error('Failed to save autoY', err);
+            }
+            draw();
+        });
+    }
+
+    // Handle Ignite icon click
+    const igniteIcon = document.getElementById('live-ignite-icon');
+    if (igniteIcon) {
+        igniteIcon.addEventListener('click', async () => {
+            try {
+                const res = await fetch('/api/control/ignite', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ action: 'start', detector: 'FID1' })
+                });
+                if(res.ok) {
+                    window.showToast('FID 点火指令已发送');
+                    isIgnited = true;
+                    igniteIcon.style.color = '#ef4444'; // Red color when ignited
+                    igniteIcon.title = "已点火";
+                } else {
+                    window.showToast('点火指令发送失败', true);
+                }
+            } catch(e) {
+                window.showToast('点火异常: ' + e.message, true);
+            }
+        });
+    }
+
     function draw() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         
@@ -84,20 +267,26 @@ function setupCanvas() {
         ctx.lineWidth = 1;
         
         let xBegMin = 0;
-        let xEndMin = 2; // Default 2 minutes
+        let xEndMin = uiSettings.fullMin || 2; 
+        
+        // 覆盖自动延长的逻辑，以 UI 配置的满屏时间为准
         if (dataPoints.length > 0) {
             const maxT = dataPoints[dataPoints.length - 1][0];
-            if (maxT / 60 > 2) {
+            if (maxT / 60 > xEndMin) {
+                // 如果实际数据超过了满屏时间，自动往右滚动或者自动扩展。
+                // 传统色谱通常会固定 xEndMin，超出的部分被裁剪，或者自动增加满屏时间。
+                // 这里我们暂且允许它自动向后拓展，保证能看到波形。
                 xEndMin = Math.ceil(maxT / 60);
             }
         }
         const xSpanMin = xEndMin - xBegMin;
         
-        let yBeg = 0;
-        let yEnd = 40;
-        
-        // Auto Y
-        if (dataPoints.length > 0) {
+        let yBeg = uiSettings.yLow;
+        let yEnd = uiSettings.yHigh;
+
+        // 峰高自适应逻辑
+        const autoYEl = document.getElementById('live-auto-y');
+        if (autoYEl && autoYEl.checked && dataPoints.length > 0) {
             let yMin = Infinity;
             let yMax = -Infinity;
             for (let i = 0; i < dataPoints.length; i++) {
@@ -108,25 +297,21 @@ function setupCanvas() {
             if (yMin === Infinity) { yMin = 0; yMax = 1; }
 
             let span = yMax - yMin;
-            const minSpan = 0.5;
+            // 提高最小量程阈值，避免纯基线微小漂移被当作峰而触发留白放大
+            const minSpan = 10.0; 
             if (span < minSpan) {
-                const c = (yMin + yMax) / 2;
-                yMin = c - minSpan / 2;
-                yMax = c + minSpan / 2;
                 span = minSpan;
             }
             
-            // 下面预留 5%，上面预留 40%，所以数据占 55%
-            const V = span / 0.55;
+            // 下面留5%，上面留60%，所以实际波形（或 minSpan）占据中间的 35%
+            const V = span / 0.35;
             yBeg = yMin - 0.05 * V;
-            yEnd = yMax + 0.40 * V;
+            // 始终基于 yMin 和 span 计算 yEnd，确保在 span 被锁定时，yEnd 不会随着 yMax 的微小增加而往下压波形
+            yEnd = yMin + 0.95 * V;
         }
+
+        if (yEnd <= yBeg) yEnd = yBeg + 1; // 防止无效区间
         
-        // Smooth Y transition
-        if (lastMin !== null && lastMax !== null) {
-            yBeg = lastMin + (yBeg - lastMin) * 0.2;
-            yEnd = lastMax + (yEnd - lastMax) * 0.2;
-        }
         lastMin = yBeg;
         lastMax = yEnd;
         
@@ -332,6 +517,14 @@ function setupCanvas() {
                                 updateLiveResultsTable(sess.result);
                             }
                             
+                            if (dataPoints.length > 0) {
+                                const lastPoint = dataPoints[dataPoints.length - 1];
+                                const timeEl = document.getElementById('live-current-time');
+                                const sigEl = document.getElementById('live-current-signal');
+                                if (timeEl) timeEl.innerText = (lastPoint[0] / 60.0).toFixed(3);
+                                if (sigEl) sigEl.innerText = lastPoint[1].toFixed(3);
+                            }
+                            
                             requestAnimationFrame(draw);
                         }
                     }).catch(e => {
@@ -357,6 +550,14 @@ function setupCanvas() {
                 // Ensure it stays sorted if merged out of order
                 dataPoints.sort((a, b) => a[0] - b[0]);
 
+                if (dataPoints.length > 0) {
+                    const lastPoint = dataPoints[dataPoints.length - 1];
+                    const timeEl = document.getElementById('live-current-time');
+                    const sigEl = document.getElementById('live-current-signal');
+                    if (timeEl) timeEl.innerText = (lastPoint[0] / 60.0).toFixed(3);
+                    if (sigEl) sigEl.innerText = lastPoint[1].toFixed(3);
+                }
+
                 requestAnimationFrame(draw);
             } else if (parsed.type === 'result') {
                 // Update live results table
@@ -368,18 +569,30 @@ function setupCanvas() {
             } else if (parsed.type === 'telemetry') {
                 // Update hardware states if available
                 if (parsed.tempInj1 !== undefined) {
-                    const inj = parsed.tempInj1 || 0;
-                    const col = parsed.tempCol || 0;
-                    const det = parsed.tempDet1 || 0;
-                    // Update DOM element if exists
-                    const table = document.querySelector('#view-live .control-group table');
-                    if (table) {
-                        table.innerHTML = `
-                            <tr><td>FID1点火</td><td style="color:var(--success)">监控中</td></tr>
-                            <tr><td>进样口温</td><td>${inj.toFixed(1)} ℃</td></tr>
-                            <tr><td>柱温</td><td>${col.toFixed(1)} ℃</td></tr>
-                            <tr><td>检测器温</td><td>${det.toFixed(1)} ℃</td></tr>
-                        `;
+                    const elInj1 = document.getElementById('val-inj1');
+                    const elCol = document.getElementById('val-col');
+                    const elDet1 = document.getElementById('val-det1');
+                    const elValve = document.getElementById('val-valve');
+                    
+                    if (elInj1) elInj1.innerText = (parsed.tempInj1 || 0).toFixed(1);
+                    if (elCol) elCol.innerText = (parsed.tempCol || 0).toFixed(1);
+                    if (elDet1) elDet1.innerText = (parsed.tempDet1 || 0).toFixed(1);
+                    if (elValve) elValve.innerText = (parsed.tempInj2 || 0).toFixed(1); // 阀温暂借用 tempInj2
+                }
+                if (parsed.carrierPsi !== undefined || parsed.epc) {
+                    const elCarrier = document.getElementById('val-carrier');
+                    const elH2 = document.getElementById('val-h2');
+                    const elAir = document.getElementById('val-air');
+                    
+                    // 支持两种格式的遥测数据 (解析平铺格式或 epc 数组格式)
+                    if (parsed.carrierPsi !== undefined) {
+                        if (elCarrier) elCarrier.innerText = (parsed.carrierPsi || 0).toFixed(2);
+                        if (elH2) elH2.innerText = (parsed.h2Psi || 0).toFixed(2);
+                        if (elAir) elAir.innerText = (parsed.airPsi || 0).toFixed(2);
+                    } else if (parsed.epc && parsed.epc.length >= 3) {
+                        if (elCarrier) elCarrier.innerText = (parsed.epc[0].psi || 0).toFixed(2);
+                        if (elH2) elH2.innerText = (parsed.epc[1].psi || 0).toFixed(2);
+                        if (elAir) elAir.innerText = (parsed.epc[2].psi || 0).toFixed(2);
                     }
                 }
             }

@@ -374,6 +374,34 @@ func (s *persistStore) LoadHardwareConfig(deviceID string) (models.HardwareConfi
 	return out, true
 }
 
+func (s *persistStore) SaveUploadConfig(deviceID string, cfg models.UploadConfig) {
+	if deviceID == "" {
+		return
+	}
+	b, err := json.Marshal(cfg)
+	if err != nil {
+		return
+	}
+	path := filepath.Join(s.root, "uploadconfig")
+	_ = os.MkdirAll(path, 0o755)
+	_ = os.WriteFile(filepath.Join(path, deviceID+".json"), b, 0o644)
+}
+
+func (s *persistStore) LoadUploadConfig(deviceID string) (models.UploadConfig, bool) {
+	if deviceID == "" {
+		return models.UploadConfig{}, false
+	}
+	b, err := os.ReadFile(filepath.Join(s.root, "uploadconfig", deviceID+".json"))
+	if err != nil {
+		return models.UploadConfig{}, false
+	}
+	var out models.UploadConfig
+	if json.Unmarshal(b, &out) != nil {
+		return models.UploadConfig{}, false
+	}
+	return out, true
+}
+
 func itoa(n int) string {
 	if n == 0 {
 		return "0"

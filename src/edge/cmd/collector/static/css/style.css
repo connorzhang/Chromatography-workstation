@@ -28,3 +28,15 @@ th { color: #94a3b8; font-weight: normal; }
 .btn:hover { background: #2563eb; }
 .btn-danger { background: var(--danger); }
 .btn-danger:hover { background: #dc2626; }
+
+.settings-container { display: flex; flex-direction: column; height: 100%; }
+.settings-tabs { display: flex; background: var(--panel); border-bottom: 2px solid #334155; }
+.tab-btn { background: transparent; color: #94a3b8; border: none; padding: 10px 20px; font-size: 16px; cursor: pointer; outline: none; border-bottom: 2px solid transparent; margin-bottom: -2px; }
+.tab-btn:hover { color: #fff; }
+.tab-btn.active { color: #fff; border-bottom: 2px solid var(--accent); }
+.tab-content { display: none; padding: 20px 0; flex: 1; overflow-y: auto; }
+.tab-content.active { display: block; }
+.settings-table { width: 100%; border-collapse: collapse; }
+.settings-table th, .settings-table td { padding: 8px; border: 1px solid #334155; text-align: center; }
+.settings-table th { background: #1e293b; color: #94a3b8; }
+.input-cell { background: #0f172a; border: 1px solid #334155; color: white; padding: 4px; width: 60px; text-align: center; }

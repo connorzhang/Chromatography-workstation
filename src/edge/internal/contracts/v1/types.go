@@ -13,10 +13,17 @@ type Trace struct {
 }
 
 type Method struct {
-	MethodID   string          `json:"methodId"`
-	Version    int             `json:"version"`
-	Pollutants []PollutantSpec `json:"pollutants"`
-	Groups     []PeakGroupSpec `json:"groups"` // 峰分组配置
+	MethodID    string          `json:"methodId"`
+	Version     int             `json:"version"`
+	Pollutants  []PollutantSpec `json:"pollutants"`
+	Groups      []PeakGroupSpec `json:"groups"` // 峰分组配置
+	Integration IntegrationSpec `json:"integration"`
+}
+
+type IntegrationSpec struct {
+	MinHeight float64 `json:"min_height"`
+	Slope     float64 `json:"slope"`
+	MinWidth  float64 `json:"min_width"`
 }
 
 type PeakGroupSpec struct {
@@ -29,8 +36,9 @@ type PeakGroupSpec struct {
 type PollutantSpec struct {
 	Code         string  `json:"code"`
 	Name         string  `json:"name"`
-	StartS       float64 `json:"startS"`
-	EndS         float64 `json:"endS"`
+	RtS          float64 `json:"rtS"`    // 标准保留时间
+	StartS       float64 `json:"startS"` // 标定的左边界
+	EndS         float64 `json:"endS"`   // 标定的右边界
 	PaddingS     float64 `json:"paddingS"`
 	AlignMode    string  `json:"alignMode"`
 	BaselineMode string  `json:"baselineMode"`
