@@ -213,14 +213,15 @@ Go 版当前实现了旧版一致风格的变换（平方/衰减系数/放大）
 
 | Cmd | 方向 | 名称 | Payload（请求） | 应答 Cmd | Payload（应答） | 结构来源 |
 |---:|---|---|---|---:|---|---|
-| 0 | WS→GC | 控温参数查询 | 无 | 128 | TempSetedList | `InsDeviceManager.GetTempSetedList/SetTempSetedList` |
-| 8 | WS→GC | 控温参数设置 | TempSetedList | 136 | （确认/回读） | 同上 |
+| 0 | WS→GC | 控温参数查询 | 无 | 128 | TempSetedList | 返回 24 字节：前 12 字节 6 路设定，后 12 字节 6 路保护 |
+| 8 | WS→GC | 控温参数设置 | 24 字节 | 136 | （确认/回读） | 同 Cmd 0 的 24 字节结构 |
 | 1 | WS→GC | 程序升温参数查询 | 无 | 129 | TempSettingList | `GetTempSettingList/SetTempSettingList` |
 | 9 | WS→GC | 程序升温参数设置 | TempSettingList | 137 | （确认/回读） | 同上 |
 | 2 | WS→GC | 外部事件表0查询 | 无 | 130 | EventTable0 | `GetEventTable0/SetEventTable0` |
 | 10 | WS→GC | 外部事件表0设置 | EventTable0 | 138 | （确认/回读） | 同上 |
-| 101 | WS→GC | 外部事件表1设置（旧版） | EventTable1 | 229 | （确认/回读） | `GetEventTable1/SetEventTable1` |
-| 228 | WS→GC | 外部事件表1查询应答 | — | — | — | 旧版收侧用 228/229 更新 UI（需要抓包确定请求 cmd） |
+| 100 | WS→GC | 外部事件表1查询 | 无 | 228 | EventTable1 | `GetEventTable1` |
+| 101 | WS→GC | 外部事件表1设置 | EventTable1 | 229 | — | `WriteEventTable1` |
+| 228 | GC→WS | 外部事件表1查询应答 | — | — | — | 返回 96 字节 BCD 矩阵对应事件 5~8 |
 | 211 | GC→WS | 外部事件开关状态应答 | — | — | byte[25] 为 eventState | [Answer211](file:///d:/GIT/VS2022/Chromatography-workstation/IBrainChrom2018/TcpServerSocket.cs#L1832-L1842) |
 | 212 | GC→WS | 外部事件开关设置应答 | — | — | 复用缓存 `byte_0` | [Answer212](file:///d:/GIT/VS2022/Chromatography-workstation/IBrainChrom2018/TcpServerSocket.cs#L1844-L1853) |
 

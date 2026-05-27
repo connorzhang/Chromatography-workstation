@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"os"
 	"time"
 
+	"chromatography-workstation/edge/internal/models"
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
 
@@ -15,16 +15,19 @@ type MqttClient struct {
 	topic  string
 }
 
-func NewMqttClient() *MqttClient {
-	broker := os.Getenv("MQTT_BROKER")
-	if broker == "" {
-		broker = "tcp://127.0.0.1:1883" // Default fallback
+func NewMqttClient(cfg models.SysConfig) *MqttClient {
+	if !cfg.MqttEnabled {
+		return nil
 	}
-	topic := os.Getenv("MQTT_TOPIC")
+	broker := cfg.MqttBroker
+	if broker == "" {
+		broker = "tcp://127.0.0.1:1883"
+	}
+	topic := cfg.MqttTopic
 	if topic == "" {
 		topic = "vocs/telemetry/results"
 	}
-	clientID := os.Getenv("MQTT_CLIENT_ID")
+	clientID := cfg.MqttClientID
 	if clientID == "" {
 		clientID = fmt.Sprintf("edge_collector_%d", time.Now().UnixNano())
 	}
@@ -37,10 +40,10 @@ func NewMqttClient() *MqttClient {
 		SetAutoReconnect(true).
 		SetMaxReconnectInterval(10 * time.Second)
 		
-	if user := os.Getenv("MQTT_USER"); user != "" {
+	if user := cfg.MqttUser; user != "" {
 		opts.SetUsername(user)
 	}
-	if pass := os.Getenv("MQTT_PASS"); pass != "" {
+	if pass := cfg.MqttPass; pass != "" {
 		opts.SetPassword(pass)
 	}
 
@@ -60,6 +63,38 @@ func NewMqttClient() *MqttClient {
 		client: c,
 		topic:  topic,
 	}
+}
+
+func (m *MqttClient) IsConnected() bool {
+	if m == nil || m.client == nil {
+		return false
+	}
+	return m.client.IsConnected()
+}
+
+func (m *MqttClient) Disconnect() {
+	if m != nil && m.client != nil {
+		m.client.Disconnect(250)
+	}
+}
+
+func (m *MqttClient) TestPublish() error {
+	if m == nil {
+		return fmt.Errorf("MQTT 客户端未初始化 (可能未启用)")
+	}
+	if !m.client.IsConnected() {
+		return fmt.Errorf("MQTT 尚未连接到 Broker")
+	}
+	payload := map[string]any{
+		"event": "test_connection",
+		"time":  time.Now().Format(time.RFC3339),
+	}
+	b, _ := json.Marshal(payload)
+	token := m.client.Publish(m.topic, 1, false, b)
+	if !token.WaitTimeout(3 * time.Second) {
+		return fmt.Errorf("发布超时")
+	}
+	return token.Error()
 }
 
 // PublishResult 上报精简增量的结果到 MQTT 以供 Elasticsearch 溯源 (要求：轻量、不固定组份)
