@@ -66,6 +66,8 @@ type HardwareConfig struct {
 	IgniteThreshold1 float64        `json:"igniteThreshold1"`
 	IgniteThreshold2 float64        `json:"igniteThreshold2"`
 	IgniteDuration   float64        `json:"igniteDuration"`
+	CycleInterval    float64        `json:"cycleInterval"`
+	CycleCount       int            `json:"cycleCount"`
 	Events       []EventRow         `json:"events"`       // 外部事件序列
 }
 

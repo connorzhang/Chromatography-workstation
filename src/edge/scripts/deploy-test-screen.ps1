@@ -90,17 +90,17 @@ $hostkey = Get-HostKey $sshHost $port
 
 function Run-Remote([string]$cmd) {
   Write-Host "Running: $cmd"
-  & $putty.Plink -batch -ssh -P $port -pw $pass $remote $cmd
+  & $putty.Plink -batch -hostkey $hostkey -ssh -P $port -pw $pass $remote $cmd
   if ($LASTEXITCODE -ne 0) { throw "plink failed ($LASTEXITCODE)" }
 }
 
 function Copy-Remote([string]$src, [string]$dst) {
-  "" | & $putty.Pscp -batch -P $port -pw $pass $src "${remote}:$dst"
+  "" | & $putty.Pscp -batch -hostkey $hostkey -P $port -pw $pass $src "${remote}:$dst"
   if ($LASTEXITCODE -ne 0) { throw "pscp failed ($LASTEXITCODE)" }
 }
 
 function Copy-RemoteDir([string]$srcDir, [string]$dstDir) {
-  "" | & $putty.Pscp -batch -r -P $port -pw $pass $srcDir "${remote}:$dstDir"
+  "" | & $putty.Pscp -batch -hostkey $hostkey -r -P $port -pw $pass $srcDir "${remote}:$dstDir"
   if ($LASTEXITCODE -ne 0) { throw "pscp failed ($LASTEXITCODE)" }
 }
 
