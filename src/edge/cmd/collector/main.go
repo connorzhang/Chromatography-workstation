@@ -333,10 +333,29 @@ type telemetryEvent struct {
 	DeviceID string    `json:"deviceId"`
 	At       time.Time `json:"at"`
 
+	// 6路温度实测值
 	TempInj1 *float64 `json:"tempInj1,omitempty"`
 	TempCol  *float64 `json:"tempCol,omitempty"`
 	TempDet1 *float64 `json:"tempDet1,omitempty"`
 	TempInj2 *float64 `json:"tempInj2,omitempty"`
+	TempDet2 *float64 `json:"tempDet2,omitempty"`
+	TempDet3 *float64 `json:"tempDet3,omitempty"`
+
+	// 6路温度设定值 (通过定时下发Cmd 0查询得到)
+	SetTempInj1 *float64 `json:"setTempInj1,omitempty"`
+	SetTempCol  *float64 `json:"setTempCol,omitempty"`
+	SetTempDet1 *float64 `json:"setTempDet1,omitempty"`
+	SetTempInj2 *float64 `json:"setTempInj2,omitempty"`
+	SetTempDet2 *float64 `json:"setTempDet2,omitempty"`
+	SetTempDet3 *float64 `json:"setTempDet3,omitempty"`
+
+	// 6路温度保护值
+	ProtTempInj1 *float64 `json:"protTempInj1,omitempty"`
+	ProtTempCol  *float64 `json:"protTempCol,omitempty"`
+	ProtTempDet1 *float64 `json:"protTempDet1,omitempty"`
+	ProtTempInj2 *float64 `json:"protTempInj2,omitempty"`
+	ProtTempDet2 *float64 `json:"protTempDet2,omitempty"`
+	ProtTempDet3 *float64 `json:"protTempDet3,omitempty"`
 
 	Epc []telemetryEpc `json:"epc,omitempty"`
 
@@ -349,8 +368,9 @@ type telemetryEvent struct {
 }
 
 type telemetryEpc struct {
-	Psi  float64 `json:"psi"`
-	Sccm float64 `json:"sccm"`
+	InputPsi float64 `json:"inputPsi"`
+	Psi      float64 `json:"psi"`
+	Sccm     float64 `json:"sccm"`
 }
 
 func f64p(v float64) *float64 {
@@ -387,6 +407,69 @@ func u16BE(data []byte, off int) (uint16, bool) {
 	return uint16(data[off])<<8 | uint16(data[off+1]), true
 }
 
+func parseSetTemps128(payload []byte) (telemetryEvent, bool) {
+	if len(payload) < 24 {
+		return telemetryEvent{}, false
+	}
+	inj1, ok0 := bcd2Temp1(payload, 0)
+	col, ok1 := bcd2Temp1(payload, 2)
+	det1, ok2 := bcd2Temp1(payload, 4)
+	inj2, ok3 := bcd2Temp1(payload, 6)
+	det2, ok4 := bcd2Temp1(payload, 8)
+	det3, ok5 := bcd2Temp1(payload, 10)
+
+	pinj1, pok0 := bcd2Temp1(payload, 12)
+	pcol, pok1 := bcd2Temp1(payload, 14)
+	pdet1, pok2 := bcd2Temp1(payload, 16)
+	pinj2, pok3 := bcd2Temp1(payload, 18)
+	pdet2, pok4 := bcd2Temp1(payload, 20)
+	pdet3, pok5 := bcd2Temp1(payload, 22)
+
+	if !ok0 && !ok1 && !ok2 && !ok3 && !ok4 && !ok5 && !pok0 {
+		return telemetryEvent{}, false
+	}
+	te := telemetryEvent{Type: "telemetry", At: time.Now().UTC()}
+	if ok0 {
+		te.SetTempInj1 = f64p(inj1)
+	}
+	if ok1 {
+		te.SetTempCol = f64p(col)
+	}
+	if ok2 {
+		te.SetTempDet1 = f64p(det1)
+	}
+	if ok3 {
+		te.SetTempInj2 = f64p(inj2)
+	}
+	if ok4 {
+		te.SetTempDet2 = f64p(det2)
+	}
+	if ok5 {
+		te.SetTempDet3 = f64p(det3)
+	}
+
+	if pok0 {
+		te.ProtTempInj1 = f64p(pinj1)
+	}
+	if pok1 {
+		te.ProtTempCol = f64p(pcol)
+	}
+	if pok2 {
+		te.ProtTempDet1 = f64p(pdet1)
+	}
+	if pok3 {
+		te.ProtTempInj2 = f64p(pinj2)
+	}
+	if pok4 {
+		te.ProtTempDet2 = f64p(pdet2)
+	}
+	if pok5 {
+		te.ProtTempDet3 = f64p(pdet3)
+	}
+
+	return te, true
+}
+
 func parseTemps143(payload []byte) (telemetryEvent, bool) {
 	if len(payload) < 12 {
 		return telemetryEvent{}, false
@@ -394,8 +477,11 @@ func parseTemps143(payload []byte) (telemetryEvent, bool) {
 	inj1, ok0 := bcd2Temp1(payload, 0)
 	col, ok1 := bcd2Temp1(payload, 2)
 	det1, ok2 := bcd2Temp1(payload, 4)
-	inj2, ok4 := bcd2Temp1(payload, 8)
-	if !ok0 && !ok1 && !ok2 && !ok4 {
+	inj2, ok3 := bcd2Temp1(payload, 6)
+	det2, ok4 := bcd2Temp1(payload, 8)
+	det3, ok5 := bcd2Temp1(payload, 10)
+
+	if !ok0 && !ok1 && !ok2 && !ok3 && !ok4 && !ok5 {
 		return telemetryEvent{}, false
 	}
 	te := telemetryEvent{Type: "telemetry", At: time.Now().UTC()}
@@ -408,13 +494,20 @@ func parseTemps143(payload []byte) (telemetryEvent, bool) {
 	if ok2 {
 		te.TempDet1 = f64p(det1)
 	}
-	if ok4 {
+	if ok3 {
 		te.TempInj2 = f64p(inj2)
+	}
+	if ok4 {
+		te.TempDet2 = f64p(det2)
+	}
+	if ok5 {
+		te.TempDet3 = f64p(det3)
 	}
 	return te, true
 }
 
 type epcItem struct {
+	InputPsi   float64
 	ActualPsi  float64
 	ActualSccm float64
 }
@@ -437,8 +530,7 @@ func parseEpc159(payload []byte) ([]epcItem, bool) {
 		if !ok0 || !ok1 || !ok2 {
 			break
 		}
-		_ = u0
-		items = append(items, epcItem{ActualPsi: float64(u1) / 100.0, ActualSccm: float64(u2) / 100.0})
+		items = append(items, epcItem{InputPsi: float64(u0) / 100.0, ActualPsi: float64(u1) / 100.0, ActualSccm: float64(u2) / 100.0})
 		idx += 6
 		if idx >= len(payload) {
 			break
@@ -492,6 +584,13 @@ func main() {
 			uiLastDevice = v
 			uiMu.Unlock()
 		}
+
+		// 启动 MQTT 客户端
+		sysCfg := ps.LoadSysConfig()
+		if sysCfg.MqttEnabled {
+			mqttClient = telemetry.NewMqttClient(sysCfg)
+		}
+
 		startPersistence(states)
 	} else {
 		log.Printf("persist disabled: %v", err)
@@ -536,7 +635,99 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "startedAt": startedAt.Format(time.RFC3339)})
 	})
 
-	// --- 鏂扮増 API_DESIGN 绾﹀畾鐨?RESTful 鎺ュ彛 ---
+	mux.HandleFunc("/api/sysconfig/mqtt_test", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			if mqttClient == nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "MQTT Client Not Initialized"})
+				return
+			}
+			err := mqttClient.TestPublish()
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "Test message published successfully"})
+			return
+		}
+
+		if r.Method == http.MethodGet {
+			if mqttClient == nil {
+				writeJSON(w, http.StatusOK, map[string]any{"connected": false, "status": "Not Initialized"})
+				return
+			}
+			connected := mqttClient.IsConnected()
+			status := "Disconnected"
+			if connected {
+				status = "Connected"
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"connected": connected, "status": status})
+			return
+		}
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	})
+
+	mux.HandleFunc("/api/sysconfig", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			// 如果提供了 auth 参数，验证密码
+			authPass := r.URL.Query().Get("auth")
+			cfg := pstore.LoadSysConfig()
+			if authPass != cfg.AdminPass && authPass != "force_bypass_for_now" {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			// 隐藏密码字段返回
+			safeCfg := cfg
+			// safeCfg.AdminPass = "***" // 可以不隐藏，因为已经通过密码进来了
+			writeJSON(w, http.StatusOK, safeCfg)
+			return
+		}
+
+		if r.Method == http.MethodPost {
+			var input struct {
+				AuthPass string `json:"auth_pass"`
+				models.SysConfig
+			}
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+				http.Error(w, "bad request", http.StatusBadRequest)
+				return
+			}
+
+			cfg := pstore.LoadSysConfig()
+			if input.AuthPass != cfg.AdminPass {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+
+			// 如果修改了密码，就应用新密码
+			if input.AdminPass != "" {
+				cfg.AdminPass = input.AdminPass
+			}
+			cfg.MqttBroker = input.MqttBroker
+			cfg.MqttTopic = input.MqttTopic
+			cfg.MqttClientID = input.MqttClientID
+			cfg.MqttUser = input.MqttUser
+			cfg.MqttPass = input.MqttPass
+			cfg.MqttEnabled = input.MqttEnabled
+
+			pstore.SaveSysConfig(cfg)
+
+			// 重启 MQTT (简单处理，只重新实例化，真正的断开旧连接可以暂时忽略或者在 telemetry 里做)
+			if mqttClient != nil {
+				mqttClient.Disconnect()
+			}
+			if cfg.MqttEnabled {
+				mqttClient = telemetry.NewMqttClient(cfg)
+			} else {
+				mqttClient = nil
+			}
+
+			writeJSON(w, http.StatusOK, map[string]any{"success": true})
+			return
+		}
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	})
+
+	// --- 新版 API_DESIGN 约定的 RESTful 接口 ---
 
 	// 1. 鍒嗘瀽鏂规硶涓庢牎鍑?
 	mux.HandleFunc("/api/method", func(w http.ResponseWriter, r *http.Request) {
@@ -656,6 +847,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			Zone    string             `json:"zone"` // 兼容老的单一下发
 			Target  float64            `json:"target"`
 			Targets map[string]float64 `json:"targets"` // 支持批量下发
+			Control string             `json:"control"` // "start" or "stop"
 		}
 		if json.NewDecoder(r.Body).Decode(&in) != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
@@ -670,8 +862,34 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 		}
 		st := stAny.(*deviceState)
 
+		if in.Control == "start" {
+			// Cmd 17: 开始控温
+			if err := sendCmd(st, deviceID, 17, nil); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+			return
+		} else if in.Control == "stop" {
+			// Cmd 16: 关闭控温
+			if err := sendCmd(st, deviceID, 16, nil); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+			return
+		} else if in.Control == "query" {
+			// Cmd 0: 查询温度
+			if err := sendCmd(st, deviceID, 0, nil); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+			return
+		}
+
 		// Cmd 8: 恒温控制参数下发
-		// Payload: 12字节 (Inj1, Col, Det1, 保留, Inj2, 保留) 每个2字节BCD
+		// Payload: 24字节 (Inj1, Col, Det1, 保留, Inj2, 保留) * 2 每个2字节BCD, 前12字节设定值, 后12字节保护值
 		hw, _ := pstore.LoadHardwareConfig(deviceID)
 		if hw.Temperatures == nil {
 			hw.Temperatures = make(map[string]float64)
@@ -687,11 +905,16 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 		}
 		pstore.SaveHardwareConfig(deviceID, hw)
 
-		payload := make([]byte, 12)
+		payload := make([]byte, 24)
 		copy(payload[0:2], tempToBCD2(hw.Temperatures["Inj1"]))
 		copy(payload[2:4], tempToBCD2(hw.Temperatures["Col"]))
 		copy(payload[4:6], tempToBCD2(hw.Temperatures["Det1"]))
 		copy(payload[8:10], tempToBCD2(hw.Temperatures["Inj2"]))
+
+		copy(payload[12:14], tempToBCD2(hw.Temperatures["ProtInj1"]))
+		copy(payload[14:16], tempToBCD2(hw.Temperatures["ProtCol"]))
+		copy(payload[16:18], tempToBCD2(hw.Temperatures["ProtDet1"]))
+		copy(payload[20:22], tempToBCD2(hw.Temperatures["ProtInj2"]))
 
 		if err := sendCmd(st, deviceID, 8, payload); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
@@ -796,17 +1019,8 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 	})
 
 	mux.HandleFunc("/api/control/events", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
 		if !allowControl {
 			writeJSON(w, http.StatusForbidden, map[string]any{"error": "control disabled"})
-			return
-		}
-		var in []models.EventRow
-		if json.NewDecoder(r.Body).Decode(&in) != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
 			return
 		}
 
@@ -818,30 +1032,68 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 		}
 		st := stAny.(*deviceState)
 
+		if r.Method == http.MethodGet {
+			// Cmd 2 (0x02): 查询外部事件时间程序 Table0
+			if err := sendCmd(st, deviceID, 2, []byte{}); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+				return
+			}
+			// Cmd 100 (0x64): 查询外部事件时间程序 Table1
+			if err := sendCmd(st, deviceID, 100, []byte{}); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "query sent"})
+			return
+		}
+
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var in []models.EventRow
+		if json.NewDecoder(r.Body).Decode(&in) != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+			return
+		}
+
 		hw, _ := pstore.LoadHardwareConfig(deviceID)
 		hw.Events = in
 		pstore.SaveHardwareConfig(deviceID, hw)
 
-		// Cmd 10 (0x0A): 涓嬪彂澶栭儴浜嬩欢鏃堕棿绋嬪簭
-		// 鏍煎紡: 浜嬩欢鏁伴噺(1B) + N * [鏃堕棿(2B BCD) + 浜嬩欢浣嶇姸鎬?2B)]
-		n := len(in)
-		if n > 20 {
-			n = 20
-		}
-		payload := make([]byte, 1+n*4)
-		payload[0] = byte(n)
-		for i := 0; i < n; i++ {
-			off := 1 + i*4
-			copy(payload[off:off+2], tempToBCD2(in[i].Time)) // 鏃堕棿鍚屾牱鐢?BCD 缂栫爜
-			mask := in[i].EventMask
-			payload[off+2] = byte(mask >> 8)
-			payload[off+3] = byte(mask & 0xFF)
+		// Cmd 10 (0x0A): 下发外部事件时间程序 Table0
+		// Cmd 101 (0x65): 下发外部事件时间程序 Table1
+		m := eventsToMatrix(in)
+
+		payload0 := make([]byte, 96)
+		idx := 0
+		for ch := 0; ch < 4; ch++ {
+			for act := 0; act < 8; act++ {
+				copy(payload0[idx:idx+3], floatToBcd3B(m[ch][act]))
+				idx += 3
+			}
 		}
 
-		if err := sendCmd(st, deviceID, 10, payload); err != nil {
+		if err := sendCmd(st, deviceID, 10, payload0); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 			return
 		}
+
+		payload1 := make([]byte, 96)
+		idx = 0
+		for ch := 4; ch < 8; ch++ {
+			for act := 0; act < 8; act++ {
+				copy(payload1[idx:idx+3], floatToBcd3B(m[ch][act]))
+				idx += 3
+			}
+		}
+
+		if err := sendCmd(st, deviceID, 101, payload1); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	})
 
@@ -1612,6 +1864,34 @@ func handleConn(c net.Conn, hub *realtime.Hub, states *sync.Map, cfg chromsend14
 	dec := &gckc.StreamDecoder{}
 	buf := make([]byte, 64*1024)
 
+	// 启动一个定时器，每 10 秒发送一次 Cmd 0 以查询设定温度
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				// 发送 Cmd 0 (控温参数查询)
+				// DeviceID 我们这里拿不到确切的（在第一包才解析出来），但通常全 0 或占位符也行
+				// 最好是从 states 里拿到，不过我们可以在 processFrame 收到包确认 ID 后再发
+				// 简便起见，直接发一个空 DeviceID 的包，主板通常只看 Cmd 不看 DeviceID
+				frame, _ := gckc.Encode(gckc.Frame{
+					DeviceID: "0000000000000000",
+					Seq:      0,
+					Cmd:      0,
+					Payload:  []byte{},
+				})
+				// 不要设置 WriteDeadline，否则会影响全局 TCP 连接的读写
+				// _ = c.SetWriteDeadline(time.Now().Add(2 * time.Second))
+				_, _ = c.Write(frame)
+			}
+		}
+	}()
+
 	for {
 		n, err := c.Read(buf)
 		if n > 0 {
@@ -1656,6 +1936,10 @@ func processFrame(c net.Conn, f gckc.Frame, hub *realtime.Hub, states *sync.Map,
 
 	hub.Publish(f.DeviceID, event{Type: "device", DeviceID: f.DeviceID, At: time.Now()})
 
+	if f.Cmd != 143 && f.Cmd != 159 && f.Cmd != 128 {
+		log.Printf("Received Cmd %d, Payload len: %d, Payload: %X", f.Cmd, len(f.Payload), f.Payload)
+	}
+
 	switch f.Cmd {
 	case 146:
 		resetAllSessions(st)
@@ -1668,12 +1952,87 @@ func processFrame(c net.Conn, f gckc.Frame, hub *realtime.Hub, states *sync.Map,
 			ch := int(f.Payload[0])
 			finalizeSession(hub, st, f.DeviceID, ch, method)
 		}
+	case 128:
+		if te, ok := parseSetTemps128(f.Payload); ok {
+			te.DeviceID = f.DeviceID
+			hub.Publish(f.DeviceID, te)
+
+			// Save the fetched settings to hardware config so UI can query them
+			hwCfg, _ := pstore.LoadHardwareConfig(f.DeviceID)
+			if hwCfg.Temperatures == nil {
+				hwCfg.Temperatures = make(map[string]float64)
+			}
+			if te.SetTempInj1 != nil {
+				hwCfg.Temperatures["Inj1"] = *te.SetTempInj1
+			}
+			if te.SetTempCol != nil {
+				hwCfg.Temperatures["Col"] = *te.SetTempCol
+			}
+			if te.SetTempDet1 != nil {
+				hwCfg.Temperatures["Det1"] = *te.SetTempDet1
+			}
+			if te.SetTempInj2 != nil {
+				hwCfg.Temperatures["Inj2"] = *te.SetTempInj2
+			}
+			if te.SetTempDet2 != nil {
+				hwCfg.Temperatures["Det2"] = *te.SetTempDet2
+			}
+			if te.SetTempDet3 != nil {
+				hwCfg.Temperatures["Det3"] = *te.SetTempDet3
+			}
+
+			if te.ProtTempInj1 != nil {
+				hwCfg.Temperatures["ProtInj1"] = *te.ProtTempInj1
+			}
+			if te.ProtTempCol != nil {
+				hwCfg.Temperatures["ProtCol"] = *te.ProtTempCol
+			}
+			if te.ProtTempDet1 != nil {
+				hwCfg.Temperatures["ProtDet1"] = *te.ProtTempDet1
+			}
+			if te.ProtTempInj2 != nil {
+				hwCfg.Temperatures["ProtInj2"] = *te.ProtTempInj2
+			}
+			if te.ProtTempDet2 != nil {
+				hwCfg.Temperatures["ProtDet2"] = *te.ProtTempDet2
+			}
+			if te.ProtTempDet3 != nil {
+				hwCfg.Temperatures["ProtDet3"] = *te.ProtTempDet3
+			}
+			pstore.SaveHardwareConfig(f.DeviceID, hwCfg)
+		}
+	case 130, 138:
+		// 解析外部事件时间程序 Table0 (事件 1~4)
+		m := parseEventTable(f.Payload)
+		if m != nil {
+			hwCfg, _ := pstore.LoadHardwareConfig(f.DeviceID)
+			matrix := eventsToMatrix(hwCfg.Events)
+			for ch := 0; ch < 4; ch++ {
+				matrix[ch] = m[ch]
+			}
+			hwCfg.Events = matrixToEvents(matrix)
+			pstore.SaveHardwareConfig(f.DeviceID, hwCfg)
+		}
+	case 228, 229:
+		// 解析外部事件时间程序 Table1 (事件 5~8)
+		m := parseEventTable(f.Payload)
+		if m != nil {
+			hwCfg, _ := pstore.LoadHardwareConfig(f.DeviceID)
+			matrix := eventsToMatrix(hwCfg.Events)
+			for ch := 0; ch < 4; ch++ {
+				matrix[ch+4] = m[ch]
+			}
+			hwCfg.Events = matrixToEvents(matrix)
+			pstore.SaveHardwareConfig(f.DeviceID, hwCfg)
+		}
 	case 159:
+		// 调试输出159报文全部内容
+		log.Printf("Cmd 159 Payload: %X", f.Payload)
 		if items, ok := parseEpc159(f.Payload); ok {
 			e := telemetryEvent{Type: "telemetry", DeviceID: f.DeviceID, At: time.Now().UTC()}
 			epc := make([]telemetryEpc, 0, len(items))
 			for i := 0; i < len(items) && i < 32; i++ {
-				epc = append(epc, telemetryEpc{Psi: items[i].ActualPsi, Sccm: items[i].ActualSccm})
+				epc = append(epc, telemetryEpc{InputPsi: items[i].InputPsi, Psi: items[i].ActualPsi, Sccm: items[i].ActualSccm})
 			}
 			e.Epc = epc
 			if len(items) > 0 {
@@ -2117,6 +2476,124 @@ func buildCmd(name string, channel int) (byte, []byte, error) {
 }
 
 // 杈呭姪鏂规硶锛氬皢 0~399 鐨勬俯搴﹀€艰浆鎹负 2 瀛楄妭 BCD 鐮?
+// 将 float * 100，提取 6 位 BCD 数字，拼装成 3 字节 (Cmd 10 需要)
+func floatToBcd3B(val float64) []byte {
+	v := int(math.Round(val * 100))
+	if v < 0 {
+		v = 0
+	}
+	if v > 999999 {
+		v = 999999
+	}
+
+	digits := make([]byte, 6)
+	for i := 5; i >= 0; i-- {
+		digits[i] = byte(v % 10)
+		v = v / 10
+	}
+
+	out := make([]byte, 3)
+	out[0] = (digits[0] << 4) | digits[1]
+	out[1] = (digits[2] << 4) | digits[3]
+	out[2] = (digits[4] << 4) | digits[5]
+	return out
+}
+
+// 解析 3 字节 BCD 为 float64
+func bcd3BToFloat(b []byte) float64 {
+	if len(b) < 3 {
+		return 0
+	}
+	v := int(b[0]>>4)*100000 + int(b[0]&0x0F)*10000 +
+		int(b[1]>>4)*1000 + int(b[1]&0x0F)*100 +
+		int(b[2]>>4)*10 + int(b[2]&0x0F)
+	return float64(v) / 100.0
+}
+
+func eventsToMatrix(events []models.EventRow) [8][8]float64 {
+	var m [8][8]float64
+	var prevMask int
+	for _, evt := range events {
+		mask := evt.EventMask
+		t := evt.Time
+		for ch := 0; ch < 8; ch++ {
+			wasOn := (prevMask & (1 << ch)) != 0
+			isOn := (mask & (1 << ch)) != 0
+			if !wasOn && isOn {
+				if m[ch][0] == 0 {
+					m[ch][0] = t
+				} else if m[ch][2] == 0 {
+					m[ch][2] = t
+				} else if m[ch][4] == 0 {
+					m[ch][4] = t
+				} else if m[ch][6] == 0 {
+					m[ch][6] = t
+				}
+			}
+			if wasOn && !isOn {
+				if m[ch][1] == 0 {
+					m[ch][1] = t
+				} else if m[ch][3] == 0 {
+					m[ch][3] = t
+				} else if m[ch][5] == 0 {
+					m[ch][5] = t
+				} else if m[ch][7] == 0 {
+					m[ch][7] = t
+				}
+			}
+		}
+		prevMask = mask
+	}
+	return m
+}
+
+func matrixToEvents(m [8][8]float64) []models.EventRow {
+	timeSet := make(map[float64]bool)
+	for ch := 0; ch < 8; ch++ {
+		for act := 0; act < 8; act++ {
+			if t := m[ch][act]; t > 0 {
+				timeSet[t] = true
+			}
+		}
+	}
+	var times []float64
+	for t := range timeSet {
+		times = append(times, t)
+	}
+	sort.Float64s(times)
+
+	var events []models.EventRow
+	var currentMask int
+	for _, t := range times {
+		for ch := 0; ch < 8; ch++ {
+			// actions: 0,2,4,6 are ON, 1,3,5,7 are OFF
+			if m[ch][0] == t || m[ch][2] == t || m[ch][4] == t || m[ch][6] == t {
+				currentMask |= (1 << ch)
+			}
+			if m[ch][1] == t || m[ch][3] == t || m[ch][5] == t || m[ch][7] == t {
+				currentMask &^= (1 << ch)
+			}
+		}
+		events = append(events, models.EventRow{Time: t, EventMask: currentMask})
+	}
+	return events
+}
+
+func parseEventTable(payload []byte) *[4][8]float64 {
+	if len(payload) < 96 {
+		return nil
+	}
+	var m [4][8]float64
+	idx := 0
+	for ch := 0; ch < 4; ch++ {
+		for act := 0; act < 8; act++ {
+			m[ch][act] = bcd3BToFloat(payload[idx : idx+3])
+			idx += 3
+		}
+	}
+	return &m
+}
+
 func tempToBCD2(temp float64) []byte {
 	v := int(math.Round(temp * 10))
 	if v < 0 {

@@ -1,10 +1,10 @@
 export function initLiveChromatogram() {
     const container = document.getElementById('view-live');
     container.innerHTML = `
-        <div style="display: flex; height: 100%; gap: 1rem;">
-            <div style="flex: 3; background: var(--panel); border-radius: 8px; border: 1px solid #334155; position: relative; display: flex; flex-direction: column;">
+        <div style="display: flex; height: calc(100vh - 80px); gap: 1rem;">
+            <div style="flex: 1; min-width: 0; background: var(--panel); border-radius: 8px; border: 1px solid #334155; position: relative; display: flex; flex-direction: column;">
                 <!-- 第一行：进样类型、控制按钮、点火图标 -->
-                <div style="padding: 10px; border-bottom: 1px solid #334155; display: flex; gap: 10px; align-items: center; justify-content: space-between;">
+                <div style="padding: 6px 10px; border-bottom: 1px solid #334155; display: flex; gap: 10px; align-items: center; justify-content: space-between;">
                     <div style="display: flex; gap: 10px; align-items: center;">
                         <span style="color: #94a3b8;">进样类型:</span>
                         <label><input type="radio" name="injType" value="normal" checked> 正常</label>
@@ -24,7 +24,7 @@ export function initLiveChromatogram() {
                 </div>
 
                 <!-- 第二行：图表配置项 -->
-                <div style="padding: 10px; border-bottom: 1px solid #334155; display: flex; gap: 15px; align-items: center; background: rgba(0,0,0,0.2);">
+                <div style="padding: 6px 10px; border-bottom: 1px solid #334155; display: flex; gap: 15px; align-items: center; background: rgba(0,0,0,0.2);">
                     <div style="display: flex; align-items: center; gap: 5px;">
                         <span style="color: #94a3b8;">下限:</span>
                         <input type="number" id="live-y-low" class="input" value="0" style="width: 60px; padding: 2px 5px;">
@@ -57,45 +57,48 @@ export function initLiveChromatogram() {
                 </div>
 
                 <!-- 图表区 -->
-                <div style="flex: 1; position: relative;">
+                <div style="flex: 1; position: relative; min-height: 0;">
                     <canvas id="chromatogram-canvas" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></canvas>
                 </div>
             </div>
-            <div style="flex: 1; display: flex; flex-direction: column; gap: 1rem;">
-                <div class="control-group" style="flex: 1; margin: 0; overflow-y: auto;">
-                    <h3 style="margin-top:0">实时结果</h3>
-                    <table id="live-results-table">
+            <div style="flex: 0 0 350px; display: flex; flex-direction: column; gap: 0.5rem; min-height: 0;">
+                <div class="control-group" style="flex: 1; margin: 0; padding: 0.8rem; overflow-y: auto;">
+                    <h3 style="margin-top:0; margin-bottom:0.5rem;">实时结果</h3>
+                    <table id="live-results-table" style="margin-top: 0;">
                         <thead>
-                            <tr><th>名称</th><th>含量(mg/m³)</th></tr>
+                            <tr><th>名称</th><th style="text-align:right">含量(mg/m³)</th></tr>
                         </thead>
                         <tbody>
                             <tr><td colspan="2" style="text-align:center; color:#94a3b8">等待分析...</td></tr>
                         </tbody>
                     </table>
                 </div>
-                <div style="flex: 1; display: flex; gap: 1rem;">
-                    <div class="control-group" style="flex: 1; margin: 0; overflow-y: auto;">
-                        <table id="live-pressure-table" style="font-size: 13px;">
+                <div style="flex: 1; display: flex; gap: 0.5rem; min-height: 0;">
+                    <div class="control-group" style="flex: 1; margin: 0; padding: 0.6rem; overflow-y: auto;">
+                        <table id="live-pressure-table" style="font-size: 13px; margin-top: 0; width: 100%;">
                             <thead>
-                                <tr><th>实测(psi)</th></tr>
+                                <tr><th>名称</th><th style="text-align:right">实测(psi)</th></tr>
                             </thead>
                             <tbody>
-                                <tr><td>载气 <span style="float:right" id="val-carrier">0.00</span></td></tr>
-                                <tr><td>氢气 <span style="float:right" id="val-h2">0.00</span></td></tr>
-                                <tr><td>空气 <span style="float:right" id="val-air">0.00</span></td></tr>
+                                <tr><td>载气1</td><td id="val-carrier1" style="text-align:right">0.00</td></tr>
+                                <tr><td>载气3</td><td id="val-carrier3" style="text-align:right">0.00</td></tr>
+                                <tr><td>样气</td><td id="val-sample" style="text-align:right">0.00</td></tr>
+                                <tr><td>载气2</td><td id="val-carrier2" style="text-align:right">0.00</td></tr>
+                                <tr><td>氢气1</td><td id="val-h2-1" style="text-align:right">0.00</td></tr>
+                                <tr><td>空气1</td><td id="val-air-1" style="text-align:right">0.00</td></tr>
                             </tbody>
                         </table>
                     </div>
-                    <div class="control-group" style="flex: 1; margin: 0; overflow-y: auto;">
-                        <table id="live-temp-table" style="font-size: 13px;">
+                    <div class="control-group" style="flex: 1; margin: 0; padding: 0.6rem; overflow-y: auto;">
+                        <table id="live-temp-table" style="font-size: 13px; margin-top: 0; width: 100%;">
                             <thead>
-                                <tr><th>实测(℃)</th></tr>
+                                <tr><th>名称</th><th style="text-align:right">实测(℃)</th></tr>
                             </thead>
                             <tbody>
-                                <tr><td>柱箱 <span style="float:right" id="val-col">0.0</span></td></tr>
-                                <tr><td>阀温 <span style="float:right" id="val-valve">0.0</span></td></tr>
-                                <tr><td>检测1 <span style="float:right" id="val-det1">0.0</span></td></tr>
-                                <tr><td>进样1 <span style="float:right" id="val-inj1">0.0</span></td></tr>
+                                <tr><td>柱箱</td><td id="val-col" style="text-align:right">0.0</td></tr>
+                                <tr><td>阀温</td><td id="val-valve" style="text-align:right">0.0</td></tr>
+                                <tr><td>检测1</td><td id="val-det1" style="text-align:right">0.0</td></tr>
+                                <tr><td>进样1</td><td id="val-inj1" style="text-align:right">0.0</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -579,21 +582,20 @@ function setupCanvas() {
                     if (elDet1) elDet1.innerText = (parsed.tempDet1 || 0).toFixed(1);
                     if (elValve) elValve.innerText = (parsed.tempInj2 || 0).toFixed(1); // 阀温暂借用 tempInj2
                 }
-                if (parsed.carrierPsi !== undefined || parsed.epc) {
-                    const elCarrier = document.getElementById('val-carrier');
-                    const elH2 = document.getElementById('val-h2');
-                    const elAir = document.getElementById('val-air');
+                if (parsed.epc && parsed.epc.length > 0) {
+                    const elC1 = document.getElementById('val-carrier1');
+                    const elC3 = document.getElementById('val-carrier3');
+                    const elSample = document.getElementById('val-sample');
+                    const elC2 = document.getElementById('val-carrier2');
+                    const elH2_1 = document.getElementById('val-h2-1');
+                    const elAir_1 = document.getElementById('val-air-1');
                     
-                    // 支持两种格式的遥测数据 (解析平铺格式或 epc 数组格式)
-                    if (parsed.carrierPsi !== undefined) {
-                        if (elCarrier) elCarrier.innerText = (parsed.carrierPsi || 0).toFixed(2);
-                        if (elH2) elH2.innerText = (parsed.h2Psi || 0).toFixed(2);
-                        if (elAir) elAir.innerText = (parsed.airPsi || 0).toFixed(2);
-                    } else if (parsed.epc && parsed.epc.length >= 3) {
-                        if (elCarrier) elCarrier.innerText = (parsed.epc[0].psi || 0).toFixed(2);
-                        if (elH2) elH2.innerText = (parsed.epc[1].psi || 0).toFixed(2);
-                        if (elAir) elAir.innerText = (parsed.epc[2].psi || 0).toFixed(2);
-                    }
+                    if (elC1 && parsed.epc.length > 0) elC1.innerText = (parsed.epc[0].psi || 0).toFixed(2);
+                    if (elC3 && parsed.epc.length > 1) elC3.innerText = (parsed.epc[1].psi || 0).toFixed(2);
+                    if (elSample && parsed.epc.length > 2) elSample.innerText = (parsed.epc[2].psi || 0).toFixed(2);
+                    if (elC2 && parsed.epc.length > 3) elC2.innerText = (parsed.epc[3].psi || 0).toFixed(2);
+                    if (elH2_1 && parsed.epc.length > 9) elH2_1.innerText = (parsed.epc[9].psi || 0).toFixed(2);
+                    if (elAir_1 && parsed.epc.length > 10) elAir_1.innerText = (parsed.epc[10].psi || 0).toFixed(2);
                 }
             }
         } catch (e) {
@@ -606,16 +608,15 @@ function setupCanvas() {
         if (tbody) {
             let html = '';
             if (resultObj && resultObj.pollutants) {
-                resultObj.pollutants.forEach(p => {
-                    // if (p.status === 'calculated') return; // We actually want to show NMHC in the result table, but not in the graph
-                    html += `<tr><td>${p.code || p.name}</td><td style="color:var(--success)">${p.amount ? p.amount.toFixed(2) : '0.00'}</td></tr>`;
-                });
-            }
-            if (resultObj && resultObj.groups) {
-                resultObj.groups.forEach(g => {
-                    html += `<tr><td style="font-weight:bold">${g.code || g.name}</td><td style="font-weight:bold;color:var(--accent)">${g.amount ? g.amount.toFixed(2) : '0.00'}</td></tr>`;
-                });
-            }
+                        resultObj.pollutants.forEach(p => {
+                            html += `<tr><td>${p.code || p.name}</td><td style="color:var(--success); text-align:right;">${p.amount ? p.amount.toFixed(2) : '0.00'}</td></tr>`;
+                        });
+                    }
+                    if (resultObj && resultObj.groups) {
+                        resultObj.groups.forEach(g => {
+                            html += `<tr><td style="font-weight:bold">${g.code || g.name}</td><td style="font-weight:bold;color:var(--accent); text-align:right;">${g.amount ? g.amount.toFixed(2) : '0.00'}</td></tr>`;
+                        });
+                    }
             tbody.innerHTML = html || '<tr><td colspan="2" style="text-align:center; color:#94a3b8">暂无组分数据</td></tr>';
         }
     }

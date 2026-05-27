@@ -84,3 +84,14 @@ type UploadConfig struct {
 	ChromatographIP string               `json:"chromatographIP"` // 色谱IP
 	EnableUpload    bool                 `json:"enableUpload"`    // 是否启用上传
 }
+
+// SysConfig 系统高级配置 (如 MQTT，不依赖环境变量)
+type SysConfig struct {
+	MqttBroker   string `json:"mqtt_broker"`
+	MqttTopic    string `json:"mqtt_topic"`
+	MqttClientID string `json:"mqtt_client_id"`
+	MqttUser     string `json:"mqtt_user"`
+	MqttPass     string `json:"mqtt_pass"`
+	MqttEnabled  bool   `json:"mqtt_enabled"`
+	AdminPass    string `json:"admin_pass"` // 菜单加密密码
+}

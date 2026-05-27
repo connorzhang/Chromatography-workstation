@@ -110,6 +110,29 @@ func (s *persistStore) LoadLastDeviceID() (string, bool) {
 	return s.LoadKV("ui.lastDeviceId")
 }
 
+func (s *persistStore) LoadSysConfig() models.SysConfig {
+	var cfg models.SysConfig
+	if v, ok := s.LoadKV("sys.config"); ok && v != "" {
+		_ = json.Unmarshal([]byte(v), &cfg)
+	}
+	// 默认值兜底
+	if cfg.MqttBroker == "" {
+		cfg.MqttBroker = "tcp://127.0.0.1:1883"
+	}
+	if cfg.MqttTopic == "" {
+		cfg.MqttTopic = "vocs/telemetry/results"
+	}
+	if cfg.AdminPass == "" {
+		cfg.AdminPass = "123456" // 默认密码
+	}
+	return cfg
+}
+
+func (s *persistStore) SaveSysConfig(cfg models.SysConfig) {
+	b, _ := json.Marshal(cfg)
+	s.SaveKV("sys.config", string(b))
+}
+
 func (s *persistStore) SaveUI(st uiState) {
 	if st.DeviceID == "" {
 		return

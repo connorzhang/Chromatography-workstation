@@ -7,7 +7,8 @@ export function initSettings() {
                 <button class="tab-btn" data-target="tab-inst2">仪器参数2</button>
                 <button class="tab-btn" data-target="tab-upload">上传参数</button>
                 <button class="tab-btn" data-target="tab-log">log</button>
-                <button class="tab-btn" data-target="tab-daq">数采仪</button>
+                <button class="tab-btn" data-target="tab-hw-verify" style="color: #38bdf8;">硬件核对</button>
+                <button id="btn-secret-menu" style="margin-left:auto; background:transparent; color:#64748b; border:none; cursor:pointer; padding: 10px 20px;" title="高级设置">⚙️高级</button>
             </div>
             
             <div class="tab-content active" id="tab-inst1">
@@ -63,35 +64,35 @@ export function initSettings() {
                         </thead>
                         <tbody>
                             <tr>
-                                <td>载气1(psi)</td>
-                                <td id="real-epc-carrier1">0.00</td>
+                                <td>载气1(psi / sccm)</td>
+                                <td id="real-epc-carrier1">0.00 / 0.00</td>
                                 <td><input type="number" id="set-epc-carrier1" class="input-cell" value="13.00"></td>
                                 <td><button class="btn" onclick="window.setEPC('Carrier1')">设定</button></td>
                                 
-                                <td>载气2(psi)</td>
-                                <td id="real-epc-carrier2">0.00</td>
+                                <td>载气2(psi / sccm)</td>
+                                <td id="real-epc-carrier2">0.00 / 0.00</td>
                                 <td><input type="number" id="set-epc-carrier2" class="input-cell" value="0.00"></td>
                                 <td><button class="btn" onclick="window.setEPC('Carrier2')">设定</button></td>
                             </tr>
                             <tr>
-                                <td>氢气1(ml/min)</td>
-                                <td id="real-epc-h2-1">0.00</td>
+                                <td>氢气1(psi / sccm)</td>
+                                <td id="real-epc-h2-1">0.00 / 0.00</td>
                                 <td><input type="number" id="set-epc-h2-1" class="input-cell" value="60.00"></td>
                                 <td><button class="btn" onclick="window.setEPC('H2_1')">设定</button></td>
                                 
-                                <td>氢气2(ml/min)</td>
-                                <td id="real-epc-h2-2">0.00</td>
+                                <td>氢气2(psi / sccm)</td>
+                                <td id="real-epc-h2-2">0.00 / 0.00</td>
                                 <td><input type="number" id="set-epc-h2-2" class="input-cell" value="0.00"></td>
                                 <td><button class="btn" onclick="window.setEPC('H2_2')">设定</button></td>
                             </tr>
                             <tr>
-                                <td>空气1(ml/min)</td>
-                                <td id="real-epc-air-1">0.00</td>
+                                <td>空气1(psi / sccm)</td>
+                                <td id="real-epc-air-1">0.00 / 0.00</td>
                                 <td><input type="number" id="set-epc-air-1" class="input-cell" value="200.00"></td>
                                 <td><button class="btn" onclick="window.setEPC('Air1')">设定</button></td>
                                 
-                                <td>空气2(ml/min)</td>
-                                <td id="real-epc-air-2">0.00</td>
+                                <td>空气2(psi / sccm)</td>
+                                <td id="real-epc-air-2">0.00 / 0.00</td>
                                 <td><input type="number" id="set-epc-air-2" class="input-cell" value="0.00"></td>
                                 <td><button class="btn" onclick="window.setEPC('Air2')">设定</button></td>
                             </tr>
@@ -111,45 +112,46 @@ export function initSettings() {
                 <div style="display: flex; gap: 20px;">
                     <div class="control-group" style="flex: 1;">
                         <h3 style="margin-top:0;">温度控制</h3>
-                        <table class="settings-table">
-                            <thead>
-                                <tr>
-                                    <th>名称</th><th>实测(℃)</th><th>设定(℃)</th><th>保护(℃)</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr>
-                                    <td>柱箱</td><td id="real-temp-col">0.0</td>
-                                    <td><input type="number" id="set-temp-col" class="input-cell" value="100"></td>
-                                    <td><input type="number" id="prot-temp-col" class="input-cell" value=""></td>
-                                </tr>
-                                <tr>
-                                    <td>阀温</td><td id="real-temp-valve">0.0</td>
-                                    <td><input type="number" id="set-temp-valve" class="input-cell" value="100"></td>
-                                    <td><input type="number" id="prot-temp-valve" class="input-cell" value=""></td>
-                                </tr>
-                                <tr>
-                                    <td>检测1</td><td id="real-temp-det1">0.0</td>
-                                    <td><input type="number" id="set-temp-det1" class="input-cell" value="220"></td>
-                                    <td><input type="number" id="prot-temp-det1" class="input-cell" value=""></td>
-                                </tr>
-                                <tr>
-                                    <td>进样2</td><td id="real-temp-inj2">0.0</td>
-                                    <td><input type="number" id="set-temp-inj2" class="input-cell" value="100"></td>
-                                    <td><input type="number" id="prot-temp-inj2" class="input-cell" value=""></td>
-                                </tr>
-                                <tr>
-                                    <td>检测2</td><td id="real-temp-det2">0.0</td>
-                                    <td><input type="number" id="set-temp-det2" class="input-cell" value="0"></td>
-                                    <td><input type="number" id="prot-temp-det2" class="input-cell" value=""></td>
-                                </tr>
-                            </tbody>
-                        </table>
-                        <div style="margin-top: 10px; display: flex; gap: 10px;">
-                            <button class="btn btn-danger">关闭控温</button>
-                            <button class="btn" id="btn-query-temp">查询</button>
-                            <button class="btn" id="btn-apply-temp">设定</button>
-                        </div>
+        <table class="settings-table">
+            <thead>
+                <tr>
+                    <th>名称</th><th>实测(℃)</th><th>设定(℃)</th><th>保护(℃)</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>进样1</td><td id="real-temp-inj1">0.0</td>
+                    <td><input type="number" id="set-temp-inj1" class="input-cell" value="100"></td>
+                    <td><input type="number" id="prot-temp-inj1" class="input-cell" value=""></td>
+                </tr>
+                <tr>
+                    <td>柱箱</td><td id="real-temp-col">0.0</td>
+                    <td><input type="number" id="set-temp-col" class="input-cell" value="100"></td>
+                    <td><input type="number" id="prot-temp-col" class="input-cell" value=""></td>
+                </tr>
+                <tr>
+                    <td>检测1</td><td id="real-temp-det1">0.0</td>
+                    <td><input type="number" id="set-temp-det1" class="input-cell" value="220"></td>
+                    <td><input type="number" id="prot-temp-det1" class="input-cell" value=""></td>
+                </tr>
+                <tr>
+                    <td>进样2</td><td id="real-temp-inj2">0.0</td>
+                    <td><input type="number" id="set-temp-inj2" class="input-cell" value="100"></td>
+                    <td><input type="number" id="prot-temp-inj2" class="input-cell" value=""></td>
+                </tr>
+                <tr>
+                    <td>检测2</td><td id="real-temp-det2">0.0</td>
+                    <td><input type="number" id="set-temp-det2" class="input-cell" value="0"></td>
+                    <td><input type="number" id="prot-temp-det2" class="input-cell" value=""></td>
+                </tr>
+            </tbody>
+        </table>
+                    <div style="margin-top: 10px; display: flex; gap: 10px;">
+                        <button class="btn" id="btn-start-temp" style="background-color: #2e7d32; color: white;">开始控温</button>
+                        <button class="btn" id="btn-stop-temp" style="background-color: #d32f2f; color: white;">关闭控温</button>
+                        <button class="btn" id="btn-query-temp">查询</button>
+                        <button class="btn" id="btn-apply-temp">设定</button>
+                    </div>
                     </div>
 
                     <div class="control-group" style="flex: 1;">
@@ -262,28 +264,136 @@ export function initSettings() {
                 </div>
             </div>
 
-            <div class="tab-content" id="tab-daq">
-                <div style="max-width: 400px; margin: 40px auto; padding: 20px; border: 1px solid #334155; border-radius: 8px;">
-                    <div style="display: flex; margin-bottom: 15px; align-items: center;">
-                        <span style="width: 100px;">设备号</span>
-                        <input type="text" id="daq-device-no" class="input" style="flex: 1;" value="1A1GBHKL9011202180011101">
+            <div class="tab-content" id="tab-hw-verify">
+                <div style="display: flex; gap: 20px;">
+                    <div class="control-group" style="flex: 1;">
+                        <h3 style="margin-top:0;">温度全量核对 (Cmd 143/128)</h3>
+                        <table class="settings-table">
+            <thead>
+                <tr><th>通道</th><th>实时值 (℃)</th><th>设定值 (℃)</th><th>保护值 (℃)</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>Temp 1 (Inj1)</td><td id="vrf-rt-temp1">0.0</td><td id="vrf-st-temp1">0.0</td><td id="vrf-pt-temp1">0.0</td></tr>
+                <tr><td>Temp 2 (Col)</td><td id="vrf-rt-temp2">0.0</td><td id="vrf-st-temp2">0.0</td><td id="vrf-pt-temp2">0.0</td></tr>
+                <tr><td>Temp 3 (Det1)</td><td id="vrf-rt-temp3">0.0</td><td id="vrf-st-temp3">0.0</td><td id="vrf-pt-temp3">0.0</td></tr>
+                <tr><td>Temp 4 (Inj2)</td><td id="vrf-rt-temp4">0.0</td><td id="vrf-st-temp4">0.0</td><td id="vrf-pt-temp4">0.0</td></tr>
+                <tr><td>Temp 5 (Det2)</td><td id="vrf-rt-temp5">0.0</td><td id="vrf-st-temp5">0.0</td><td id="vrf-pt-temp5">0.0</td></tr>
+                <tr><td>Temp 6 (Det3)</td><td id="vrf-rt-temp6">0.0</td><td id="vrf-st-temp6">0.0</td><td id="vrf-pt-temp6">0.0</td></tr>
+            </tbody>
+        </table>
                     </div>
-                    <div style="display: flex; margin-bottom: 15px; align-items: center;">
-                        <span style="width: 100px;">上传IP</span>
-                        <input type="text" id="daq-upload-ip" class="input" style="flex: 1;" value="192.168.1.105">
+                    <div class="control-group" style="flex: 1;">
+                        <h3 style="margin-top:0;">气路全量核对 (Cmd 159)</h3>
+                        <table class="settings-table">
+                            <thead>
+                                <tr><th>通道</th><th>实时压力(psi)</th><th>实时流量(sccm)</th><th>设定压力(psi)</th></tr>
+                            </thead>
+                            <tbody>
+                                <tr><td>EPC 1</td><td id="vrf-rt-epc1-psi">0.00</td><td id="vrf-rt-epc1-sccm">0.00</td><td id="vrf-st-epc1-psi">0.00</td></tr>
+                                <tr><td>EPC 2</td><td id="vrf-rt-epc2-psi">0.00</td><td id="vrf-rt-epc2-sccm">0.00</td><td id="vrf-st-epc2-psi">0.00</td></tr>
+                                <tr><td>EPC 3</td><td id="vrf-rt-epc3-psi">0.00</td><td id="vrf-rt-epc3-sccm">0.00</td><td id="vrf-st-epc3-psi">0.00</td></tr>
+                                <tr><td>EPC 4</td><td id="vrf-rt-epc4-psi">0.00</td><td id="vrf-rt-epc4-sccm">0.00</td><td id="vrf-st-epc4-psi">0.00</td></tr>
+                                <tr><td>EPC 5</td><td id="vrf-rt-epc5-psi">0.00</td><td id="vrf-rt-epc5-sccm">0.00</td><td id="vrf-st-epc5-psi">0.00</td></tr>
+                                <tr><td>EPC 6</td><td id="vrf-rt-epc6-psi">0.00</td><td id="vrf-rt-epc6-sccm">0.00</td><td id="vrf-st-epc6-psi">0.00</td></tr>
+                                <tr><td>EPC 7</td><td id="vrf-rt-epc7-psi">0.00</td><td id="vrf-rt-epc7-sccm">0.00</td><td id="vrf-st-epc7-psi">0.00</td></tr>
+                                <tr><td>EPC 8</td><td id="vrf-rt-epc8-psi">0.00</td><td id="vrf-rt-epc8-sccm">0.00</td><td id="vrf-st-epc8-psi">0.00</td></tr>
+                                <tr><td>EPC 9</td><td id="vrf-rt-epc9-psi">0.00</td><td id="vrf-rt-epc9-sccm">0.00</td><td id="vrf-st-epc9-psi">0.00</td></tr>
+                                <tr><td>EPC 10</td><td id="vrf-rt-epc10-psi">0.00</td><td id="vrf-rt-epc10-sccm">0.00</td><td id="vrf-st-epc10-psi">0.00</td></tr>
+                                <tr><td>EPC 11</td><td id="vrf-rt-epc11-psi">0.00</td><td id="vrf-rt-epc11-sccm">0.00</td><td id="vrf-st-epc11-psi">0.00</td></tr>
+                                <tr><td>EPC 12</td><td id="vrf-rt-epc12-psi">0.00</td><td id="vrf-rt-epc12-sccm">0.00</td><td id="vrf-st-epc12-psi">0.00</td></tr>
+                                <tr><td>EPC 13</td><td id="vrf-rt-epc13-psi">0.00</td><td id="vrf-rt-epc13-sccm">0.00</td><td id="vrf-st-epc13-psi">0.00</td></tr>
+                                <tr><td>EPC 14</td><td id="vrf-rt-epc14-psi">0.00</td><td id="vrf-rt-epc14-sccm">0.00</td><td id="vrf-st-epc14-psi">0.00</td></tr>
+                                <tr><td>EPC 15</td><td id="vrf-rt-epc15-psi">0.00</td><td id="vrf-rt-epc15-sccm">0.00</td><td id="vrf-st-epc15-psi">0.00</td></tr>
+                                <tr><td>EPC 16</td><td id="vrf-rt-epc16-psi">0.00</td><td id="vrf-rt-epc16-sccm">0.00</td><td id="vrf-st-epc16-psi">0.00</td></tr>
+                                <tr><td>EPC 17</td><td id="vrf-rt-epc17-psi">0.00</td><td id="vrf-rt-epc17-sccm">0.00</td><td id="vrf-st-epc17-psi">0.00</td></tr>
+                                <tr><td>EPC 18</td><td id="vrf-rt-epc18-psi">0.00</td><td id="vrf-rt-epc18-sccm">0.00</td><td id="vrf-st-epc18-psi">0.00</td></tr>
+                            </tbody>
+                        </table>
                     </div>
-                    <div style="display: flex; margin-bottom: 15px; align-items: center;">
-                        <span style="width: 100px;">上传端口号</span>
-                        <input type="text" id="daq-upload-port" class="input" style="flex: 1;" value="5300">
+                </div>
+            </div>
+        </div>
+
+        <!-- 隐藏的高级设置 Modal -->
+        <div id="sysconfig-modal" class="modal-overlay" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:999; justify-content:center; align-items:center;">
+            <div class="modal-content" style="background:#1e293b; padding:20px; border-radius:8px; width:450px; color:#fff; max-height: 90vh; overflow-y: auto;">
+                <h3 style="margin-top:0; border-bottom:1px solid #334155; padding-bottom:10px;">系统高级配置</h3>
+                
+                <div id="sysconfig-login" style="margin-top:20px;">
+                    <div style="display:flex; flex-direction:column; gap:10px;">
+                        <label>请输入加密密码：</label>
+                        <input type="password" id="sys-auth-pass" class="input" placeholder="输入密码以解锁配置">
+                        <button class="btn" id="btn-sys-login" style="margin-top:10px;">解锁</button>
+                        <button class="btn btn-danger" id="btn-sys-close1" style="margin-top:5px; background:transparent; border:1px solid #475569;">取消</button>
                     </div>
-                    <div style="display: flex; margin-bottom: 15px; align-items: center;">
-                        <span style="width: 100px;">色谱IP</span>
-                        <input type="text" id="daq-chrom-ip" class="input" style="flex: 1;" value="192.168.1.20">
+                </div>
+
+                <div id="sysconfig-form" style="display:none; margin-top:20px;">
+                    <div style="display:flex; flex-direction:column; gap:10px;">
+                        <!-- 数采仪配置部分 -->
+                        <h4 style="margin: 0; color: #38bdf8; border-bottom: 1px dashed #334155; padding-bottom: 5px;">数采仪 (HJ212)</h4>
+                        
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <label style="width: 80px;">设备号</label>
+                            <input type="text" id="daq-device-no" class="input" style="flex: 1;" value="1A1GBHKL9011202180011101">
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <label style="width: 80px;">上传IP</label>
+                            <input type="text" id="daq-upload-ip" class="input" style="flex: 1;" value="192.168.1.105">
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <label style="width: 80px;">上传端口</label>
+                            <input type="text" id="daq-upload-port" class="input" style="flex: 1;" value="5300">
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <label style="width: 80px;">色谱IP</label>
+                            <input type="text" id="daq-chrom-ip" class="input" style="flex: 1;" value="192.168.1.20">
+                        </div>
+                        <div style="margin-bottom: 10px; padding-left: 90px;">
+                            <label style="color: #10b981;"><input type="checkbox" id="daq-enable" checked> 启用数采仪上传</label>
+                        </div>
+
+                        <!-- MQTT配置部分 -->
+                        <div style="display: flex; align-items: center; justify-content: space-between; margin: 10px 0 0 0; border-bottom: 1px dashed #334155; padding-bottom: 5px;">
+                            <h4 style="margin: 0; color: #38bdf8;">MQTT 增量遥测</h4>
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <span id="mqtt-status-indicator" style="font-size: 12px; color: #94a3b8;">状态: 未知</span>
+                                <button class="btn" id="btn-mqtt-test" style="padding: 2px 8px; font-size: 12px;">测试连接</button>
+                            </div>
+                        </div>
+                        <label style="color:#10b981; margin-top: 10px; display: block;"><input type="checkbox" id="sys-mqtt-enable"> 启用 MQTT 上传</label>
+                        
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <label style="width: 80px;">Broker</label>
+                            <input type="text" id="sys-mqtt-broker" class="input" style="flex: 1;" placeholder="tcp://127.0.0.1:1883">
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <label style="width: 80px;">Topic</label>
+                            <input type="text" id="sys-mqtt-topic" class="input" style="flex: 1;" placeholder="vocs/telemetry/results">
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <label style="width: 80px;">Client ID</label>
+                            <input type="text" id="sys-mqtt-clientid" class="input" style="flex: 1;" placeholder="edge_collector_01">
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <label style="width: 80px;">Username</label>
+                            <input type="text" id="sys-mqtt-user" class="input" style="flex: 1;">
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <label style="width: 80px;">Password</label>
+                            <input type="password" id="sys-mqtt-pass" class="input" style="flex: 1;">
+                        </div>
+
+                        <!-- 密码修改部分 -->
+                        <h4 style="margin: 10px 0 0 0; color: #38bdf8; border-bottom: 1px dashed #334155; padding-bottom: 5px;">安全设置</h4>
+                        <label>修改管理员密码 (可选)</label>
+                        <input type="password" id="sys-admin-pass-new" class="input" placeholder="留空则不修改">
+                        
+                        <div style="display:flex; gap:10px; margin-top:20px;">
+                            <button class="btn" id="btn-sys-save" style="flex:1;">保存并应用</button>
+                            <button class="btn btn-danger" id="btn-sys-close2" style="flex:1; background:transparent; border:1px solid #475569;">关闭</button>
+                        </div>
                     </div>
-                    <div style="margin-bottom: 20px; padding-left: 100px;">
-                        <label style="color: #10b981;"><input type="checkbox" id="daq-enable" checked> 上传</label>
-                    </div>
-                    <button class="btn" id="btn-apply-daq" style="width: 100%;">保存并应用</button>
                 </div>
             </div>
         </div>
@@ -330,16 +440,33 @@ export function initSettings() {
                 hwSettings = await hwRes.json();
                 
                 // Populate Events
-                if (hwSettings.events && hwSettings.events.length > 0) {
-                    for (let i = 0; i < 8 && i < hwSettings.events.length; i++) {
-                        const evt = hwSettings.events[i];
-                        if (evt.event_mask === 1) { // Assume 1 is on, 0 is off for now, logic may vary
-                            document.getElementById('ev-on-' + (i+1)).value = evt.time;
-                        } else {
-                            document.getElementById('ev-off-' + (i+1)).value = evt.time;
-                        }
-                    }
-                }
+                  if (hwSettings.events && hwSettings.events.length > 0) {
+                      // 还原时间程序到8路UI (吸合1 / 释放1)
+                      const channelOn = new Array(8).fill(null);
+                      const channelOff = new Array(8).fill(null);
+                      let prevMask = 0;
+                      
+                      for (const evt of hwSettings.events) {
+                          const mask = evt.event_mask;
+                          for (let b = 0; b < 8; b++) {
+                              const wasOn = (prevMask & (1 << b)) !== 0;
+                              const isOn = (mask & (1 << b)) !== 0;
+                              
+                              if (!wasOn && isOn && channelOn[b] === null) {
+                                  channelOn[b] = evt.time;
+                              }
+                              if (wasOn && !isOn && channelOff[b] === null) {
+                                  channelOff[b] = evt.time;
+                              }
+                          }
+                          prevMask = mask;
+                      }
+                      
+                      for (let i = 0; i < 8; i++) {
+                          document.getElementById('ev-on-' + (i + 1)).value = channelOn[i] !== null ? channelOn[i] : 0;
+                          document.getElementById('ev-off-' + (i + 1)).value = channelOff[i] !== null ? channelOff[i] : 0;
+                      }
+                  }
 
                 // Populate EPCs
                 if (hwSettings.epcs) {
@@ -355,10 +482,19 @@ export function initSettings() {
                 // Populate Temps
                 if (hwSettings.temperatures) {
                     if (hwSettings.temperatures['Col'] !== undefined) document.getElementById('set-temp-col').value = hwSettings.temperatures['Col'];
+                    if (hwSettings.temperatures['ProtCol'] !== undefined) document.getElementById('prot-temp-col').value = hwSettings.temperatures['ProtCol'];
+                    
                     if (hwSettings.temperatures['Valve'] !== undefined) document.getElementById('set-temp-valve').value = hwSettings.temperatures['Valve'];
+                    if (hwSettings.temperatures['ProtValve'] !== undefined) document.getElementById('prot-temp-valve').value = hwSettings.temperatures['ProtValve'];
+                    
                     if (hwSettings.temperatures['Det1'] !== undefined) document.getElementById('set-temp-det1').value = hwSettings.temperatures['Det1'];
+                    if (hwSettings.temperatures['ProtDet1'] !== undefined) document.getElementById('prot-temp-det1').value = hwSettings.temperatures['ProtDet1'];
+                    
                     if (hwSettings.temperatures['Inj2'] !== undefined) document.getElementById('set-temp-inj2').value = hwSettings.temperatures['Inj2'];
+                    if (hwSettings.temperatures['ProtInj2'] !== undefined) document.getElementById('prot-temp-inj2').value = hwSettings.temperatures['ProtInj2'];
+                    
                     if (hwSettings.temperatures['Det2'] !== undefined) document.getElementById('set-temp-det2').value = hwSettings.temperatures['Det2'];
+                    if (hwSettings.temperatures['ProtDet2'] !== undefined) document.getElementById('prot-temp-det2').value = hwSettings.temperatures['ProtDet2'];
                 }
 
                 if (hwSettings.igniteThreshold1 !== undefined) document.getElementById('set-ignite-th1').value = hwSettings.igniteThreshold1;
@@ -401,24 +537,115 @@ export function initSettings() {
                     const parsed = JSON.parse(event.data);
                     if (parsed.type === 'telemetry') {
                         if (parsed.tempInj1 !== undefined) {
+                            const elInj1 = document.getElementById('real-temp-inj1');
                             const elCol = document.getElementById('real-temp-col');
                             const elDet1 = document.getElementById('real-temp-det1');
-                            const elValve = document.getElementById('real-temp-valve');
+                            const elInj2 = document.getElementById('real-temp-inj2');
+                            const elDet2 = document.getElementById('real-temp-det2');
                             
                             if (elCol) elCol.innerText = (parsed.tempCol || 0).toFixed(1);
                             if (elDet1) elDet1.innerText = (parsed.tempDet1 || 0).toFixed(1);
-                            if (elValve) elValve.innerText = (parsed.tempInj2 || 0).toFixed(1);
+                            if (elInj1) elInj1.innerText = (parsed.tempInj1 || 0).toFixed(1);
+                            if (elInj2) elInj2.innerText = (parsed.tempInj2 || 0).toFixed(1);
+                            if (elDet2) elDet2.innerText = (parsed.tempDet2 || 0).toFixed(1);
                         }
                         
                         if (parsed.carrierPsi !== undefined || parsed.epc) {
                             if (parsed.carrierPsi !== undefined) {
-                                document.getElementById('real-epc-carrier1').innerText = (parsed.carrierPsi || 0).toFixed(2);
-                                document.getElementById('real-epc-h2-1').innerText = (parsed.h2Psi || 0).toFixed(2);
-                                document.getElementById('real-epc-air-1').innerText = (parsed.airPsi || 0).toFixed(2);
+                                document.getElementById('real-epc-carrier1').innerText = (parsed.carrierPsi || 0).toFixed(2) + " / " + (parsed.carrierSccm || 0).toFixed(1);
+                                document.getElementById('real-epc-h2-1').innerText = (parsed.h2Psi || 0).toFixed(2) + " / " + (parsed.h2Sccm || 0).toFixed(1);
+                                document.getElementById('real-epc-air-1').innerText = (parsed.airPsi || 0).toFixed(2) + " / " + (parsed.airSccm || 0).toFixed(1);
                             } else if (parsed.epc && parsed.epc.length >= 3) {
-                                document.getElementById('real-epc-carrier1').innerText = (parsed.epc[0].psi || 0).toFixed(2);
-                                document.getElementById('real-epc-h2-1').innerText = (parsed.epc[1].psi || 0).toFixed(2);
-                                document.getElementById('real-epc-air-1').innerText = (parsed.epc[2].psi || 0).toFixed(2);
+                                document.getElementById('real-epc-carrier1').innerText = (parsed.epc[0].psi || 0).toFixed(2) + " / " + (parsed.epc[0].sccm || 0).toFixed(1);
+                                document.getElementById('real-epc-h2-1').innerText = (parsed.epc[1].psi || 0).toFixed(2) + " / " + (parsed.epc[1].sccm || 0).toFixed(1);
+                                document.getElementById('real-epc-air-1').innerText = (parsed.epc[2].psi || 0).toFixed(2) + " / " + (parsed.epc[2].sccm || 0).toFixed(1);
+                            }
+                        }
+
+                        // Hardware Verify Tab Update
+                        if (parsed.tempInj1 !== undefined) {
+                            const rtEl = document.getElementById('vrf-rt-temp1');
+                            if (rtEl) rtEl.innerText = parsed.tempInj1.toFixed(1);
+                        }
+                        if (parsed.tempCol !== undefined) {
+                            const rtEl = document.getElementById('vrf-rt-temp2');
+                            if (rtEl) rtEl.innerText = parsed.tempCol.toFixed(1);
+                        }
+                        if (parsed.tempDet1 !== undefined) {
+                            const rtEl = document.getElementById('vrf-rt-temp3');
+                            if (rtEl) rtEl.innerText = parsed.tempDet1.toFixed(1);
+                        }
+                        if (parsed.tempInj2 !== undefined) {
+                            const rtEl = document.getElementById('vrf-rt-temp4');
+                            if (rtEl) rtEl.innerText = parsed.tempInj2.toFixed(1);
+                        }
+                        if (parsed.tempDet2 !== undefined) {
+                            const rtEl = document.getElementById('vrf-rt-temp5');
+                            if (rtEl) rtEl.innerText = parsed.tempDet2.toFixed(1);
+                        }
+                        if (parsed.tempDet3 !== undefined) {
+                            const rtEl = document.getElementById('vrf-rt-temp6');
+                            if (rtEl) rtEl.innerText = parsed.tempDet3.toFixed(1);
+                        }
+
+                        if (parsed.setTempInj1 !== undefined) {
+                            const stEl = document.getElementById('vrf-st-temp1');
+                            if (stEl) stEl.innerText = parsed.setTempInj1.toFixed(1);
+                        }
+                        if (parsed.setTempCol !== undefined) {
+                            const stEl = document.getElementById('vrf-st-temp2');
+                            if (stEl) stEl.innerText = parsed.setTempCol.toFixed(1);
+                        }
+                        if (parsed.setTempDet1 !== undefined) {
+                            const stEl = document.getElementById('vrf-st-temp3');
+                            if (stEl) stEl.innerText = parsed.setTempDet1.toFixed(1);
+                        }
+                        if (parsed.setTempInj2 !== undefined) {
+                            const stEl = document.getElementById('vrf-st-temp4');
+                            if (stEl) stEl.innerText = parsed.setTempInj2.toFixed(1);
+                        }
+                        if (parsed.setTempDet2 !== undefined) {
+                            const stEl = document.getElementById('vrf-st-temp5');
+                            if (stEl) stEl.innerText = parsed.setTempDet2.toFixed(1);
+                        }
+                        if (parsed.setTempDet3 !== undefined) {
+                            const stEl = document.getElementById('vrf-st-temp6');
+                            if (stEl) stEl.innerText = parsed.setTempDet3.toFixed(1);
+                        }
+
+                        if (parsed.protTempInj1 !== undefined) {
+                            const ptEl = document.getElementById('vrf-pt-temp1');
+                            if (ptEl) ptEl.innerText = parsed.protTempInj1.toFixed(1);
+                        }
+                        if (parsed.protTempCol !== undefined) {
+                            const ptEl = document.getElementById('vrf-pt-temp2');
+                            if (ptEl) ptEl.innerText = parsed.protTempCol.toFixed(1);
+                        }
+                        if (parsed.protTempDet1 !== undefined) {
+                            const ptEl = document.getElementById('vrf-pt-temp3');
+                            if (ptEl) ptEl.innerText = parsed.protTempDet1.toFixed(1);
+                        }
+                        if (parsed.protTempInj2 !== undefined) {
+                            const ptEl = document.getElementById('vrf-pt-temp4');
+                            if (ptEl) ptEl.innerText = parsed.protTempInj2.toFixed(1);
+                        }
+                        if (parsed.protTempDet2 !== undefined) {
+                            const ptEl = document.getElementById('vrf-pt-temp5');
+                            if (ptEl) ptEl.innerText = parsed.protTempDet2.toFixed(1);
+                        }
+                        if (parsed.protTempDet3 !== undefined) {
+                            const ptEl = document.getElementById('vrf-pt-temp6');
+                            if (ptEl) ptEl.innerText = parsed.protTempDet3.toFixed(1);
+                        }
+
+                        if (parsed.epc && parsed.epc.length > 0) {
+                            for (let i = 0; i < parsed.epc.length && i < 18; i++) {
+                                const pEl = document.getElementById('vrf-rt-epc' + (i + 1) + '-psi');
+                                const sEl = document.getElementById('vrf-rt-epc' + (i + 1) + '-sccm');
+                                const iEl = document.getElementById('vrf-st-epc' + (i + 1) + '-psi');
+                                if (pEl) pEl.innerText = (parsed.epc[i].psi || 0).toFixed(2);
+                                if (sEl) sEl.innerText = (parsed.epc[i].sccm || 0).toFixed(1);
+                                if (iEl) iEl.innerText = (parsed.epc[i].inputPsi || 0).toFixed(2);
                             }
                         }
                     }
@@ -429,24 +656,90 @@ export function initSettings() {
             console.error('Failed to init settings', e);
         }
 
+        // Events Query
+        document.getElementById('btn-query-events').addEventListener('click', async () => {
+            try {
+                const res = await fetch('/api/control/events');
+                if (!res.ok) {
+                    window.showToast('查询失败', true);
+                    return;
+                }
+                window.showToast('查询指令已下发，稍后刷新...');
+                
+                // 等待 1 秒后重新拉取硬件配置并渲染
+                setTimeout(async () => {
+                    const hwRes = await fetch('/api/v1/hardware?deviceId=' + encodeURIComponent(deviceId));
+                    if (hwRes.ok) {
+                        hwSettings = await hwRes.json();
+                        if (hwSettings.events && hwSettings.events.length > 0) {
+                            const channelOn = new Array(8).fill(null);
+                            const channelOff = new Array(8).fill(null);
+                            let prevMask = 0;
+                            
+                            for (const evt of hwSettings.events) {
+                                const mask = evt.event_mask;
+                                for (let b = 0; b < 8; b++) {
+                                    const wasOn = (prevMask & (1 << b)) !== 0;
+                                    const isOn = (mask & (1 << b)) !== 0;
+                                    
+                                    if (!wasOn && isOn && channelOn[b] === null) {
+                                        channelOn[b] = evt.time;
+                                    }
+                                    if (wasOn && !isOn && channelOff[b] === null) {
+                                        channelOff[b] = evt.time;
+                                    }
+                                }
+                                prevMask = mask;
+                            }
+                            
+                            for (let i = 0; i < 8; i++) {
+                                document.getElementById('ev-on-' + (i + 1)).value = channelOn[i] !== null ? channelOn[i] : 0;
+                                document.getElementById('ev-off-' + (i + 1)).value = channelOff[i] !== null ? channelOff[i] : 0;
+                            }
+                            window.showToast('事件程序已刷新');
+                        } else {
+                            window.showToast('设备返回了空事件');
+                        }
+                    }
+                }, 1000);
+            } catch(e) {
+                window.showToast('异常: ' + e.message, true);
+            }
+        });
+
         // Events Apply
         document.getElementById('btn-apply-events').addEventListener('click', async () => {
-            const events = [];
+            const transitions = [];
             for (let i = 1; i <= 8; i++) {
                 const onTime = parseFloat(document.getElementById('ev-on-' + i).value);
                 const offTime = parseFloat(document.getElementById('ev-off-' + i).value);
                 
-                // Very simplified event logic mapping for UI
-                if (!isNaN(onTime) && onTime > 0) {
-                    events.push({ time: onTime, event_mask: 1 }); // 1 for ON
+                if (!isNaN(onTime) && onTime >= 0) {
+                    transitions.push({ time: onTime, bit: i - 1, state: 1 });
                 }
-                if (!isNaN(offTime) && offTime > 0) {
-                    events.push({ time: offTime, event_mask: 0 }); // 0 for OFF
+                if (!isNaN(offTime) && offTime >= 0) {
+                    transitions.push({ time: offTime, bit: i - 1, state: 0 });
                 }
             }
+
+            // 获取所有唯一的时间点并排序
+            const timePoints = [...new Set(transitions.map(t => t.time))].sort((a, b) => a - b);
             
-            // Sort events by time
-            events.sort((a, b) => a.time - b.time);
+            const events = [];
+            let currentMask = 0; // 默认时间0时所有阀/继电器都是释放状态
+
+            for (const t of timePoints) {
+                const transAtT = transitions.filter(x => x.time === t);
+                for (const trans of transAtT) {
+                    if (trans.state === 1) {
+                        currentMask |= (1 << trans.bit);
+                    } else {
+                        currentMask &= ~(1 << trans.bit);
+                    }
+                }
+                events.push({ time: t, event_mask: currentMask });
+            }
+
             hwSettings.events = events;
 
             try {
@@ -529,10 +822,15 @@ export function initSettings() {
         document.getElementById('btn-apply-temp').addEventListener('click', async () => {
             if (!hwSettings.temperatures) hwSettings.temperatures = {};
             hwSettings.temperatures['Col'] = parseFloat(document.getElementById('set-temp-col').value) || 0;
-            hwSettings.temperatures['Valve'] = parseFloat(document.getElementById('set-temp-valve').value) || 0;
+            hwSettings.temperatures['ProtCol'] = parseFloat(document.getElementById('prot-temp-col').value) || 0;
+            hwSettings.temperatures['Inj1'] = parseFloat(document.getElementById('set-temp-inj1').value) || 0;
+            hwSettings.temperatures['ProtInj1'] = parseFloat(document.getElementById('prot-temp-inj1').value) || 0;
             hwSettings.temperatures['Det1'] = parseFloat(document.getElementById('set-temp-det1').value) || 0;
+            hwSettings.temperatures['ProtDet1'] = parseFloat(document.getElementById('prot-temp-det1').value) || 0;
             hwSettings.temperatures['Inj2'] = parseFloat(document.getElementById('set-temp-inj2').value) || 0;
+            hwSettings.temperatures['ProtInj2'] = parseFloat(document.getElementById('prot-temp-inj2').value) || 0;
             hwSettings.temperatures['Det2'] = parseFloat(document.getElementById('set-temp-det2').value) || 0;
+            hwSettings.temperatures['ProtDet2'] = parseFloat(document.getElementById('prot-temp-det2').value) || 0;
 
             try {
                 await fetch('/api/v1/hardware?deviceId=' + encodeURIComponent(deviceId), {
@@ -549,6 +847,74 @@ export function initSettings() {
                 if (res.ok) window.showToast('温度控制指令已下发!');
                 else window.showToast('发送失败', true);
             } catch(e) {
+                window.showToast('异常: ' + e.message, true);
+            }
+        });
+
+        document.getElementById('btn-query-temp').addEventListener('click', async () => {
+            window.showToast('正在向设备下发查询指令...');
+            try {
+                // 1. 下发 Cmd 0
+                await fetch('/api/v1/hardware', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({control: 'query'})
+                });
+                
+                // 2. 等待 500ms 让设备回传 Cmd 128
+                await new Promise(r => setTimeout(r, 500));
+                
+                // 3. 拉取最新的缓存
+                const hwRes = await fetch('/api/v1/hardware?deviceId=' + encodeURIComponent(deviceId));
+                if (hwRes.ok) {
+                    hwSettings = await hwRes.json();
+                    if (hwSettings.temperatures) {
+                        if (hwSettings.temperatures['Inj1'] !== undefined) document.getElementById('set-temp-inj1').value = hwSettings.temperatures['Inj1'];
+                        if (hwSettings.temperatures['ProtInj1'] !== undefined) document.getElementById('prot-temp-inj1').value = hwSettings.temperatures['ProtInj1'];
+                        
+                        if (hwSettings.temperatures['Col'] !== undefined) document.getElementById('set-temp-col').value = hwSettings.temperatures['Col'];
+                        if (hwSettings.temperatures['ProtCol'] !== undefined) document.getElementById('prot-temp-col').value = hwSettings.temperatures['ProtCol'];
+                        
+                        if (hwSettings.temperatures['Det1'] !== undefined) document.getElementById('set-temp-det1').value = hwSettings.temperatures['Det1'];
+                        if (hwSettings.temperatures['ProtDet1'] !== undefined) document.getElementById('prot-temp-det1').value = hwSettings.temperatures['ProtDet1'];
+                        
+                        if (hwSettings.temperatures['Inj2'] !== undefined) document.getElementById('set-temp-inj2').value = hwSettings.temperatures['Inj2'];
+                        if (hwSettings.temperatures['ProtInj2'] !== undefined) document.getElementById('prot-temp-inj2').value = hwSettings.temperatures['ProtInj2'];
+                        
+                        if (hwSettings.temperatures['Det2'] !== undefined) document.getElementById('set-temp-det2').value = hwSettings.temperatures['Det2'];
+                        if (hwSettings.temperatures['ProtDet2'] !== undefined) document.getElementById('prot-temp-det2').value = hwSettings.temperatures['ProtDet2'];
+                    }
+                    window.showToast('温度参数已刷新');
+                }
+            } catch (e) {
+                window.showToast('查询异常: ' + e.message, true);
+            }
+        });
+
+        document.getElementById('btn-start-temp').addEventListener('click', async () => {
+            try {
+                const res = await fetch('/api/v1/hardware', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({control: 'start'})
+                });
+                if (res.ok) window.showToast('已下发开始控温指令');
+                else window.showToast('指令下发失败', true);
+            } catch (e) {
+                window.showToast('异常: ' + e.message, true);
+            }
+        });
+
+        document.getElementById('btn-stop-temp').addEventListener('click', async () => {
+            try {
+                const res = await fetch('/api/v1/hardware', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({control: 'stop'})
+                });
+                if (res.ok) window.showToast('已下发关闭控温指令');
+                else window.showToast('指令下发失败', true);
+            } catch (e) {
                 window.showToast('异常: ' + e.message, true);
             }
         });
@@ -612,8 +978,88 @@ export function initSettings() {
             }
         });
 
-        // DAQ Config Apply
-        document.getElementById('btn-apply-daq').addEventListener('click', async () => {
+        // ================= 系统高级配置 Modal 逻辑 =================
+        const modal = document.getElementById('sysconfig-modal');
+        const loginDiv = document.getElementById('sysconfig-login');
+        const formDiv = document.getElementById('sysconfig-form');
+        let currentAuthPass = "";
+
+        document.getElementById('btn-secret-menu').addEventListener('click', () => {
+            modal.style.display = 'flex';
+            loginDiv.style.display = 'block';
+            formDiv.style.display = 'none';
+            document.getElementById('sys-auth-pass').value = '';
+        });
+
+        document.getElementById('btn-sys-close1').addEventListener('click', () => modal.style.display = 'none');
+        document.getElementById('btn-sys-close2').addEventListener('click', () => modal.style.display = 'none');
+
+        document.getElementById('btn-sys-login').addEventListener('click', async () => {
+            const pass = document.getElementById('sys-auth-pass').value;
+            if (!pass) return window.showToast('请输入密码', true);
+            try {
+                const res = await fetch('/api/sysconfig?auth=' + encodeURIComponent(pass));
+                if (res.ok) {
+                    const cfg = await res.json();
+                    currentAuthPass = pass;
+                    loginDiv.style.display = 'none';
+                    formDiv.style.display = 'block';
+                    
+                    document.getElementById('sys-mqtt-enable').checked = cfg.mqtt_enabled;
+                    document.getElementById('sys-mqtt-broker').value = cfg.mqtt_broker || '';
+                    document.getElementById('sys-mqtt-topic').value = cfg.mqtt_topic || '';
+                    document.getElementById('sys-mqtt-clientid').value = cfg.mqtt_client_id || '';
+                    document.getElementById('sys-mqtt-user').value = cfg.mqtt_user || '';
+                    document.getElementById('sys-mqtt-pass').value = cfg.mqtt_pass || '';
+                    document.getElementById('sys-admin-pass-new').value = '';
+
+                    // Check MQTT status
+                    fetch('/api/sysconfig/mqtt_test').then(r => r.json()).then(st => {
+                        const ind = document.getElementById('mqtt-status-indicator');
+                        if (st.connected) {
+                            ind.textContent = '状态: 已连接';
+                            ind.style.color = '#10b981';
+                        } else {
+                            ind.textContent = '状态: ' + (st.status || '未连接');
+                            ind.style.color = '#ef4444';
+                        }
+                    }).catch(e => {});
+
+                } else {
+                    window.showToast('密码错误', true);
+                }
+            } catch (e) {
+                window.showToast('网络异常', true);
+            }
+        });
+
+        // MQTT Test
+        document.getElementById('btn-mqtt-test').addEventListener('click', async () => {
+            const btn = document.getElementById('btn-mqtt-test');
+            const ind = document.getElementById('mqtt-status-indicator');
+            btn.disabled = true;
+            btn.textContent = '测试中...';
+            try {
+                const res = await fetch('/api/sysconfig/mqtt_test', { method: 'POST' });
+                const data = await res.json();
+                if (res.ok && data.ok) {
+                    window.showToast('测试连接成功!');
+                    ind.textContent = '状态: 已连接';
+                    ind.style.color = '#10b981';
+                } else {
+                    window.showToast('测试失败: ' + (data.error || '未知错误'), true);
+                    ind.textContent = '状态: 连接失败';
+                    ind.style.color = '#ef4444';
+                }
+            } catch (e) {
+                window.showToast('网络异常', true);
+            }
+            btn.disabled = false;
+            btn.textContent = '测试连接';
+        });
+
+        document.getElementById('btn-sys-save').addEventListener('click', async () => {
+            // 1. 保存数采仪参数
             uploadSettings.deviceNo = document.getElementById('daq-device-no').value;
             uploadSettings.uploadIP = document.getElementById('daq-upload-ip').value;
             uploadSettings.uploadPort = parseInt(document.getElementById('daq-upload-port').value)||0;
@@ -621,15 +1067,40 @@ export function initSettings() {
             uploadSettings.enableUpload = document.getElementById('daq-enable').checked;
 
             try {
-                const res = await fetch('/api/v1/uploadconfig?deviceId=' + encodeURIComponent(deviceId), {
+                await fetch('/api/v1/uploadconfig?deviceId=' + encodeURIComponent(deviceId), {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(uploadSettings)
                 });
-                if (res.ok) window.showToast('数采仪配置已保存!');
-                else window.showToast('保存失败', true);
             } catch(e) {
-                window.showToast('异常: ' + e.message, true);
+                console.error("Failed to save DAQ", e);
+            }
+
+            // 2. 保存系统参数
+            const payload = {
+                auth_pass: currentAuthPass,
+                mqtt_enabled: document.getElementById('sys-mqtt-enable').checked,
+                mqtt_broker: document.getElementById('sys-mqtt-broker').value,
+                mqtt_topic: document.getElementById('sys-mqtt-topic').value,
+                mqtt_client_id: document.getElementById('sys-mqtt-clientid').value,
+                mqtt_user: document.getElementById('sys-mqtt-user').value,
+                mqtt_pass: document.getElementById('sys-mqtt-pass').value,
+                admin_pass: document.getElementById('sys-admin-pass-new').value
+            };
+            try {
+                const res = await fetch('/api/sysconfig', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                });
+                if (res.ok) {
+                    window.showToast('系统高级配置已保存');
+                    modal.style.display = 'none';
+                } else {
+                    window.showToast('保存失败', true);
+                }
+            } catch (e) {
+                window.showToast('网络异常', true);
             }
         });
 

@@ -39,19 +39,25 @@ export function initDashboard() {
 
         <div class="card-grid" style="margin-top: 1rem;">
             <div class="card" style="background: rgba(30,41,59,0.5);">
-                <div class="card-title">载气压力 (Carrier)</div>
-                <div class="card-value" id="val-epc-carrier" style="font-size: 1.5rem;">--</div>
-                <div class="card-unit">psi</div>
+                <div class="card-title">载气1</div>
+                <div class="card-value" style="font-size: 1.2rem; display: flex; flex-direction: column; gap: 4px;">
+                    <div><span id="val-epc-carrier-psi">--</span> <span style="font-size: 0.9rem; color: var(--muted);">psi</span></div>
+                    <div><span id="val-epc-carrier-sccm">--</span> <span style="font-size: 0.9rem; color: var(--muted);">sccm/mL</span></div>
+                </div>
             </div>
             <div class="card" style="background: rgba(30,41,59,0.5);">
-                <div class="card-title">氢气压力 (H2)</div>
-                <div class="card-value" id="val-epc-h2" style="font-size: 1.5rem;">--</div>
-                <div class="card-unit">psi</div>
+                <div class="card-title">氢气1</div>
+                <div class="card-value" style="font-size: 1.2rem; display: flex; flex-direction: column; gap: 4px;">
+                    <div><span id="val-epc-h2-psi">--</span> <span style="font-size: 0.9rem; color: var(--muted);">psi</span></div>
+                    <div><span id="val-epc-h2-sccm">--</span> <span style="font-size: 0.9rem; color: var(--muted);">sccm/mL</span></div>
+                </div>
             </div>
             <div class="card" style="background: rgba(30,41,59,0.5);">
-                <div class="card-title">空气压力 (Air)</div>
-                <div class="card-value" id="val-epc-air" style="font-size: 1.5rem;">--</div>
-                <div class="card-unit">psi</div>
+                <div class="card-title">空气1</div>
+                <div class="card-value" style="font-size: 1.2rem; display: flex; flex-direction: column; gap: 4px;">
+                    <div><span id="val-epc-air-psi">--</span> <span style="font-size: 0.9rem; color: var(--muted);">psi</span></div>
+                    <div><span id="val-epc-air-sccm">--</span> <span style="font-size: 0.9rem; color: var(--muted);">sccm/mL</span></div>
+                </div>
             </div>
         </div>
         
@@ -95,9 +101,20 @@ export function initDashboard() {
                 if (parsed.tempCol !== undefined) document.getElementById('val-temp-col').textContent = parsed.tempCol.toFixed(1);
                 if (parsed.tempDet1 !== undefined) document.getElementById('val-temp-det1').textContent = parsed.tempDet1.toFixed(1);
                 
-                if (parsed.carrierPsi !== undefined) document.getElementById('val-epc-carrier').textContent = parsed.carrierPsi.toFixed(2);
-                if (parsed.h2Psi !== undefined) document.getElementById('val-epc-h2').textContent = parsed.h2Psi.toFixed(2);
-                if (parsed.airPsi !== undefined) document.getElementById('val-epc-air').textContent = parsed.airPsi.toFixed(2);
+                if (parsed.epc && parsed.epc.length > 0) {
+                    if (parsed.epc.length > 0) {
+                        document.getElementById('val-epc-carrier-psi').textContent = (parsed.epc[0].psi || 0).toFixed(2);
+                        document.getElementById('val-epc-carrier-sccm').textContent = (parsed.epc[0].sccm || 0).toFixed(1);
+                    }
+                    if (parsed.epc.length > 9) {
+                        document.getElementById('val-epc-h2-psi').textContent = (parsed.epc[9].psi || 0).toFixed(2);
+                        document.getElementById('val-epc-h2-sccm').textContent = (parsed.epc[9].sccm || 0).toFixed(1);
+                    }
+                    if (parsed.epc.length > 10) {
+                        document.getElementById('val-epc-air-psi').textContent = (parsed.epc[10].psi || 0).toFixed(2);
+                        document.getElementById('val-epc-air-sccm').textContent = (parsed.epc[10].sccm || 0).toFixed(1);
+                    }
+                }
             }
         } catch (e) {
             console.error('SSE parse error:', e);
