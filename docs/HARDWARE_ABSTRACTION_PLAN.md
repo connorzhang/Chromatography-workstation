@@ -42,9 +42,11 @@ type InstrumentDriver interface {
 }
 ```
 
-### 3.2 驱动层实现
-- **老主板驱动 (`driver_gckc_legacy.go`)**：将目前写死在 `main.go` 里的 `Cmd 128`、`Cmd 143`、双表合并逻辑全部剥离到此。确保对老设备的完美向后兼容。
-- **通用模块化驱动 (`driver_modular.go`)**：当使用散件时启用此驱动。
+### 3.2 驱动层实现（隔离历史包袱）
+**核心理念：主程序（Frontend + Backend Core）将彻底消除 `Cmd 143`、`Cmd 128` 等概念，所有指令体系仅存在于特定的底层驱动中。**
+
+- **老主板驱动 (`driver_gckc_legacy.go`)**：将目前写死在 `main.go` 里的 `Cmd 128`、`Cmd 143`、双表合并逻辑全部剥离到此。这是整个系统中**唯一**知道 "Cmd" 是什么东西的地方。确保对老设备的完美向后兼容。
+- **通用模块化驱动 (`driver_modular.go`)**：当使用散件时启用此驱动。**这里完全没有 Cmd 128 或 143 的概念。**
   - 温控：将 `SetTemperatures` 翻译为 `Modbus RTU Write Multiple Registers (0x10)` 发送给第三方温控表。
   - IO：将 `SetEvents` 翻译为 `Modbus Write Coil (0x05)` 发送给继电器模块。
   - ADC：从高精度采集卡的独立串口读取微伏/皮安级信号。
@@ -72,3 +74,45 @@ type InstrumentDriver interface {
 - **硬件降本**：整机 BOM 成本有望断崖式下降。
 - **供应链安全**：摆脱单一厂商锁定，任何模块坏了都可以用市面上同类标准品替换。
 - **产品升维**：软件从“定制工具”升级为“通用色谱仪平台底座”，具备赋能其他仪器厂家的潜力。
+
+---
+
+## 6. 深入设计：模块化下的关键技术挑战与解决
+
+将“单一高集成主板”拆解为“多厂商散件模块”的过程中，会面临数据同步、配置管理等工程挑战。针对此，HAL 的进阶完善方案如下：
+
+### 6.1 接口细化与组合模式 (Composition over Inheritance)
+不要将所有功能塞进一个庞大的 `InstrumentDriver`，而是抽象出细粒度的子接口：
+- `TemperatureController`: `SetTemp(ch, val)`, `ReadTemp()`
+- `IOController`: `SetEvent(ch, state)`, `ReadEvent()`
+- `DetectorADC`: `StartStream()`, `StopStream()`
+- `FlowController (EPC)`: `SetPressure()`, `ReadFlow()`
+
+在“散件模式”下，`ModularDriver` 实际上是一个**聚合器 (Aggregator)**，它内部持有上述各个子接口的实例。这样无论是 A 厂家的温控搭配 B 厂家的 IO，都可以像搭积木一样在 Go 中自由组合。
+
+### 6.2 异步数据聚合引擎 (Telemetry Aggregator)
+**痛点**：原厂主板通过 Cmd 143 每秒打包所有状态一次性推送上来。但在散件模式下，各模块的采样率不同（ADC可能 50Hz，温控可能 1Hz，IO可能 2Hz）。
+**解决方案**：在 HAL 层引入**数据黑板 (Data Blackboard) 聚合引擎**。
+1. **并发采集**：各个子模块的驱动独立运行自己的 Goroutine 进行轮询或事件监听。
+2. **黑板更新**：读到的数据通过读写锁写入后端的共享内存对象（黑板）中。
+3. **节拍组装**：Collector 按照前端需要的固定节拍（如 10Hz）对“黑板”进行数据快照，组装成统一的 `telemetryEvent` 通过 WebSocket 推送给前端。
+**结果**：前端完全无感知底层是单板还是散件。
+
+### 6.3 硬件拓扑描述文件 (Topology Config)
+不能将串口号和波特率硬编码在代码里。需引入 `hardware_topology.json` 或 `.env` 结构：
+```json
+{
+  "mode": "modular",
+  "modules": {
+    "temperature": { "driver": "modbus_rtu", "port": "/dev/ttyS1", "baud": 9600, "slave_id": 1 },
+    "io": { "driver": "modbus_rtu", "port": "/dev/ttyS1", "baud": 9600, "slave_id": 2 },
+    "adc": { "driver": "serial_stream", "port": "/dev/ttyS2", "baud": 115200 }
+  }
+}
+```
+后端启动时解析该拓扑，利用工厂模式（Factory Pattern）动态实例化并挂载对应的子驱动。
+
+### 6.4 异常隔离与降级 (Fault Tolerance)
+由于多模块共存，若某一模块（如气路 EPC）掉线，不应导致整个程序崩溃。
+- **独立 Keep-Alive**：每个子驱动独立管理自己的断线重连逻辑。
+- **状态隔离**：某模块超时，仅在对应的 `telemetryEvent` 字段（如 `Epc[]`）标记为空或写入告警码，其他模块（如 ADC 和温控）继续运行，并在 UI 上局部标红，实现真正的容错隔离。

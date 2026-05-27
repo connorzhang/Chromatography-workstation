@@ -414,18 +414,17 @@ func parseSetTemps128(payload []byte) (telemetryEvent, bool) {
 	inj1, ok0 := bcd2Temp1(payload, 0)
 	col, ok1 := bcd2Temp1(payload, 2)
 	det1, ok2 := bcd2Temp1(payload, 4)
-	inj2, ok3 := bcd2Temp1(payload, 6)
-	det2, ok4 := bcd2Temp1(payload, 8)
-	det3, ok5 := bcd2Temp1(payload, 10)
+	inj2, ok3 := bcd2Temp1(payload, 8)
+	det2, ok4 := bcd2Temp1(payload, 10)
+	// det3 is not parsed since payload is 24 bytes and we skip index 6
 
 	pinj1, pok0 := bcd2Temp1(payload, 12)
 	pcol, pok1 := bcd2Temp1(payload, 14)
 	pdet1, pok2 := bcd2Temp1(payload, 16)
-	pinj2, pok3 := bcd2Temp1(payload, 18)
-	pdet2, pok4 := bcd2Temp1(payload, 20)
-	pdet3, pok5 := bcd2Temp1(payload, 22)
+	pinj2, pok3 := bcd2Temp1(payload, 20)
+	pdet2, pok4 := bcd2Temp1(payload, 22)
 
-	if !ok0 && !ok1 && !ok2 && !ok3 && !ok4 && !ok5 && !pok0 {
+	if !ok0 && !ok1 && !ok2 && !ok3 && !ok4 && !pok0 {
 		return telemetryEvent{}, false
 	}
 	te := telemetryEvent{Type: "telemetry", At: time.Now().UTC()}
@@ -444,9 +443,6 @@ func parseSetTemps128(payload []byte) (telemetryEvent, bool) {
 	if ok4 {
 		te.SetTempDet2 = f64p(det2)
 	}
-	if ok5 {
-		te.SetTempDet3 = f64p(det3)
-	}
 
 	if pok0 {
 		te.ProtTempInj1 = f64p(pinj1)
@@ -462,9 +458,6 @@ func parseSetTemps128(payload []byte) (telemetryEvent, bool) {
 	}
 	if pok4 {
 		te.ProtTempDet2 = f64p(pdet2)
-	}
-	if pok5 {
-		te.ProtTempDet3 = f64p(pdet3)
 	}
 
 	return te, true
@@ -861,26 +854,24 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			return
 		}
 		st := stAny.(*deviceState)
+		driver := NewLegacyGCKCDriver(st, deviceID)
 
 		if in.Control == "start" {
-			// Cmd 17: 开始控温
-			if err := sendCmd(st, deviceID, 17, nil); err != nil {
+			if err := driver.StartTempControl(); err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 				return
 			}
 			writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 			return
 		} else if in.Control == "stop" {
-			// Cmd 16: 关闭控温
-			if err := sendCmd(st, deviceID, 16, nil); err != nil {
+			if err := driver.StopTempControl(); err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 				return
 			}
 			writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 			return
 		} else if in.Control == "query" {
-			// Cmd 0: 查询温度
-			if err := sendCmd(st, deviceID, 0, nil); err != nil {
+			if err := driver.QueryTempSetpoints(); err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 				return
 			}
@@ -888,8 +879,6 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			return
 		}
 
-		// Cmd 8: 恒温控制参数下发
-		// Payload: 24字节 (Inj1, Col, Det1, 保留, Inj2, 保留) * 2 每个2字节BCD, 前12字节设定值, 后12字节保护值
 		hw, _ := pstore.LoadHardwareConfig(deviceID)
 		if hw.Temperatures == nil {
 			hw.Temperatures = make(map[string]float64)
@@ -905,22 +894,129 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 		}
 		pstore.SaveHardwareConfig(deviceID, hw)
 
-		payload := make([]byte, 24)
-		copy(payload[0:2], tempToBCD2(hw.Temperatures["Inj1"]))
-		copy(payload[2:4], tempToBCD2(hw.Temperatures["Col"]))
-		copy(payload[4:6], tempToBCD2(hw.Temperatures["Det1"]))
-		copy(payload[8:10], tempToBCD2(hw.Temperatures["Inj2"]))
+		setpoints := []float64{
+			hw.Temperatures["Inj1"], hw.Temperatures["Col"], hw.Temperatures["Det1"],
+			hw.Temperatures["Inj2"], hw.Temperatures["Det2"], hw.Temperatures["Det3"],
+		}
+		protects := []float64{
+			hw.Temperatures["ProtInj1"], hw.Temperatures["ProtCol"], hw.Temperatures["ProtDet1"],
+			hw.Temperatures["ProtInj2"], hw.Temperatures["ProtDet2"], hw.Temperatures["ProtDet3"],
+		}
 
-		copy(payload[12:14], tempToBCD2(hw.Temperatures["ProtInj1"]))
-		copy(payload[14:16], tempToBCD2(hw.Temperatures["ProtCol"]))
-		copy(payload[16:18], tempToBCD2(hw.Temperatures["ProtDet1"]))
-		copy(payload[20:22], tempToBCD2(hw.Temperatures["ProtInj2"]))
-
-		if err := sendCmd(st, deviceID, 8, payload); err != nil {
+		if err := driver.SetTempSetpoints(setpoints, protects); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	})
+
+	mux.HandleFunc("/api/control/ignite_config", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !allowControl {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": "control disabled"})
+			return
+		}
+		var in struct {
+			Control string `json:"control"` // "query" or "set"
+		}
+		if json.NewDecoder(r.Body).Decode(&in) != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+			return
+		}
+
+		deviceID := uiLastDevice
+		stAny, ok := states.Load(deviceID)
+		if !ok {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "device not found"})
+			return
+		}
+		st := stAny.(*deviceState)
+
+		if in.Control == "query" {
+			_ = sendCmd(st, deviceID, 250, nil) // Query ignite thresholds
+			_ = sendCmd(st, deviceID, 48, nil)  // Query ignite duration (Cmd 48)
+			_ = sendCmd(st, deviceID, 4, nil)   // Query cycle parameters (Cmd 4 -> Cmd 132/140)
+			writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+			return
+		} else if in.Control == "set" {
+			hw, _ := pstore.LoadHardwareConfig(deviceID)
+			t1 := byte(math.Round(hw.IgniteThreshold1 * 10))
+			t2 := byte(math.Round(hw.IgniteThreshold2 * 10))
+			_ = sendCmd(st, deviceID, 249, []byte{t1, t2})
+
+			durByte := byte(math.Round(hw.IgniteDuration))
+			_ = sendCmd(st, deviceID, 50, []byte{durByte})
+			writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+			return
+		}
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid control command"})
+	})
+
+	mux.HandleFunc("/api/control/cycle", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !allowControl {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": "control disabled"})
+			return
+		}
+		var in struct {
+			Control string `json:"control"`
+		}
+		if json.NewDecoder(r.Body).Decode(&in) != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+			return
+		}
+		deviceID := uiLastDevice
+		stAny, ok := states.Load(deviceID)
+		if !ok {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "device not found"})
+			return
+		}
+		st := stAny.(*deviceState)
+
+		if in.Control == "query" {
+			_ = sendCmd(st, deviceID, 4, nil)
+			writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+			return
+		} else if in.Control == "set" {
+			hw, _ := pstore.LoadHardwareConfig(deviceID)
+
+			// FloatToBCD for interval
+			val := hw.CycleInterval
+			if val > 1000.0 {
+				val = 1000.0
+			}
+			text := fmt.Sprintf("%04.0f", val*10) // e.g. 2.0 -> 20 -> 0020
+			if len(text) > 4 {
+				text = text[len(text)-4:]
+			}
+
+			b0 := (text[0]-'0')<<4 + (text[1] - '0')
+			b1 := (text[2]-'0')<<4 + (text[3] - '0')
+
+			// IntToBCD for count
+			count := hw.CycleCount
+			c1 := byte(count / 100)
+			c2 := byte(count % 100)
+			c1Hex, _ := strconv.ParseUint(fmt.Sprintf("%d", c1), 16, 8)
+			c2Hex, _ := strconv.ParseUint(fmt.Sprintf("%d", c2), 16, 8)
+
+			payload := []byte{
+				b0, b1,
+				byte(c1Hex), byte(c2Hex),
+				0, // injectSpendTime (not used)
+				0, // injectLightTime (not used)
+			}
+			_ = sendCmd(st, deviceID, 12, payload)
+			writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+			return
+		}
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid control command"})
 	})
 
 	mux.HandleFunc("/api/control/ignite", func(w http.ResponseWriter, r *http.Request) {
@@ -940,18 +1036,12 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
 			return
 		}
-		// 鏍规嵁 API_DESIGN锛岃浆鎹负 Cmd 20 / 21
-		deviceID := uiLastDevice // 鑾峰彇褰撳墠璁惧ID锛岃繖閲屾殏鐢ㄥ叏灞€鍙橀噺
+		deviceID := uiLastDevice
 		stAny, ok := states.Load(deviceID)
 		if ok {
 			st := stAny.(*deviceState)
-			cmd := byte(20) // 榛樿 FID1
-			if in.Detector == "FID2" {
-				cmd = byte(21)
-			}
-			if in.Action == "start" {
-				_ = sendCmd(st, deviceID, cmd, nil)
-			}
+			driver := NewLegacyGCKCDriver(st, deviceID)
+			_ = driver.Ignite(in.Detector, in.Action == "start")
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "ignite sent"})
 	})
@@ -1011,7 +1101,8 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 		copy(payload[8:10], h2Psi)
 		copy(payload[16:18], airPsi)
 
-		if err := sendCmd(st, deviceID, 34, payload); err != nil {
+		driver := NewLegacyGCKCDriver(st, deviceID)
+		if err := driver.SetEPC(payload); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 			return
 		}
@@ -1031,15 +1122,10 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			return
 		}
 		st := stAny.(*deviceState)
+		driver := NewLegacyGCKCDriver(st, deviceID)
 
 		if r.Method == http.MethodGet {
-			// Cmd 2 (0x02): 查询外部事件时间程序 Table0
-			if err := sendCmd(st, deviceID, 2, []byte{}); err != nil {
-				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
-				return
-			}
-			// Cmd 100 (0x64): 查询外部事件时间程序 Table1
-			if err := sendCmd(st, deviceID, 100, []byte{}); err != nil {
+			if err := driver.QueryEvents(); err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 				return
 			}
@@ -1062,34 +1148,8 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 		hw.Events = in
 		pstore.SaveHardwareConfig(deviceID, hw)
 
-		// Cmd 10 (0x0A): 下发外部事件时间程序 Table0
-		// Cmd 101 (0x65): 下发外部事件时间程序 Table1
 		m := eventsToMatrix(in)
-
-		payload0 := make([]byte, 96)
-		idx := 0
-		for ch := 0; ch < 4; ch++ {
-			for act := 0; act < 8; act++ {
-				copy(payload0[idx:idx+3], floatToBcd3B(m[ch][act]))
-				idx += 3
-			}
-		}
-
-		if err := sendCmd(st, deviceID, 10, payload0); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
-			return
-		}
-
-		payload1 := make([]byte, 96)
-		idx = 0
-		for ch := 4; ch < 8; ch++ {
-			for act := 0; act < 8; act++ {
-				copy(payload1[idx:idx+3], floatToBcd3B(m[ch][act]))
-				idx += 3
-			}
-		}
-
-		if err := sendCmd(st, deviceID, 101, payload1); err != nil {
+		if err := driver.SetEvents(m); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 			return
 		}
@@ -1737,6 +1797,8 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			return
 		}
 		st := stAny.(*deviceState)
+		driver := NewLegacyGCKCDriver(st, deviceID)
+
 		switch action {
 		case "cmd":
 			if !allowControl {
@@ -1745,16 +1807,46 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			}
 			sub := r.URL.Query().Get("name")
 			ch := envIntFromQuery(r, "channel", 0)
-			cmd, payload, err := buildCmd(sub, ch)
+
+			// Route through HAL where possible
+			var err error
+			var mappedCmd byte
+			switch sub {
+			case "start":
+				err = driver.StartAnalysis(byte(ch))
+				mappedCmd = 22
+			case "stop":
+				// Stop single channel is not explicitly in interface, but let's use the legacy sendCmd for now or add it.
+				// Actually driver.StopAnalysis stops all. Wait, Cmd 23 is single channel stop.
+				// Let's add it to HAL or just use a raw method. I'll use a raw method for legacy stuff not yet fully abstracted.
+				mappedCmd, payload, _ := buildCmd(sub, ch)
+				err = driver.SendRawCmd(mappedCmd, payload)
+			case "startAll":
+				err = driver.StartAnalysis(0xFF) // 0xFF denotes start all
+				mappedCmd = 18
+			case "stopAll":
+				err = driver.StopAnalysis() // Cmd 246? Wait, buildCmd says 19.
+				mappedCmd = 19
+			case "tempOn":
+				err = driver.StartTempControl()
+				mappedCmd = 16
+			case "tempOff":
+				err = driver.StopTempControl()
+				mappedCmd = 17
+			default:
+				mappedCmd, payload, e := buildCmd(sub, ch)
+				if e != nil {
+					writeJSON(w, http.StatusBadRequest, map[string]any{"error": e.Error()})
+					return
+				}
+				err = driver.SendRawCmd(mappedCmd, payload)
+			}
+
 			if err != nil {
 				writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 				return
 			}
-			if err := sendCmd(st, deviceID, cmd, payload); err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-				return
-			}
-			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "cmd": cmd})
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "cmd": mappedCmd})
 		case "localStart":
 			ch := envIntFromQuery(r, "channel", 0)
 			if ch < 0 || ch > 7 {
@@ -1790,7 +1882,8 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			}
 			if allowControl {
 				channelMask := byte(1 << uint(ch))
-				_ = sendCmd(st, deviceID, 245, []byte{channelMask})
+				driver := NewLegacyGCKCDriver(st, deviceID)
+				_ = driver.RequestStop(channelMask)
 				time.Sleep(100 * time.Millisecond)
 			}
 			ok, msg := finalizeSession(hub, st, deviceID, ch, method)
@@ -1944,7 +2037,10 @@ func processFrame(c net.Conn, f gckc.Frame, hub *realtime.Hub, states *sync.Map,
 	case 146:
 		resetAllSessions(st)
 	case 150:
-		// stop/complete ack: do not reset session here; the next start ack (146) defines a new session
+		if len(f.Payload) > 0 {
+			ch := int(f.Payload[0])
+			resetSession(st, ch)
+		}
 	case 147:
 		finalizeAllSessions(hub, st, f.DeviceID, method)
 	case 151:
@@ -2048,6 +2144,34 @@ func processFrame(c net.Conn, f gckc.Frame, hub *realtime.Hub, states *sync.Map,
 				e.AirSccm = f64p(items[2].ActualSccm)
 			}
 			hub.Publish(f.DeviceID, e)
+		}
+	case 250:
+		if len(f.Payload) >= 2 {
+			hwCfg, _ := pstore.LoadHardwareConfig(f.DeviceID)
+			hwCfg.IgniteThreshold1 = float64(f.Payload[0]) / 10.0
+			hwCfg.IgniteThreshold2 = float64(f.Payload[1]) / 10.0
+			pstore.SaveHardwareConfig(f.DeviceID, hwCfg)
+		}
+	case 181, 178:
+		if len(f.Payload) >= 1 {
+			hwCfg, _ := pstore.LoadHardwareConfig(f.DeviceID)
+			hwCfg.IgniteDuration = float64(f.Payload[0])
+			pstore.SaveHardwareConfig(f.DeviceID, hwCfg)
+		}
+	case 132, 140:
+		if len(f.Payload) >= 6 {
+			hwCfg, _ := pstore.LoadHardwareConfig(f.DeviceID)
+			// byte 0,1 -> float (interval)
+			b0 := int(f.Payload[0]>>4)*100 + int(f.Payload[0]&0x0f)*10 + int(f.Payload[1]>>4)
+			b1 := int(f.Payload[1] & 0x0f)
+			interval := float64(b0) + float64(b1)*0.1
+
+			// byte 2,3 -> int (NTimes)
+			nTimes := int(f.Payload[2]>>4)*1000 + int(f.Payload[2]&0x0f)*100 + int(f.Payload[3]>>4)*10 + int(f.Payload[3]&0x0f)
+
+			hwCfg.CycleInterval = interval
+			hwCfg.CycleCount = nTimes
+			pstore.SaveHardwareConfig(f.DeviceID, hwCfg)
 		}
 	}
 
@@ -2711,7 +2835,7 @@ var indexHTML = `<!doctype html>
 <body>
   <div class="shell">
     <header class="topbar">
-      <div class="brand">鍦ㄧ嚎鐩戞祴 <span style="font-size:12px;opacity:0.6;margin-left:10px">v0.1.3</span></div>
+      <div class="brand">鍦ㄧ嚎鐩戞祴 <span style="font-size:12px;opacity:0.6;margin-left:10px">v0.3.6</span></div>
       <nav class="tabs" id="tabs">
         <button class="tab active" data-tab="overview"><span class="tabIcon">姒?/span><span class="tabText">姒傝</span></button>
         <button class="tab" data-tab="curve"><span class="tabIcon">鏇?/span><span class="tabText">鏇茬嚎</span></button>

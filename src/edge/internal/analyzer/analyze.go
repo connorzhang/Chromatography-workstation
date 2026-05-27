@@ -9,7 +9,7 @@ import (
 )
 
 const EngineName = "edge-analyzer"
-const EngineVersion = "0.1.0"
+const EngineVersion = "0.3.5"
 
 func Analyze(trace contracts.Trace, method contracts.Method, gitSHA string, now time.Time) (contracts.Result, error) {
 	if trace.DtS <= 0 {

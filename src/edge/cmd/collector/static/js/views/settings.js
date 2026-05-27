@@ -168,21 +168,23 @@ export function initSettings() {
                             <span style="width: 80px;">点火时长</span>
                             <input type="number" id="set-ignite-dur" class="input" value="10">
                         </div>
-                        <button class="btn" id="btn-apply-ignite-config" style="width: 100%; margin-bottom: 20px;">设定</button>
+                        <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+                            <button class="btn" id="btn-query-ignite-config" style="flex: 1;">查询</button>
+                            <button class="btn" id="btn-apply-ignite-config" style="flex: 1;">设定</button>
+                        </div>
 
                         <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
-                            <span style="width: 90px;">采集次数(次):</span>
+                            <span style="width: 90px;">循环次数(次):</span>
                             <input type="number" id="set-time-cycle-max" class="input" value="9999999">
                         </div>
                         <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
-                            <span style="width: 90px;">通道1(min):</span>
-                            <input type="number" id="set-time-acq" class="input" step="0.1" value="2">
+                            <span style="width: 90px;">循环间隔(min):</span>
+                            <input type="number" id="set-time-cycle" class="input" step="0.1" value="2">
                         </div>
-                        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
-                            <span style="width: 90px;">通道2(min):</span>
-                            <input type="number" id="set-time-cycle" class="input" step="0.1" value="0">
+                        <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+                            <button class="btn" id="btn-query-time" style="flex: 1;">查询</button>
+                            <button class="btn" id="btn-apply-time" style="flex: 1;">设定</button>
                         </div>
-                        <button class="btn" id="btn-apply-time" style="width: 100%;">保存并应用</button>
                     </div>
                 </div>
             </div>
@@ -429,9 +431,9 @@ export function initSettings() {
             const uiRes = await fetch('/api/v1/ui?deviceId=' + encodeURIComponent(deviceId));
             if (uiRes.ok) {
                 uiSettings = await uiRes.json();
-                if (uiSettings.acqMin !== undefined) document.getElementById('set-time-acq').value = uiSettings.acqMin;
-                if (uiSettings.cycleMin !== undefined) document.getElementById('set-time-cycle').value = uiSettings.cycleMin;
-                if (uiSettings.cycleMax !== undefined) document.getElementById('set-time-cycle-max').value = uiSettings.cycleMax;
+                // if (uiSettings.acqMin !== undefined) document.getElementById('set-time-acq').value = uiSettings.acqMin;
+                if (hwSettings.cycleInterval !== undefined) document.getElementById('set-time-cycle').value = hwSettings.cycleInterval;
+                if (hwSettings.cycleCount !== undefined) document.getElementById('set-time-cycle-max').value = hwSettings.cycleCount;
             }
 
             // Load Hardware Settings
@@ -481,11 +483,11 @@ export function initSettings() {
 
                 // Populate Temps
                 if (hwSettings.temperatures) {
+                    if (hwSettings.temperatures['Inj1'] !== undefined) document.getElementById('set-temp-inj1').value = hwSettings.temperatures['Inj1'];
+                    if (hwSettings.temperatures['ProtInj1'] !== undefined) document.getElementById('prot-temp-inj1').value = hwSettings.temperatures['ProtInj1'];
+
                     if (hwSettings.temperatures['Col'] !== undefined) document.getElementById('set-temp-col').value = hwSettings.temperatures['Col'];
                     if (hwSettings.temperatures['ProtCol'] !== undefined) document.getElementById('prot-temp-col').value = hwSettings.temperatures['ProtCol'];
-                    
-                    if (hwSettings.temperatures['Valve'] !== undefined) document.getElementById('set-temp-valve').value = hwSettings.temperatures['Valve'];
-                    if (hwSettings.temperatures['ProtValve'] !== undefined) document.getElementById('prot-temp-valve').value = hwSettings.temperatures['ProtValve'];
                     
                     if (hwSettings.temperatures['Det1'] !== undefined) document.getElementById('set-temp-det1').value = hwSettings.temperatures['Det1'];
                     if (hwSettings.temperatures['ProtDet1'] !== undefined) document.getElementById('prot-temp-det1').value = hwSettings.temperatures['ProtDet1'];
@@ -797,6 +799,34 @@ export function initSettings() {
             }
         };
 
+        // Ignite Config Query
+        const btnQueryIgnite = document.getElementById('btn-query-ignite-config');
+        if (btnQueryIgnite) {
+            btnQueryIgnite.addEventListener('click', async () => {
+                window.showToast('正在向设备下发点火参数查询指令...');
+                try {
+                    await fetch('/api/control/ignite_config', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({control: 'query'})
+                    });
+                    
+                    await new Promise(r => setTimeout(r, 500));
+                    
+                    const hwRes = await fetch('/api/v1/hardware?deviceId=' + encodeURIComponent(deviceId));
+                    if (hwRes.ok) {
+                        hwSettings = await hwRes.json();
+                        if (hwSettings.igniteThreshold1 !== undefined) document.getElementById('set-ignite-th1').value = hwSettings.igniteThreshold1;
+                        if (hwSettings.igniteThreshold2 !== undefined) document.getElementById('set-ignite-th2').value = hwSettings.igniteThreshold2;
+                        if (hwSettings.igniteDuration !== undefined) document.getElementById('set-ignite-dur').value = hwSettings.igniteDuration;
+                        window.showToast('点火参数已刷新');
+                    }
+                } catch(e) {
+                    window.showToast('异常: ' + e.message, true);
+                }
+            });
+        }
+
         // Ignite Config Apply
         const btnIgniteConfig = document.getElementById('btn-apply-ignite-config');
         if (btnIgniteConfig) {
@@ -810,8 +840,15 @@ export function initSettings() {
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify(hwSettings)
                     });
-                    if (res.ok) window.showToast('点火参数已保存!');
-                    else window.showToast('保存失败', true);
+                    
+                    const ctrlRes = await fetch('/api/control/ignite_config', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({control: 'set'})
+                    });
+
+                    if (ctrlRes.ok) window.showToast('点火参数已保存并下发!');
+                    else window.showToast('保存下发失败', true);
                 } catch(e) {
                     window.showToast('异常: ' + e.message, true);
                 }
@@ -920,19 +957,51 @@ export function initSettings() {
         });
 
         // Time / UI Settings Apply
+        // Time Config Query
+        const btnQueryTime = document.getElementById('btn-query-time');
+        if (btnQueryTime) {
+            btnQueryTime.addEventListener('click', async () => {
+                window.showToast('正在获取工作站循环参数...');
+                try {
+                    await fetch('/api/control/cycle', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({control: 'query'})
+                    });
+                    
+                    await new Promise(r => setTimeout(r, 500));
+
+                    const uiRes = await fetch('/api/v1/hardware?deviceId=' + encodeURIComponent(deviceId));
+                    if (uiRes.ok) {
+                        hwSettings = await uiRes.json();
+                        if (hwSettings.cycleInterval !== undefined) document.getElementById('set-time-cycle').value = hwSettings.cycleInterval;
+                        if (hwSettings.cycleCount !== undefined) document.getElementById('set-time-cycle-max').value = hwSettings.cycleCount;
+                        window.showToast('循环参数已刷新');
+                    }
+                } catch(e) {
+                    window.showToast('异常: ' + e.message, true);
+                }
+            });
+        }
+
         document.getElementById('btn-apply-time').addEventListener('click', async () => {
-            uiSettings.acqMin = parseFloat(document.getElementById('set-time-acq').value) || 0;
-            uiSettings.cycleMin = parseFloat(document.getElementById('set-time-cycle').value) || 0;
-            uiSettings.cycleMax = parseInt(document.getElementById('set-time-cycle-max').value) || 9999999;
-            uiSettings.deviceId = deviceId;
+            // uiSettings.acqMin = parseFloat(document.getElementById('set-time-acq').value) || 0;
+            hwSettings.cycleInterval = parseFloat(document.getElementById('set-time-cycle').value) || 0;
+            hwSettings.cycleCount = parseInt(document.getElementById('set-time-cycle-max').value) || 9999999;
             
             try {
-                const res = await fetch('/api/v1/ui', {
+                await fetch('/api/v1/hardware?deviceId=' + encodeURIComponent(deviceId), {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(uiSettings)
+                    body: JSON.stringify(hwSettings)
                 });
-                if (res.ok) window.showToast('时间和循环参数已保存!');
+
+                const res = await fetch('/api/control/cycle', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({control: 'set'})
+                });
+                if (res.ok) window.showToast('时间和循环参数已保存并下发!');
                 else window.showToast('保存失败', true);
             } catch(e) {
                 window.showToast('异常: ' + e.message, true);

@@ -32,12 +32,6 @@ func schedulerTick(hub *realtime.Hub, states *sync.Map, method v1.Method) {
 		}
 		acqDur := time.Duration(acqMin*60.0*1000.0) * time.Millisecond
 		
-		cycleMin := ui.CycleMin
-		if cycleMin <= 0 {
-			cycleMin = acqMin // fallback if not set
-		}
-		cycleDur := time.Duration(cycleMin*60.0*1000.0) * time.Millisecond
-
 		for ch := 0; ch < 8; ch++ {
 			st.mu.Lock()
 			s := st.sessions[ch]
@@ -60,25 +54,20 @@ func schedulerTick(hub *realtime.Hub, states *sync.Map, method v1.Method) {
 				// AcqMin reached: perform snapshot and result calculation
 				_, _ = publishSessionResultSnapshot(hub, st, deviceID, ch, method)
 				
-				// If not looping, we stop here
+				// We no longer send STOP (245) or START (22) from the local scheduler 
+				// if we are in Loop mode. The hardware's Cycle Interval will handle the auto-cycle!
+				// We finalize locally to save the result. The hardware will send Cmd 150 when the next cycle begins.
+				finalizeSession(hub, st, deviceID, ch, method)
 				if !ui.Loop {
-					finalizeSession(hub, st, deviceID, ch, method)
-					// Send Stop command to hardware
-					channelMask := byte(1 << uint(ch))
-					_ = sendCmd(st, deviceID, 245, []byte{channelMask})
+					// Send Stop command to hardware ONLY if not looping
+					_ = sendCmd(st, deviceID, 23, []byte{byte(ch)})
 				}
 			}
 
-			// 2. Check if we need to start the next cycle
-			if ui.Loop && timeSinceStart >= cycleDur {
-				// CycleMin reached: Restart session for the next cycle
-				// TODO: Check CycleMax (loop count) if needed in the future
-				resetSession(st, ch)
-				// Send Start command to hardware
-				_ = sendCmd(st, deviceID, 22, []byte{byte(ch)})
-				// Send the secondary start/reset command that frontend used to send
-				_ = sendCmd(st, deviceID, 25, nil)
-			}
+			// 2. We removed the local Start (Cmd 22) for the next cycle
+			// because the hardware mainboard handles the CycleInterval itself.
+			// When the hardware starts the next cycle, it will send Cmd 150 (Start Ack),
+			// which will trigger resetSession() in main.go.
 		}
 		return true
 	})

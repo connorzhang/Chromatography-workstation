@@ -81,5 +81,5 @@ $hostkey = Get-HostKey $sshHost $port
 
 $cmd = "set -e; cd `"$RemoteDir`"; echo '== ls =='; ls -lah; echo '== pid =='; cat collector.pid 2>/dev/null || true; if [ -f collector.pid ]; then echo '== ps =='; ps -p `$(cat collector.pid) -o pid,cmd || true; fi; echo '== ports =='; (ss -lntp 2>/dev/null || netstat -lntp 2>/dev/null || true) | grep -E '(:8080|:8000|:25001)' || true; echo '== log =='; tail -n 120 collector.log 2>/dev/null || true"
 
-"" | & $plink -batch -ssh -P $port -pw $pass $remote $cmd
+"" | & $plink -batch -hostkey $hostkey -ssh -P $port -pw $pass $remote $cmd
 if ($LASTEXITCODE -ne 0) { throw "plink failed ($LASTEXITCODE)" }
