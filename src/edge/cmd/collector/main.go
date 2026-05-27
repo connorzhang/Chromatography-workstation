@@ -2835,7 +2835,7 @@ var indexHTML = `<!doctype html>
 <body>
   <div class="shell">
     <header class="topbar">
-      <div class="brand">鍦ㄧ嚎鐩戞祴 <span style="font-size:12px;opacity:0.6;margin-left:10px">v0.3.6</span></div>
+      <div class="brand">鍦ㄧ嚎鐩戞祴 <span style="font-size:12px;opacity:0.6;margin-left:10px">v0.3.7</span></div>
       <nav class="tabs" id="tabs">
         <button class="tab active" data-tab="overview"><span class="tabIcon">姒?/span><span class="tabText">姒傝</span></button>
         <button class="tab" data-tab="curve"><span class="tabIcon">鏇?/span><span class="tabText">鏇茬嚎</span></button>
