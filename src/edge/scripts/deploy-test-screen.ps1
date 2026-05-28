@@ -37,6 +37,7 @@ $envPath = Join-Path $root ".env"
 $kv = Read-DotEnv $envPath
 
 $sshHost = $kv["TEST_SCREEN_SSH_HOST"]
+$sshHostBak = $kv["TEST_SCREEN_SSH_HOST_BAK"]
 $port = $kv["TEST_SCREEN_SSH_PORT"]
 $user = $kv["TEST_SCREEN_SSH_USER"]
 $pass = $kv["TEST_SCREEN_SSH_PASSWORD"]
@@ -81,12 +82,24 @@ function Get-HostKey([string]$sshHost, [string]$port) {
   throw "ssh-keyscan failed"
 }
 
-$localBin = Join-Path $root "publish/edge-collector/collector-linux-arm64"
-if (-not (Test-Path $localBin)) { throw "local binary not found: $localBin" }
+$localBin = Join-Path $root "publish/edge-collector/collector-linux-arm64"      
+if (-not (Test-Path $localBin)) { throw "local binary not found: $localBin" }   
+
+$putty = Ensure-Putty (Join-Path $root "src/edge/.run/tools/putty")
+
+try {
+  $hostkey = Get-HostKey $sshHost $port
+} catch {
+  if (-not [string]::IsNullOrWhiteSpace($sshHostBak)) {
+    Write-Host "Failed to connect to main IP $sshHost. Trying backup IP $sshHostBak..."
+    $sshHost = $sshHostBak
+    $hostkey = Get-HostKey $sshHost $port
+  } else {
+    throw
+  }
+}
 
 $remote = "$user@$sshHost"
-$putty = Ensure-Putty (Join-Path $root "src/edge/.run/tools/putty")
-$hostkey = Get-HostKey $sshHost $port
 
 function Run-Remote([string]$cmd) {
   Write-Host "Running: $cmd"
