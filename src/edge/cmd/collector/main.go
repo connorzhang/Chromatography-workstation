@@ -357,6 +357,10 @@ type telemetryEvent struct {
 	ProtTempDet2 *float64 `json:"protTempDet2,omitempty"`
 	ProtTempDet3 *float64 `json:"protTempDet3,omitempty"`
 
+	// 绯荤粺鐘舵€?
+	Heating *bool `json:"heating,omitempty"`
+	Ready   *bool `json:"ready,omitempty"`
+
 	Epc []telemetryEpc `json:"epc,omitempty"`
 
 	CarrierPsi  *float64 `json:"carrierPsi,omitempty"`
@@ -414,15 +418,16 @@ func parseSetTemps128(payload []byte) (telemetryEvent, bool) {
 	inj1, ok0 := bcd2Temp1(payload, 0)
 	col, ok1 := bcd2Temp1(payload, 2)
 	det1, ok2 := bcd2Temp1(payload, 4)
+	det2, ok4 := bcd2Temp1(payload, 6)
 	inj2, ok3 := bcd2Temp1(payload, 8)
-	det2, ok4 := bcd2Temp1(payload, 10)
-	// det3 is not parsed since payload is 24 bytes and we skip index 6
+	det3, ok5 := bcd2Temp1(payload, 10)
 
 	pinj1, pok0 := bcd2Temp1(payload, 12)
 	pcol, pok1 := bcd2Temp1(payload, 14)
 	pdet1, pok2 := bcd2Temp1(payload, 16)
+	pdet2, pok4 := bcd2Temp1(payload, 18)
 	pinj2, pok3 := bcd2Temp1(payload, 20)
-	pdet2, pok4 := bcd2Temp1(payload, 22)
+	pdet3, pok5 := bcd2Temp1(payload, 22)
 
 	if !ok0 && !ok1 && !ok2 && !ok3 && !ok4 && !pok0 {
 		return telemetryEvent{}, false
@@ -443,6 +448,9 @@ func parseSetTemps128(payload []byte) (telemetryEvent, bool) {
 	if ok4 {
 		te.SetTempDet2 = f64p(det2)
 	}
+	if ok5 {
+		te.SetTempDet3 = f64p(det3)
+	}
 
 	if pok0 {
 		te.ProtTempInj1 = f64p(pinj1)
@@ -459,6 +467,9 @@ func parseSetTemps128(payload []byte) (telemetryEvent, bool) {
 	if pok4 {
 		te.ProtTempDet2 = f64p(pdet2)
 	}
+	if pok5 {
+		te.ProtTempDet3 = f64p(pdet3)
+	}
 
 	return te, true
 }
@@ -470,8 +481,8 @@ func parseTemps143(payload []byte) (telemetryEvent, bool) {
 	inj1, ok0 := bcd2Temp1(payload, 0)
 	col, ok1 := bcd2Temp1(payload, 2)
 	det1, ok2 := bcd2Temp1(payload, 4)
-	inj2, ok3 := bcd2Temp1(payload, 6)
-	det2, ok4 := bcd2Temp1(payload, 8)
+	det2, ok4 := bcd2Temp1(payload, 6)
+	inj2, ok3 := bcd2Temp1(payload, 8)
 	det3, ok5 := bcd2Temp1(payload, 10)
 
 	if !ok0 && !ok1 && !ok2 && !ok3 && !ok4 && !ok5 {
@@ -496,6 +507,16 @@ func parseTemps143(payload []byte) (telemetryEvent, bool) {
 	if ok5 {
 		te.TempDet3 = f64p(det3)
 	}
+
+	// 瑙ｆ瀽 Cmd 143/128 鐨勭姸鎬佸瓧鑺傦紙Offset 12锛?
+	if len(payload) > 12 {
+		statusByte := payload[12]
+		heating := (statusByte & 0x80) != 0
+		ready := (statusByte & 0x40) != 0
+		te.Heating = &heating
+		te.Ready = &ready
+	}
+
 	return te, true
 }
 
@@ -538,6 +559,14 @@ func parseEpc159(payload []byte) ([]epcItem, bool) {
 		return nil, false
 	}
 	return items, true
+}
+
+func getDriver(st *deviceState, deviceID string) InstrumentDriver {
+	cfg := pstore.LoadSysConfig()
+	if cfg.DriverMode == "modular" {
+		return NewModularDriver(st, deviceID)
+	}
+	return NewLegacyGCKCDriver(st, deviceID)
 }
 
 func main() {
@@ -735,6 +764,9 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			cfg.MqttUploadStatus = input.MqttUploadStatus
 			cfg.MqttUploadResult = input.MqttUploadResult
 			cfg.MqttUploadLog = input.MqttUploadLog
+			if input.DriverMode != "" {
+				cfg.DriverMode = input.DriverMode
+			}
 
 			pstore.SaveSysConfig(cfg)
 
@@ -874,6 +906,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			Zone    string             `json:"zone"` // 兼容老的单一下发
 			Target  float64            `json:"target"`
 			Targets map[string]float64 `json:"targets"` // 支持批量下发
+			Enables map[string]bool    `json:"enables"` // 支持批量开关
 			Control string             `json:"control"` // "start" or "stop"
 		}
 		if json.NewDecoder(r.Body).Decode(&in) != nil {
@@ -881,14 +914,17 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			return
 		}
 
-		deviceID := uiLastDevice
+		deviceID := r.URL.Query().Get("deviceId")
+		if deviceID == "" {
+			deviceID = uiLastDevice
+		}
 		stAny, ok := states.Load(deviceID)
 		if !ok {
 			writeJSON(w, http.StatusNotFound, map[string]any{"error": "device not found"})
 			return
 		}
 		st := stAny.(*deviceState)
-		driver := NewLegacyGCKCDriver(st, deviceID)
+		driver := getDriver(st, deviceID)
 
 		if in.Control == "start" {
 			if err := driver.StartTempControl(); err != nil {
@@ -917,6 +953,13 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 		if hw.Temperatures == nil {
 			hw.Temperatures = make(map[string]float64)
 		}
+		if hw.TempEnables == nil {
+			hw.TempEnables = map[string]bool{
+				"Inj1": true,
+				"Col":  true,
+				"Det1": true,
+			} // 默认开启这3路
+		}
 
 		if in.Zone != "" {
 			hw.Temperatures[in.Zone] = in.Target
@@ -924,6 +967,11 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 		if in.Targets != nil {
 			for k, v := range in.Targets {
 				hw.Temperatures[k] = v
+			}
+		}
+		if in.Enables != nil {
+			for k, v := range in.Enables {
+				hw.TempEnables[k] = v
 			}
 		}
 		pstore.SaveHardwareConfig(deviceID, hw)
@@ -936,8 +984,17 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			hw.Temperatures["ProtInj1"], hw.Temperatures["ProtCol"], hw.Temperatures["ProtDet1"],
 			hw.Temperatures["ProtInj2"], hw.Temperatures["ProtDet2"], hw.Temperatures["ProtDet3"],
 		}
+		for i := range protects {
+			if protects[i] <= 0 {
+				protects[i] = 400
+			}
+		}
+		enables := []bool{
+			hw.TempEnables["Inj1"], hw.TempEnables["Col"], hw.TempEnables["Det1"],
+			hw.TempEnables["Inj2"], hw.TempEnables["Det2"], hw.TempEnables["Det3"],
+		}
 
-		if err := driver.SetTempSetpoints(setpoints, protects); err != nil {
+		if err := driver.SetTempSetpoints(setpoints, protects, enables); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 			return
 		}
@@ -1074,7 +1131,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 		stAny, ok := states.Load(deviceID)
 		if ok {
 			st := stAny.(*deviceState)
-			driver := NewLegacyGCKCDriver(st, deviceID)
+			driver := getDriver(st, deviceID)
 			_ = driver.Ignite(in.Detector, in.Action == "start")
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "ignite sent"})
@@ -1135,7 +1192,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 		copy(payload[8:10], h2Psi)
 		copy(payload[16:18], airPsi)
 
-		driver := NewLegacyGCKCDriver(st, deviceID)
+		driver := getDriver(st, deviceID)
 		if err := driver.SetEPC(payload); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 			return
@@ -1156,7 +1213,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			return
 		}
 		st := stAny.(*deviceState)
-		driver := NewLegacyGCKCDriver(st, deviceID)
+		driver := getDriver(st, deviceID)
 
 		if r.Method == http.MethodGet {
 			if err := driver.QueryEvents(); err != nil {
@@ -1450,6 +1507,16 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			hw, ok := pstore.LoadHardwareConfig(deviceID)
 			if !ok {
 				hw = models.HardwareConfig{}
+			}
+			if hw.TempEnables == nil {
+				hw.TempEnables = map[string]bool{
+					"Inj1": true,
+					"Col":  true,
+					"Det1": true,
+					"Inj2": false,
+					"Det2": false,
+					"Det3": false,
+				}
 			}
 			writeJSON(w, http.StatusOK, hw)
 			return
@@ -1804,6 +1871,14 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 		})
 		writeJSON(w, http.StatusOK, out)
 	})
+
+	// 温控模块 Modbus 测试接口
+	mux.HandleFunc("/api/v1/modbus_temp/connect", handleModbusTempConnect)
+	mux.HandleFunc("/api/v1/modbus_temp/disconnect", handleModbusTempDisconnect)
+	mux.HandleFunc("/api/v1/modbus_temp/state", handleModbusTempState)
+	mux.HandleFunc("/api/v1/modbus_temp/set", handleModbusTempSet)
+	mux.HandleFunc("/api/v1/modbus_temp/set_io", handleModbusTempSetIO)
+
 	mux.HandleFunc("/api/v1/devices/", func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/api/v1/devices/")
 		parts := strings.Split(path, "/")
@@ -1831,7 +1906,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			return
 		}
 		st := stAny.(*deviceState)
-		driver := NewLegacyGCKCDriver(st, deviceID)
+		driver := getDriver(st, deviceID)
 
 		switch action {
 		case "cmd":
@@ -1916,7 +1991,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			}
 			if allowControl {
 				channelMask := byte(1 << uint(ch))
-				driver := NewLegacyGCKCDriver(st, deviceID)
+				driver := getDriver(st, deviceID)
 				_ = driver.RequestStop(channelMask)
 				time.Sleep(100 * time.Millisecond)
 			}
@@ -2408,7 +2483,12 @@ func finalizeSession(hub *realtime.Hub, st *deviceState, deviceID string, ch int
 				for _, g := range res.Groups {
 					polls[g.Code] = g.Amount
 				}
-				mqttClient.PublishResult(deviceID, e.At, trace.TraceID, polls)
+				payload := map[string]any{
+					"time":     e.At.Unix(),
+					"trace_id": trace.TraceID,
+					"results":  polls,
+				}
+				mqttClient.PublishResult(deviceID, payload)
 			}
 		}
 	}
@@ -2488,7 +2568,12 @@ func publishSessionResultSnapshot(hub *realtime.Hub, st *deviceState, deviceID s
 				for _, g := range res.Groups {
 					polls[g.Code] = g.Amount
 				}
-				mqttClient.PublishResult(deviceID, e.At, trace.TraceID, polls)
+				payload := map[string]any{
+					"time":     e.At.Unix(),
+					"trace_id": trace.TraceID,
+					"results":  polls,
+				}
+				mqttClient.PublishResult(deviceID, payload)
 			}
 		}
 	}
@@ -2772,24 +2857,6 @@ func parseEventTable(payload []byte) *[4][8]float64 {
 	return &m
 }
 
-func tempToBCD2(temp float64) []byte {
-	v := int(math.Round(temp * 10))
-	if v < 0 {
-		v = 0
-	}
-	if v > 3999 {
-		v = 3999
-	}
-	// v 姝ゆ椂褰㈠ 1234 (瀵瑰簲 123.4搴?
-	d1 := (v / 1000) % 10
-	d2 := (v / 100) % 10
-	d3 := (v / 10) % 10
-	d4 := v % 10
-	b0 := byte((d1 << 4) | d2)
-	b1 := byte((d3 << 4) | d4)
-	return []byte{b0, b1}
-}
-
 // 杈呭姪鏂规硶锛氬皢鏁板€艰浆鎹负澶х uint16 瀛楄妭
 func u16Bytes(v float64, scale float64) []byte {
 	iv := int(math.Round(v * scale))
@@ -2889,7 +2956,7 @@ var indexHTML = `<!doctype html>
 <body>
   <div class="shell">
     <header class="topbar">
-      <div class="brand">鍦ㄧ嚎鐩戞祴 <span style="font-size:12px;opacity:0.6;margin-left:10px">v0.3.10</span></div>
+      <div class="brand">在线监测 <span style="font-size:12px;opacity:0.6;margin-left:10px">v0.3.18</span></div>
       <nav class="tabs" id="tabs">
         <button class="tab active" data-tab="overview"><span class="tabIcon">姒?/span><span class="tabText">姒傝</span></button>
         <button class="tab" data-tab="curve"><span class="tabIcon">鏇?/span><span class="tabText">鏇茬嚎</span></button>

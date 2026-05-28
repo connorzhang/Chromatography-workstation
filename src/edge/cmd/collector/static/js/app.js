@@ -1,9 +1,10 @@
-import { initDashboard } from './views/dashboard.js?v=0.3.10';
-import { initLiveChromatogram } from './views/live.js?v=0.3.10';
-import { initMethod } from './views/method.js?v=0.3.10';
-import { initSettings } from './views/settings.js?v=0.3.10';
-import { initProcess } from './views/process.js?v=0.3.10';
-import { initReport } from './views/report.js?v=0.3.10';
+import { initDashboard } from './views/dashboard.js?v=0.3.18';
+import { initLiveChromatogram } from './views/live.js?v=0.3.18';
+import { initMethod } from './views/method.js?v=0.3.18';
+import { initSettings } from './views/settings.js?v=0.3.18';
+import { initProcess } from './views/process.js?v=0.3.18';
+import { initReport } from './views/report.js?v=0.3.18';
+import { initDebug } from './views/debug.js?v=0.3.18';
 
 document.addEventListener('DOMContentLoaded', () => {
     const navItems = document.querySelectorAll('.nav-item');
@@ -20,6 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initSettings();
     initProcess();
     initReport();
+    initDebug();
 
     navItems.forEach(item => {
         item.addEventListener('click', () => {

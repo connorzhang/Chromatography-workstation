@@ -5,7 +5,7 @@ type TempDriver interface {
 	StartTempControl() error
 	StopTempControl() error
 	QueryTempSetpoints() error
-	SetTempSetpoints(setpoints []float64, protects []float64) error
+	SetTempSetpoints(setpoints []float64, protects []float64, enables []bool) error
 }
 
 // EventDriver defines the standard interface for event/relay control modules.

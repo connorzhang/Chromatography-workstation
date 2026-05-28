@@ -1,0 +1,19 @@
+﻿{
+    "pool_type":  "random",
+    "headers":  {
+                    "Authorization":  "Basic Y29ubm9yOjRxYkcyYmlKMTYxOTIyMzkzMUZpRXB4UWQ5YmY4NWM4NTMzNWU4YzVjNjkwNjM2MTI1MGQ5YzA3",
+                    "content-type":  "application/json"
+                },
+    "ssl":  {
+                "enable":  false
+            },
+    "connect_timeout":  "15s",
+    "pool_size":  8,
+    "url":  "https://elk.rry.net/peaiotchrom/_doc",
+    "resource_opts":  {
+                          "start_timeout":  "5s",
+                          "start_after_created":  true,
+                          "health_check_interval":  "15s"
+                      },
+    "enable_pipelining":  100
+}

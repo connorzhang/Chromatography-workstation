@@ -1,0 +1,12 @@
+﻿{
+    "connector":  "elkrrynet_WH_CHROM",
+    "enable":  true,
+    "parameters":  {
+                       "headers":  {
+
+                                   },
+                       "method":  "post",
+                       "body":  "${.}",
+                       "max_retries":  2
+                   }
+}

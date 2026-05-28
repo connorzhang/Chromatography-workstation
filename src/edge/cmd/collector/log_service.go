@@ -100,6 +100,19 @@ func logWorker() {
 			}
 
 			// In the future, this batch will be sent via MQTT (vocs/device/{MN}/log)
+			if mqttClient != nil {
+				uiMu.Lock()
+				deviceID := uiLastDevice
+				uiMu.Unlock()
+				if deviceID != "" {
+					payload := map[string]any{
+						"timestamp": lb.Timestamp,
+						"logs":      lb.Logs,
+					}
+					mqttClient.PublishLog(deviceID, payload)
+				}
+			}
+
 			// For now, we just broadcast it to the UI (if needed) or keep it ready
 			select {
 			case logHubChan <- lb:

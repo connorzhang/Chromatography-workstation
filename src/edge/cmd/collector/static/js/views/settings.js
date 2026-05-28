@@ -111,44 +111,60 @@ export function initSettings() {
             <div class="tab-content" id="tab-inst2">
                 <div style="display: flex; gap: 20px;">
                     <div class="control-group" style="flex: 1;">
-                        <h3 style="margin-top:0;">温度控制</h3>
+                        <h3 style="margin-top:0;">温度控制 <span id="status-heating" style="font-size:12px; margin-left:10px; padding: 2px 6px; border-radius: 4px; background-color: #334155; color: #cbd5e1;">状态: 获取中...</span></h3>
         <table class="settings-table">
             <thead>
                 <tr>
-                    <th>名称</th><th>实测(℃)</th><th>设定(℃)</th><th>保护(℃)</th>
+                    <th>名称</th><th>启用</th><th>实测(℃)</th><th>设定(℃)</th><th>保护(℃)</th>
                 </tr>
             </thead>
             <tbody>
                 <tr>
-                    <td>进样1</td><td id="real-temp-inj1">0.0</td>
+                    <td>进样1</td>
+                    <td><input type="checkbox" id="en-temp-inj1" checked></td>
+                    <td id="real-temp-inj1">0.0</td>
                     <td><input type="number" id="set-temp-inj1" class="input-cell" value="100"></td>
-                    <td><input type="number" id="prot-temp-inj1" class="input-cell" value=""></td>
+                    <td><input type="number" id="prot-temp-inj1" class="input-cell" value="400"></td>
                 </tr>
                 <tr>
-                    <td>柱箱</td><td id="real-temp-col">0.0</td>
+                    <td>柱箱</td>
+                    <td><input type="checkbox" id="en-temp-col" checked></td>
+                    <td id="real-temp-col">0.0</td>
                     <td><input type="number" id="set-temp-col" class="input-cell" value="100"></td>
-                    <td><input type="number" id="prot-temp-col" class="input-cell" value=""></td>
+                    <td><input type="number" id="prot-temp-col" class="input-cell" value="400"></td>
                 </tr>
                 <tr>
-                    <td>检测1</td><td id="real-temp-det1">0.0</td>
+                    <td>检测1</td>
+                    <td><input type="checkbox" id="en-temp-det1" checked></td>
+                    <td id="real-temp-det1">0.0</td>
                     <td><input type="number" id="set-temp-det1" class="input-cell" value="220"></td>
-                    <td><input type="number" id="prot-temp-det1" class="input-cell" value=""></td>
+                    <td><input type="number" id="prot-temp-det1" class="input-cell" value="400"></td>
                 </tr>
                 <tr>
-                    <td>进样2</td><td id="real-temp-inj2">0.0</td>
+                    <td>进样2</td>
+                    <td><input type="checkbox" id="en-temp-inj2"></td>
+                    <td id="real-temp-inj2">0.0</td>
                     <td><input type="number" id="set-temp-inj2" class="input-cell" value="100"></td>
-                    <td><input type="number" id="prot-temp-inj2" class="input-cell" value=""></td>
+                    <td><input type="number" id="prot-temp-inj2" class="input-cell" value="400"></td>
                 </tr>
                 <tr>
-                    <td>检测2</td><td id="real-temp-det2">0.0</td>
+                    <td>检测2</td>
+                    <td><input type="checkbox" id="en-temp-det2"></td>
+                    <td id="real-temp-det2">0.0</td>
                     <td><input type="number" id="set-temp-det2" class="input-cell" value="0"></td>
-                    <td><input type="number" id="prot-temp-det2" class="input-cell" value=""></td>
+                    <td><input type="number" id="prot-temp-det2" class="input-cell" value="400"></td>
+                </tr>
+                <tr>
+                    <td>检测3</td>
+                    <td><input type="checkbox" id="en-temp-det3"></td>
+                    <td id="real-temp-det3">0.0</td>
+                    <td><input type="number" id="set-temp-det3" class="input-cell" value="0"></td>
+                    <td><input type="number" id="prot-temp-det3" class="input-cell" value="400"></td>
                 </tr>
             </tbody>
         </table>
                     <div style="margin-top: 10px; display: flex; gap: 10px;">
-                        <button class="btn" id="btn-start-temp" style="background-color: #2e7d32; color: white;">开始控温</button>
-                        <button class="btn" id="btn-stop-temp" style="background-color: #d32f2f; color: white;">关闭控温</button>
+                        <button class="btn" id="btn-toggle-temp" style="background-color: #2e7d32; color: white;">开始控温</button>
                         <button class="btn" id="btn-query-temp">查询</button>
                         <button class="btn" id="btn-apply-temp">设定</button>
                     </div>
@@ -436,6 +452,16 @@ export function initSettings() {
                             <input type="password" id="sys-mqtt-pass" class="input" style="flex: 1;">
                         </div>
 
+                        <!-- 硬件驱动模式 -->
+                        <h4 style="margin: 10px 0 0 0; color: #38bdf8; border-bottom: 1px dashed #334155; padding-bottom: 5px;">硬件架构模式</h4>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <label style="width: 80px;">驱动模式</label>
+                            <select id="sys-driver-mode" class="input" style="flex: 1;">
+                                <option value="legacy">Legacy (原厂高集成主板 Cmd 143/159)</option>
+                                <option value="modular">Modular (散件模块化 HAL)</option>
+                            </select>
+                        </div>
+
                         <!-- 密码修改部分 -->
                         <h4 style="margin: 10px 0 0 0; color: #38bdf8; border-bottom: 1px dashed #334155; padding-bottom: 5px;">安全设置</h4>
                         <label>修改管理员密码 (可选)</label>
@@ -547,6 +573,24 @@ export function initSettings() {
                     
                     if (hwSettings.temperatures['Det2'] !== undefined) document.getElementById('set-temp-det2').value = hwSettings.temperatures['Det2'];
                     if (hwSettings.temperatures['ProtDet2'] !== undefined) document.getElementById('prot-temp-det2').value = hwSettings.temperatures['ProtDet2'];
+
+                    if (hwSettings.temperatures['Det3'] !== undefined) {
+                        const setDet3 = document.getElementById('set-temp-det3');
+                        if (setDet3) setDet3.value = hwSettings.temperatures['Det3'];
+                    }
+                    if (hwSettings.temperatures['ProtDet3'] !== undefined) {
+                        const protDet3 = document.getElementById('prot-temp-det3');
+                        if (protDet3) protDet3.value = hwSettings.temperatures['ProtDet3'];
+                    }
+                }
+
+                if (hwSettings.temp_enables) {
+                    if (hwSettings.temp_enables['Inj1'] !== undefined) document.getElementById('en-temp-inj1').checked = hwSettings.temp_enables['Inj1'];
+                    if (hwSettings.temp_enables['Col'] !== undefined) document.getElementById('en-temp-col').checked = hwSettings.temp_enables['Col'];
+                    if (hwSettings.temp_enables['Det1'] !== undefined) document.getElementById('en-temp-det1').checked = hwSettings.temp_enables['Det1'];
+                    if (hwSettings.temp_enables['Inj2'] !== undefined) document.getElementById('en-temp-inj2').checked = hwSettings.temp_enables['Inj2'];
+                    if (hwSettings.temp_enables['Det2'] !== undefined) document.getElementById('en-temp-det2').checked = hwSettings.temp_enables['Det2'];
+                    if (hwSettings.temp_enables['Det3'] !== undefined) document.getElementById('en-temp-det3').checked = hwSettings.temp_enables['Det3'];
                 }
 
                 if (hwSettings.igniteThreshold1 !== undefined) document.getElementById('set-ignite-th1').value = hwSettings.igniteThreshold1;
@@ -588,6 +632,30 @@ export function initSettings() {
                 try {
                     const parsed = JSON.parse(event.data);
                     if (parsed.type === 'telemetry') {
+                        if (parsed.heating !== undefined) {
+                            const heatingEl = document.getElementById('status-heating');
+                            const toggleBtn = document.getElementById('btn-toggle-temp');
+                            if (heatingEl) {
+                                if (parsed.heating) {
+                                    heatingEl.innerText = "状态: 升温中 (ON)";
+                                    heatingEl.style.backgroundColor = "#166534";
+                                    heatingEl.style.color = "#bbf7d0";
+                                    if (toggleBtn) {
+                                        toggleBtn.innerText = "关闭控温";
+                                        toggleBtn.style.backgroundColor = "#d32f2f";
+                                    }
+                                } else {
+                                    heatingEl.innerText = "状态: 已停止 (OFF)";
+                                    heatingEl.style.backgroundColor = "#7f1d1d";
+                                    heatingEl.style.color = "#fecaca";
+                                    if (toggleBtn) {
+                                        toggleBtn.innerText = "开始控温";
+                                        toggleBtn.style.backgroundColor = "#2e7d32";
+                                    }
+                                }
+                            }
+                        }
+
                         if (parsed.tempInj1 !== undefined) {
                             const elInj1 = document.getElementById('real-temp-inj1');
                             const elCol = document.getElementById('real-temp-col');
@@ -978,16 +1046,34 @@ export function initSettings() {
         // Temperature Apply
         document.getElementById('btn-apply-temp').addEventListener('click', async () => {
             if (!hwSettings.temperatures) hwSettings.temperatures = {};
+            if (!hwSettings.temp_enables) hwSettings.temp_enables = {};
+            
             hwSettings.temperatures['Col'] = parseFloat(document.getElementById('set-temp-col').value) || 0;
             hwSettings.temperatures['ProtCol'] = parseFloat(document.getElementById('prot-temp-col').value) || 0;
+            hwSettings.temp_enables['Col'] = document.getElementById('en-temp-col').checked;
+            
             hwSettings.temperatures['Inj1'] = parseFloat(document.getElementById('set-temp-inj1').value) || 0;
             hwSettings.temperatures['ProtInj1'] = parseFloat(document.getElementById('prot-temp-inj1').value) || 0;
+            hwSettings.temp_enables['Inj1'] = document.getElementById('en-temp-inj1').checked;
+            
             hwSettings.temperatures['Det1'] = parseFloat(document.getElementById('set-temp-det1').value) || 0;
             hwSettings.temperatures['ProtDet1'] = parseFloat(document.getElementById('prot-temp-det1').value) || 0;
+            hwSettings.temp_enables['Det1'] = document.getElementById('en-temp-det1').checked;
+            
             hwSettings.temperatures['Inj2'] = parseFloat(document.getElementById('set-temp-inj2').value) || 0;
             hwSettings.temperatures['ProtInj2'] = parseFloat(document.getElementById('prot-temp-inj2').value) || 0;
+            hwSettings.temp_enables['Inj2'] = document.getElementById('en-temp-inj2').checked;
+            
             hwSettings.temperatures['Det2'] = parseFloat(document.getElementById('set-temp-det2').value) || 0;
             hwSettings.temperatures['ProtDet2'] = parseFloat(document.getElementById('prot-temp-det2').value) || 0;
+            hwSettings.temp_enables['Det2'] = document.getElementById('en-temp-det2').checked;
+
+            const setDet3 = document.getElementById('set-temp-det3');
+            const protDet3 = document.getElementById('prot-temp-det3');
+            const enDet3 = document.getElementById('en-temp-det3');
+            if (setDet3) hwSettings.temperatures['Det3'] = parseFloat(setDet3.value) || 0;
+            if (protDet3) hwSettings.temperatures['ProtDet3'] = parseFloat(protDet3.value) || 0;
+            if (enDet3) hwSettings.temp_enables['Det3'] = enDet3.checked;
 
             try {
                 await fetch('/api/v1/hardware?deviceId=' + encodeURIComponent(deviceId), {
@@ -996,13 +1082,19 @@ export function initSettings() {
                     body: JSON.stringify(hwSettings)
                 });
                 
-                const res = await fetch('/api/control/temp', {
+                const res = await fetch('/api/control/temp?deviceId=' + encodeURIComponent(deviceId), {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ targets: hwSettings.temperatures })
+                    body: JSON.stringify({ 
+                        targets: hwSettings.temperatures,
+                        enables: hwSettings.temp_enables
+                    })
                 });
                 if (res.ok) window.showToast('温度控制指令已下发!');
-                else window.showToast('发送失败', true);
+                else {
+                    const errTxt = await res.text();
+                    window.showToast('发送失败: ' + errTxt, true);
+                }
             } catch(e) {
                 window.showToast('异常: ' + e.message, true);
             }
@@ -1012,7 +1104,7 @@ export function initSettings() {
             window.showToast('正在向设备下发查询指令...');
             try {
                 // 1. 下发 Cmd 0
-                await fetch('/api/control/temp', {
+                await fetch('/api/control/temp?deviceId=' + encodeURIComponent(deviceId), {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({control: 'query'})
@@ -1040,6 +1132,23 @@ export function initSettings() {
                         
                         if (hwSettings.temperatures['Det2'] !== undefined) document.getElementById('set-temp-det2').value = hwSettings.temperatures['Det2'];
                         if (hwSettings.temperatures['ProtDet2'] !== undefined) document.getElementById('prot-temp-det2').value = hwSettings.temperatures['ProtDet2'];
+
+                        if (hwSettings.temperatures['Det3'] !== undefined) {
+                            const setDet3 = document.getElementById('set-temp-det3');
+                            if (setDet3) setDet3.value = hwSettings.temperatures['Det3'];
+                        }
+                        if (hwSettings.temperatures['ProtDet3'] !== undefined) {
+                            const protDet3 = document.getElementById('prot-temp-det3');
+                            if (protDet3) protDet3.value = hwSettings.temperatures['ProtDet3'];
+                        }
+                    }
+                    if (hwSettings.temp_enables) {
+                        if (hwSettings.temp_enables['Inj1'] !== undefined) document.getElementById('en-temp-inj1').checked = hwSettings.temp_enables['Inj1'];
+                        if (hwSettings.temp_enables['Col'] !== undefined) document.getElementById('en-temp-col').checked = hwSettings.temp_enables['Col'];
+                        if (hwSettings.temp_enables['Det1'] !== undefined) document.getElementById('en-temp-det1').checked = hwSettings.temp_enables['Det1'];
+                        if (hwSettings.temp_enables['Inj2'] !== undefined) document.getElementById('en-temp-inj2').checked = hwSettings.temp_enables['Inj2'];
+                        if (hwSettings.temp_enables['Det2'] !== undefined) document.getElementById('en-temp-det2').checked = hwSettings.temp_enables['Det2'];
+                        if (hwSettings.temp_enables['Det3'] !== undefined) document.getElementById('en-temp-det3').checked = hwSettings.temp_enables['Det3'];
                     }
                     window.showToast('温度参数已刷新');
                 }
@@ -1048,29 +1157,20 @@ export function initSettings() {
             }
         });
 
-        document.getElementById('btn-start-temp').addEventListener('click', async () => {
+        document.getElementById('btn-toggle-temp').addEventListener('click', async (e) => {
+            const isStarting = e.target.innerText === '开始控温';
+            const action = isStarting ? 'start' : 'stop';
             try {
-                const res = await fetch('/api/v1/hardware', {
+                const res = await fetch('/api/control/temp?deviceId=' + encodeURIComponent(deviceId), {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({control: 'start'})
+                    body: JSON.stringify({control: action})
                 });
-                if (res.ok) window.showToast('已下发开始控温指令');
-                else window.showToast('指令下发失败', true);
-            } catch (e) {
-                window.showToast('异常: ' + e.message, true);
-            }
-        });
-
-        document.getElementById('btn-stop-temp').addEventListener('click', async () => {
-            try {
-                const res = await fetch('/api/v1/hardware', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({control: 'stop'})
-                });
-                if (res.ok) window.showToast('已下发关闭控温指令');
-                else window.showToast('指令下发失败', true);
+                if (res.ok) window.showToast(`已下发${isStarting ? '开始' : '关闭'}控温指令`);
+                else {
+                    const errTxt = await res.text();
+                    window.showToast('下发失败: ' + errTxt, true);
+                }
             } catch (e) {
                 window.showToast('异常: ' + e.message, true);
             }
@@ -1206,6 +1306,7 @@ export function initSettings() {
                     document.getElementById('mqtt-upload-result').checked = cfg.mqtt_upload_result !== false;
                     document.getElementById('mqtt-upload-log').checked = cfg.mqtt_upload_log !== false;
 
+                    document.getElementById('sys-driver-mode').value = cfg.driver_mode || 'legacy';
                     document.getElementById('sys-admin-pass-new').value = '';
 
                     // Check MQTT status
@@ -1284,6 +1385,7 @@ export function initSettings() {
                 mqtt_upload_status: document.getElementById('mqtt-upload-status').checked,
                 mqtt_upload_result: document.getElementById('mqtt-upload-result').checked,
                 mqtt_upload_log: document.getElementById('mqtt-upload-log').checked,
+                driver_mode: document.getElementById('sys-driver-mode').value,
                 admin_pass: document.getElementById('sys-admin-pass-new').value
             };
             try {
