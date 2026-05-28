@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"database/sql"
 	"encoding/json"
-	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -49,7 +48,7 @@ func openPersistStore(root string) (*persistStore, error) {
 	CREATE INDEX IF NOT EXISTS idx_results_device_time ON results(device_id, created_at);
 	`
 	if _, err := db.Exec(createTableSQL); err != nil {
-		log.Printf("create table failed: %v", err)
+		LogErrorf("create table failed: %v", err)
 	}
 
 	st := &persistStore{root: root, kv: map[string]string{}, db: db}
@@ -112,6 +111,13 @@ func (s *persistStore) LoadLastDeviceID() (string, bool) {
 
 func (s *persistStore) LoadSysConfig() models.SysConfig {
 	var cfg models.SysConfig
+
+	// 赋默认值，对于布尔类型在Go里默认是false，但是业务上默认是应该上传的
+	cfg.MqttUploadInfo = true
+	cfg.MqttUploadStatus = true
+	cfg.MqttUploadResult = true
+	cfg.MqttUploadLog = true
+
 	if v, ok := s.LoadKV("sys.config"); ok && v != "" {
 		_ = json.Unmarshal([]byte(v), &cfg)
 	}
@@ -214,7 +220,7 @@ func (s *persistStore) SaveResultToDB(deviceID string, traceID string, createdAt
 	query := `INSERT INTO results (trace_id, device_id, created_at, method_id, result_json) VALUES (?, ?, ?, ?, ?)`
 	_, err := s.db.Exec(query, traceID, deviceID, createdAt.UTC().Format(time.RFC3339), methodID, resultJSON)
 	if err != nil {
-		log.Printf("SaveResultToDB error: %v", err)
+		LogErrorf("SaveResultToDB error: %v", err)
 	}
 
 	// Save full run (waveform) to disk
@@ -262,7 +268,7 @@ func (s *persistStore) LoadResultsFromDB(deviceID string, from time.Time, to tim
 	}
 
 	if err != nil {
-		log.Printf("LoadResultsFromDB query error: %v", err)
+		LogErrorf("LoadResultsFromDB query error: %v", err)
 		return nil
 	}
 	defer rows.Close()
@@ -291,7 +297,7 @@ func (s *persistStore) LoadResultsFromDB(deviceID string, from time.Time, to tim
 				results = append(results, string(b))
 			}
 		} else {
-			log.Printf("LoadResultsFromDB scan error: %v", err)
+			LogErrorf("LoadResultsFromDB scan error: %v", err)
 		}
 	}
 	return results

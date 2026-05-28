@@ -259,10 +259,26 @@ export function initSettings() {
             </div>
 
             <div class="tab-content" id="tab-log">
-                <div style="display: flex; gap: 10px; height: 100%;">
-                    <textarea style="flex: 1; height: 300px; background: var(--panel); color: #fff; border: 1px solid #334155;" readonly></textarea>
-                    <textarea style="flex: 1; height: 300px; background: var(--panel); color: #fff; border: 1px solid #334155;" readonly></textarea>
-                    <textarea style="flex: 1; height: 300px; background: var(--panel); color: #fff; border: 1px solid #334155;" readonly></textarea>
+                <div style="display: flex; flex-direction: column; gap: 10px; height: 100%;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div style="display: flex; align-items: center; gap: 15px;">
+                            <h3 style="margin: 0;">系统日志</h3>
+                            <label style="color: #94a3b8; font-size: 13px; display: flex; align-items: center; gap: 4px; cursor: pointer;">
+                                <input type="checkbox" id="chk-log-debug" style="margin:0;"> 硬件通信 (DEBUG)
+                            </label>
+                            <label style="color: #38bdf8; font-size: 13px; display: flex; align-items: center; gap: 4px; cursor: pointer;">
+                                <input type="checkbox" id="chk-log-info" checked style="margin:0;"> 业务信息 (INFO)
+                            </label>
+                            <label style="color: #facc15; font-size: 13px; display: flex; align-items: center; gap: 4px; cursor: pointer;">
+                                <input type="checkbox" id="chk-log-warn" checked style="margin:0;"> 警告 (WARN)
+                            </label>
+                            <label style="color: #ff6b6b; font-size: 13px; display: flex; align-items: center; gap: 4px; cursor: pointer;">
+                                <input type="checkbox" id="chk-log-error" checked style="margin:0;"> 错误 (ERROR)
+                            </label>
+                        </div>
+                        <button class="btn" id="btn-clear-log">清空日志</button>
+                    </div>
+                    <div id="sys-log-viewer" class="hide-debug" style="flex: 1; height: 500px; background: var(--panel); border: 1px solid #334155; font-family: monospace; padding: 10px; font-size: 13px; overflow-y: auto;"></div>
                 </div>
             </div>
 
@@ -350,6 +366,40 @@ export function initSettings() {
                         <div style="display: flex; align-items: center; gap: 10px;">
                             <label style="width: 80px;">色谱IP</label>
                             <input type="text" id="daq-chrom-ip" class="input" style="flex: 1;" value="192.168.1.20">
+                        </div>
+
+                        <!-- MQTT 上传配置部分 -->
+                        <h4 style="margin: 15px 0 0 0; color: #38bdf8; border-bottom: 1px dashed #334155; padding-bottom: 5px;">MQTT 边缘网关上传</h4>
+                        
+                        <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 5px;">
+                            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                                <input type="checkbox" id="mqtt-upload-info" checked>
+                                <div>
+                                    <div style="color: #f8fafc;">上传设备基础信息 (info)</div>
+                                    <div style="font-size: 11px; color: #94a3b8;">开机时和每小时整点触发一次，节省流量</div>
+                                </div>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                                <input type="checkbox" id="mqtt-upload-status" checked>
+                                <div>
+                                    <div style="color: #f8fafc;">上传设备实时状态 (status)</div>
+                                    <div style="font-size: 11px; color: #94a3b8;">每分钟上报一次当前温度、压力等运行状态</div>
+                                </div>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                                <input type="checkbox" id="mqtt-upload-result" checked>
+                                <div>
+                                    <div style="color: #f8fafc;">上传分析结果 (result)</div>
+                                    <div style="font-size: 11px; color: #94a3b8;">核心数据，每次色谱分析完成时立即触发</div>
+                                </div>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                                <input type="checkbox" id="mqtt-upload-log" checked>
+                                <div>
+                                    <div style="color: #f8fafc;">上传系统日志 (log)</div>
+                                    <div style="font-size: 11px; color: #94a3b8;">包含系统错误、警告等关键事件记录</div>
+                                </div>
+                            </label>
                         </div>
                         <div style="margin-bottom: 10px; padding-left: 90px;">
                             <label style="color: #10b981;"><input type="checkbox" id="daq-enable" checked> 启用数采仪上传</label>
@@ -650,9 +700,79 @@ export function initSettings() {
                                 if (iEl) iEl.innerText = (parsed.epc[i].inputPsi || 0).toFixed(2);
                             }
                         }
+                    } else if (parsed.type === 'logs') {
+                        const logViewer = document.getElementById('sys-log-viewer');
+                        if (logViewer && parsed.data && parsed.data.logs) {
+                            parsed.data.logs.forEach(l => {
+                                const t = new Date(l.time * 1000).toLocaleString();
+                                const div = document.createElement('div');
+                                div.className = 'log-entry log-level-' + l.level;
+                                div.style.marginBottom = '4px';
+                                div.style.color = l.level === 'ERROR' ? '#ff6b6b' : (l.level === 'WARN' ? '#facc15' : (l.level === 'DEBUG' ? '#94a3b8' : '#38bdf8'));
+                                div.innerText = `[${t}] [${l.level}] ${l.msg}`;
+                                logViewer.prepend(div);
+                            });
+                            // Keep max 1000 logs
+                            while (logViewer.children.length > 1000) {
+                                logViewer.removeChild(logViewer.lastChild);
+                            }
+                        }
                     }
                 } catch(e) {}
             };
+
+            // Fetch initial logs
+            try {
+                const logRes = await fetch('/api/v1/logs');
+                if (logRes.ok) {
+                    const logs = await logRes.json();
+                    const logViewer = document.getElementById('sys-log-viewer');
+                    if (logViewer && logs) {
+                        // Render initial logs (array is oldest to newest, we want newest on top, so we reverse it)
+                        [...logs].reverse().forEach(l => {
+                            const t = new Date(l.time * 1000).toLocaleString();
+                            const div = document.createElement('div');
+                            div.className = 'log-entry log-level-' + l.level;
+                            div.style.marginBottom = '4px';
+                            div.style.color = l.level === 'ERROR' ? '#ff6b6b' : (l.level === 'WARN' ? '#facc15' : (l.level === 'DEBUG' ? '#94a3b8' : '#38bdf8'));
+                            div.innerText = `[${t}] [${l.level}] ${l.msg}`;
+                            logViewer.appendChild(div);
+                        });
+                    }
+                }
+            } catch (e) {}
+
+            // Setup checkboxes logic
+            const logViewer = document.getElementById('sys-log-viewer');
+            if (logViewer) {
+                const toggles = [
+                    { id: 'chk-log-debug', class: 'hide-debug' },
+                    { id: 'chk-log-info', class: 'hide-info' },
+                    { id: 'chk-log-warn', class: 'hide-warn' },
+                    { id: 'chk-log-error', class: 'hide-error' }
+                ];
+                toggles.forEach(t => {
+                    const el = document.getElementById(t.id);
+                    if (el) {
+                        el.addEventListener('change', (e) => {
+                            if (e.target.checked) {
+                                logViewer.classList.remove(t.class);
+                            } else {
+                                logViewer.classList.add(t.class);
+                            }
+                        });
+                    }
+                });
+            }
+
+            // Setup clear log button
+            const btnClearLog = document.getElementById('btn-clear-log');
+            if (btnClearLog) {
+                btnClearLog.addEventListener('click', () => {
+                    const logViewer = document.getElementById('sys-log-viewer');
+                    if (logViewer) logViewer.innerHTML = '';
+                });
+            }
 
         } catch (e) {
             console.error('Failed to init settings', e);
@@ -1080,6 +1200,12 @@ export function initSettings() {
                     document.getElementById('sys-mqtt-clientid').value = cfg.mqtt_client_id || '';
                     document.getElementById('sys-mqtt-user').value = cfg.mqtt_user || '';
                     document.getElementById('sys-mqtt-pass').value = cfg.mqtt_pass || '';
+                    
+                    document.getElementById('mqtt-upload-info').checked = cfg.mqtt_upload_info !== false; // default true
+                    document.getElementById('mqtt-upload-status').checked = cfg.mqtt_upload_status !== false;
+                    document.getElementById('mqtt-upload-result').checked = cfg.mqtt_upload_result !== false;
+                    document.getElementById('mqtt-upload-log').checked = cfg.mqtt_upload_log !== false;
+
                     document.getElementById('sys-admin-pass-new').value = '';
 
                     // Check MQTT status
@@ -1154,6 +1280,10 @@ export function initSettings() {
                 mqtt_client_id: document.getElementById('sys-mqtt-clientid').value,
                 mqtt_user: document.getElementById('sys-mqtt-user').value,
                 mqtt_pass: document.getElementById('sys-mqtt-pass').value,
+                mqtt_upload_info: document.getElementById('mqtt-upload-info').checked,
+                mqtt_upload_status: document.getElementById('mqtt-upload-status').checked,
+                mqtt_upload_result: document.getElementById('mqtt-upload-result').checked,
+                mqtt_upload_log: document.getElementById('mqtt-upload-log').checked,
                 admin_pass: document.getElementById('sys-admin-pass-new').value
             };
             try {

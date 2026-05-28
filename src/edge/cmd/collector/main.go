@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"math"
 	"net"
 	"net/http"
@@ -553,6 +552,26 @@ func main() {
 	method := loadMethod()
 	nmhcStore.Load()
 
+	// Forward batched logs to SSE Hub (for future MQTT or other uses)
+	go func() {
+		for batch := range logHubChan {
+			// For now, doing nothing or keep it for future MQTT logic
+			_ = batch
+		}
+	}()
+
+	// Real-time logs to SSE Hub
+	go func() {
+		for entry := range uiLogChan {
+			hub.Publish("SYSTEM", map[string]interface{}{
+				"type": "logs",
+				"data": map[string]interface{}{
+					"logs": []LogEntry{entry},
+				},
+			})
+		}
+	}()
+
 	// Initialize Modbus Server
 	mbDeviceID := os.Getenv("EDGE_MODBUS_DEVICE_ID")
 	if mbDeviceID == "" {
@@ -562,13 +581,13 @@ func main() {
 	if srv, err := modbusslave.NewServer(1502, mbDeviceID, mbRTUPort); err == nil {
 		mbSlave = srv
 		go func() {
-			log.Printf("Starting Modbus TCP (1502) and RTU (%s)", mbRTUPort)
+			LogInfof("Starting Modbus TCP (1502) and RTU (%s)", mbRTUPort)
 			if err := mbSlave.Start(); err != nil {
-				log.Printf("Modbus slave failed: %v", err)
+				LogErrorf("Modbus slave failed: %v", err)
 			}
 		}()
 	} else {
-		log.Printf("Failed to init Modbus slave: %v", err)
+		LogErrorf("Failed to init Modbus slave: %v", err)
 	}
 
 	if ps, err := openPersistStore(filepath.Join(".run", "db")); err == nil {
@@ -587,7 +606,7 @@ func main() {
 
 		startPersistence(states)
 	} else {
-		log.Printf("persist disabled: %v", err)
+		LogWarnf("persist disabled: %v", err)
 	}
 	startEngineScheduler(hub, states, method)
 
@@ -621,6 +640,16 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			"pidFile":   filepath.Join(".run", "collector.pid"),
 		})
 	})
+	mux.HandleFunc("/api/v1/logs", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		logs := GetRecentLogs()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(logs)
+	})
+
 	mux.HandleFunc("/api/v1/health", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -702,6 +731,10 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			cfg.MqttUser = input.MqttUser
 			cfg.MqttPass = input.MqttPass
 			cfg.MqttEnabled = input.MqttEnabled
+			cfg.MqttUploadInfo = input.MqttUploadInfo
+			cfg.MqttUploadStatus = input.MqttUploadStatus
+			cfg.MqttUploadResult = input.MqttUploadResult
+			cfg.MqttUploadLog = input.MqttUploadLog
 
 			pstore.SaveSysConfig(cfg)
 
@@ -1934,7 +1967,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 		host = "127.0.0.1"
 	}
 	addr := host + ":" + strconv.Itoa(port)
-	log.Printf("collector http listening on %s", addr)
+	LogInfof("collector http listening on %s", addr)
 	return http.ListenAndServe(addr, mux)
 }
 
@@ -1943,7 +1976,7 @@ func serveTCP(port int, hub *realtime.Hub, states *sync.Map, cfg chromsend143.Co
 	if err != nil {
 		return fmt.Errorf("tcp listen %d failed: %w", port, err)
 	}
-	log.Printf("collector tcp listening on 0.0.0.0:%d", port)
+	LogInfof("collector tcp listening on 0.0.0.0:%d", port)
 	for {
 		c, err := ln.Accept()
 		if err != nil {
@@ -2033,7 +2066,7 @@ func processFrame(c net.Conn, f gckc.Frame, hub *realtime.Hub, states *sync.Map,
 	if isNewConn {
 		// Auto-sync hardware parameters upon connection
 		go func(deviceId string) {
-			log.Printf("Device %s connected, auto-syncing hardware parameters...", deviceId)
+			LogInfof("Device %s connected, auto-syncing hardware parameters...", deviceId)
 			_ = sendCmd(st, deviceId, 0, nil)
 			time.Sleep(100 * time.Millisecond)
 			_ = sendCmd(st, deviceId, 2, nil)
@@ -2051,7 +2084,7 @@ func processFrame(c net.Conn, f gckc.Frame, hub *realtime.Hub, states *sync.Map,
 	hub.Publish(f.DeviceID, event{Type: "device", DeviceID: f.DeviceID, At: time.Now()})
 
 	if f.Cmd != 143 && f.Cmd != 159 && f.Cmd != 128 {
-		log.Printf("Received Cmd %d, Payload len: %d, Payload: %X", f.Cmd, len(f.Payload), f.Payload)
+		LogDebugf("Received Cmd %d, Payload len: %d, Payload: %X", f.Cmd, len(f.Payload), f.Payload)
 	}
 
 	switch f.Cmd {
@@ -2144,7 +2177,7 @@ func processFrame(c net.Conn, f gckc.Frame, hub *realtime.Hub, states *sync.Map,
 		}
 	case 159:
 		// 调试输出159报文全部内容
-		log.Printf("Cmd 159 Payload: %X", f.Payload)
+		LogDebugf("Cmd 159 Payload: %X", f.Payload)
 		if items, ok := parseEpc159(f.Payload); ok {
 			e := telemetryEvent{Type: "telemetry", DeviceID: f.DeviceID, At: time.Now().UTC()}
 			epc := make([]telemetryEpc, 0, len(items))
@@ -2331,10 +2364,10 @@ func finalizeSession(hub *realtime.Hub, st *deviceState, deviceID string, ch int
 	res, err := analyzer.Analyze(trace, activeMethod, "dev", time.Now())
 	e := resultEvent{Type: "result", DeviceID: deviceID, Channel: ch, SessionToken: tok, At: time.Now(), Trace: trace, Method: activeMethod}
 	if err != nil {
-		log.Printf("Analyze error 1: %v", err)
+		LogErrorf("Analyze error 1: %v", err)
 		e.Error = err.Error()
 	} else {
-		log.Printf("Analyze success 1, saving to DB...")
+		LogInfof("Analyze success 1, saving to DB...")
 		e.Result = res
 		st.mu.Lock()
 		if st.lastResultByCh == nil {
@@ -2411,10 +2444,10 @@ func publishSessionResultSnapshot(hub *realtime.Hub, st *deviceState, deviceID s
 	e := resultEvent{Type: "result", DeviceID: deviceID, Channel: ch, SessionToken: tok, At: time.Now().UTC(), Trace: trace, Method: activeMethod}
 	res, err := analyzer.Analyze(trace, activeMethod, deviceID, time.Now())
 	if err != nil {
-		log.Printf("Analyze error 2: %v", err)
+		LogErrorf("Analyze error 2: %v", err)
 		e.Error = err.Error()
 	} else {
-		log.Printf("Analyze success 2, saving to DB...")
+		LogInfof("Analyze success 2, saving to DB...")
 		e.Result = res
 		st.mu.Lock()
 		if st.lastResultByCh == nil {
@@ -2856,7 +2889,7 @@ var indexHTML = `<!doctype html>
 <body>
   <div class="shell">
     <header class="topbar">
-      <div class="brand">鍦ㄧ嚎鐩戞祴 <span style="font-size:12px;opacity:0.6;margin-left:10px">v0.3.8</span></div>
+      <div class="brand">鍦ㄧ嚎鐩戞祴 <span style="font-size:12px;opacity:0.6;margin-left:10px">v0.3.10</span></div>
       <nav class="tabs" id="tabs">
         <button class="tab active" data-tab="overview"><span class="tabIcon">姒?/span><span class="tabText">姒傝</span></button>
         <button class="tab" data-tab="curve"><span class="tabIcon">鏇?/span><span class="tabText">鏇茬嚎</span></button>

@@ -13,6 +13,12 @@ body { margin: 0; font-family: system-ui, sans-serif; background: var(--bg); col
 .view-panel { display: none; height: 100%; }
 .view-panel.active { display: flex; flex-direction: column; }
 
+/* Log Filters */
+#sys-log-viewer.hide-debug .log-level-DEBUG { display: none !important; }
+#sys-log-viewer.hide-info .log-level-INFO { display: none !important; }
+#sys-log-viewer.hide-warn .log-level-WARN { display: none !important; }
+#sys-log-viewer.hide-error .log-level-ERROR { display: none !important; }
+
 .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem; }
 .card { background: var(--panel); padding: 1.5rem; border-radius: 8px; border: 1px solid #334155; text-align: center; }
 .card-title { font-size: 14px; color: #94a3b8; margin-bottom: 0.5rem; }

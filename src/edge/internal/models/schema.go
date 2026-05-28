@@ -89,11 +89,15 @@ type UploadConfig struct {
 
 // SysConfig 系统高级配置 (如 MQTT，不依赖环境变量)
 type SysConfig struct {
-	MqttBroker   string `json:"mqtt_broker"`
-	MqttTopic    string `json:"mqtt_topic"`
-	MqttClientID string `json:"mqtt_client_id"`
-	MqttUser     string `json:"mqtt_user"`
-	MqttPass     string `json:"mqtt_pass"`
-	MqttEnabled  bool   `json:"mqtt_enabled"`
-	AdminPass    string `json:"admin_pass"` // 菜单加密密码
+	MqttBroker       string `json:"mqtt_broker"`
+	MqttTopic        string `json:"mqtt_topic"`
+	MqttClientID     string `json:"mqtt_client_id"`
+	MqttUser         string `json:"mqtt_user"`
+	MqttPass         string `json:"mqtt_pass"`
+	MqttEnabled      bool   `json:"mqtt_enabled"`
+	MqttUploadInfo   bool   `json:"mqtt_upload_info"`   // 是否上传基础信息
+	MqttUploadStatus bool   `json:"mqtt_upload_status"` // 是否上传实时状态
+	MqttUploadResult bool   `json:"mqtt_upload_result"` // 是否上传分析结果
+	MqttUploadLog    bool   `json:"mqtt_upload_log"`    // 是否上传系统日志
+	AdminPass        string `json:"admin_pass"`         // 菜单加密密码
 }

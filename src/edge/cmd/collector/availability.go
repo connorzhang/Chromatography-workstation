@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -15,7 +14,7 @@ import (
 
 func alertf(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
-	log.Print(msg)
+	LogWarnf(msg)
 	_ = os.MkdirAll(filepath.Join(".run"), 0o755)
 	f, err := os.OpenFile(filepath.Join(".run", "alerts.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
@@ -56,4 +55,3 @@ func runHTTPForever(port int, hub *realtime.Hub, states *sync.Map, allowControl 
 		}
 	}
 }
-

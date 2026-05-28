@@ -1,9 +1,9 @@
-import { initDashboard } from './views/dashboard.js?v=1.1';
-import { initLiveChromatogram } from './views/live.js?v=1.1';
-import { initMethod } from './views/method.js?v=1.1';
-import { initSettings } from './views/settings.js?v=1.1';
-import { initProcess } from './views/process.js?v=1.1';
-import { initReport } from './views/report.js?v=1.1';
+import { initDashboard } from './views/dashboard.js?v=0.3.10';
+import { initLiveChromatogram } from './views/live.js?v=0.3.10';
+import { initMethod } from './views/method.js?v=0.3.10';
+import { initSettings } from './views/settings.js?v=0.3.10';
+import { initProcess } from './views/process.js?v=0.3.10';
+import { initReport } from './views/report.js?v=0.3.10';
 
 document.addEventListener('DOMContentLoaded', () => {
     const navItems = document.querySelectorAll('.nav-item');
