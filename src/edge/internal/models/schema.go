@@ -61,6 +61,7 @@ type EventRow struct {
 // HardwareConfig 仪器控制参数，保存当前的控温、点火及气路设定值
 type HardwareConfig struct {
 	Temperatures map[string]float64 `json:"temperatures"` // key: "Inj1", "Col", "Det1", "Valve", "Inj2", "Det2", "Protect"
+	TempEnables  map[string]bool    `json:"temp_enables"` // key: "Inj1", "Col", "Det1", "Inj2", "Det2", "Det3"
 	EPCs         map[string]float64 `json:"epcs"`         // key: "Carrier1", "H2_1", "Air1", "Aux", "Carrier2", "H2_2", "Air2"
 	Ignite       bool               `json:"ignite"`       // FID 点火状态
 	IgniteThreshold1 float64        `json:"igniteThreshold1"`
@@ -100,4 +101,5 @@ type SysConfig struct {
 	MqttUploadResult bool   `json:"mqtt_upload_result"` // 是否上传分析结果
 	MqttUploadLog    bool   `json:"mqtt_upload_log"`    // 是否上传系统日志
 	AdminPass        string `json:"admin_pass"`         // 菜单加密密码
+	DriverMode       string `json:"driver_mode"`        // 驱动模式: "legacy" 或 "modular"
 }

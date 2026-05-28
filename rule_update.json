@@ -1,0 +1,9 @@
+﻿{
+    "actions":  [
+                    "http:elkrrynet_WH_CHROM"
+                ],
+    "sql":  "SELECT clientid, topic, json_decode(payload) as payload, timestamp FROM \"vocs/#\"",
+    "name":  "elkrrynet_WH_CHROM_Rule",
+    "enable":  true,
+    "description":  "Forward VOCs topics to peaiotchrom ES index"
+}

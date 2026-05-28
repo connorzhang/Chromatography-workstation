@@ -12,7 +12,7 @@ import (
 
 type MqttClient struct {
 	client mqtt.Client
-	topic  string
+	cfg    models.SysConfig
 }
 
 func NewMqttClient(cfg models.SysConfig) *MqttClient {
@@ -22,10 +22,6 @@ func NewMqttClient(cfg models.SysConfig) *MqttClient {
 	broker := cfg.MqttBroker
 	if broker == "" {
 		broker = "tcp://127.0.0.1:1883"
-	}
-	topic := cfg.MqttTopic
-	if topic == "" {
-		topic = "vocs/telemetry/results"
 	}
 	clientID := cfg.MqttClientID
 	if clientID == "" {
@@ -61,7 +57,7 @@ func NewMqttClient(cfg models.SysConfig) *MqttClient {
 
 	return &MqttClient{
 		client: c,
-		topic:  topic,
+		cfg:    cfg,
 	}
 }
 
@@ -87,39 +83,49 @@ func (m *MqttClient) TestPublish() error {
 	}
 	payload := map[string]any{
 		"event": "test_connection",
-		"time":  time.Now().Format(time.RFC3339),
+		"time":  time.Now().Unix(),
 	}
 	b, _ := json.Marshal(payload)
-	token := m.client.Publish(m.topic, 1, false, b)
+	topic := "vocs/device/test/info"
+	token := m.client.Publish(topic, 1, false, b)
 	if !token.WaitTimeout(3 * time.Second) {
 		return fmt.Errorf("发布超时")
 	}
 	return token.Error()
 }
 
-// PublishResult 上报精简增量的结果到 MQTT 以供 Elasticsearch 溯源 (要求：轻量、不固定组份)
-func (m *MqttClient) PublishResult(deviceID string, at time.Time, traceID string, pollutants map[string]float64) {
-	if m == nil || !m.client.IsConnected() {
+func (m *MqttClient) PublishInfo(mn string, payload map[string]any) {
+	if m == nil || !m.client.IsConnected() || !m.cfg.MqttUploadInfo {
 		return
 	}
-	
-	payload := map[string]any{
-		"@timestamp": at.UTC().Format(time.RFC3339),
-		"device_id":  deviceID,
-		"trace_id":   traceID,
-		"results":    pollutants,
-	}
-	
-	b, err := json.Marshal(payload)
-	if err != nil {
+	topic := fmt.Sprintf("vocs/device/%s/info", mn)
+	b, _ := json.Marshal(payload)
+	m.client.Publish(topic, 1, false, b)
+}
+
+func (m *MqttClient) PublishStatus(mn string, payload map[string]any) {
+	if m == nil || !m.client.IsConnected() || !m.cfg.MqttUploadStatus {
 		return
 	}
-	
-	token := m.client.Publish(m.topic, 1, false, b)
-	go func() {
-		_ = token.Wait()
-		if token.Error() != nil {
-			log.Printf("MQTT publish failed: %v", token.Error())
-		}
-	}()
+	topic := fmt.Sprintf("vocs/device/%s/status", mn)
+	b, _ := json.Marshal(payload)
+	m.client.Publish(topic, 1, false, b)
+}
+
+func (m *MqttClient) PublishResult(mn string, payload map[string]any) {
+	if m == nil || !m.client.IsConnected() || !m.cfg.MqttUploadResult {
+		return
+	}
+	topic := fmt.Sprintf("vocs/device/%s/result", mn)
+	b, _ := json.Marshal(payload)
+	m.client.Publish(topic, 1, false, b)
+}
+
+func (m *MqttClient) PublishLog(mn string, payload map[string]any) {
+	if m == nil || !m.client.IsConnected() || !m.cfg.MqttUploadLog {
+		return
+	}
+	topic := fmt.Sprintf("vocs/device/%s/log", mn)
+	b, _ := json.Marshal(payload)
+	m.client.Publish(topic, 1, false, b)
 }
