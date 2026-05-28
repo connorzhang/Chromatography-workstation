@@ -51,6 +51,7 @@ type deviceState struct {
 	last143        time.Time
 	sessions       map[int]*runSession
 	lastResultByCh map[int]lastResult
+	synced         bool
 }
 
 type lastResult struct {
@@ -2015,6 +2016,7 @@ func processFrame(c net.Conn, f gckc.Frame, hub *realtime.Hub, states *sync.Map,
 	}
 	st := getState(states, f.DeviceID)
 	st.mu.Lock()
+	isNewConn := st.conn != c || !st.synced
 	st.lastSeen = time.Now()
 	st.lastCmd = f.Cmd
 	if st.cmdCnt == nil {
@@ -2022,10 +2024,29 @@ func processFrame(c net.Conn, f gckc.Frame, hub *realtime.Hub, states *sync.Map,
 	}
 	st.cmdCnt[f.Cmd]++
 	st.conn = c
+	st.synced = true
 	if st.sessions == nil {
 		st.sessions = map[int]*runSession{}
 	}
 	st.mu.Unlock()
+
+	if isNewConn {
+		// Auto-sync hardware parameters upon connection
+		go func(deviceId string) {
+			log.Printf("Device %s connected, auto-syncing hardware parameters...", deviceId)
+			_ = sendCmd(st, deviceId, 0, nil)
+			time.Sleep(100 * time.Millisecond)
+			_ = sendCmd(st, deviceId, 2, nil)
+			time.Sleep(100 * time.Millisecond)
+			_ = sendCmd(st, deviceId, 100, nil)
+			time.Sleep(100 * time.Millisecond)
+			_ = sendCmd(st, deviceId, 48, nil)
+			time.Sleep(100 * time.Millisecond)
+			_ = sendCmd(st, deviceId, 250, nil)
+			time.Sleep(100 * time.Millisecond)
+			_ = sendCmd(st, deviceId, 4, nil)
+		}(f.DeviceID)
+	}
 
 	hub.Publish(f.DeviceID, event{Type: "device", DeviceID: f.DeviceID, At: time.Now()})
 
@@ -2835,7 +2856,7 @@ var indexHTML = `<!doctype html>
 <body>
   <div class="shell">
     <header class="topbar">
-      <div class="brand">鍦ㄧ嚎鐩戞祴 <span style="font-size:12px;opacity:0.6;margin-left:10px">v0.3.7</span></div>
+      <div class="brand">鍦ㄧ嚎鐩戞祴 <span style="font-size:12px;opacity:0.6;margin-left:10px">v0.3.8</span></div>
       <nav class="tabs" id="tabs">
         <button class="tab active" data-tab="overview"><span class="tabIcon">姒?/span><span class="tabText">姒傝</span></button>
         <button class="tab" data-tab="curve"><span class="tabIcon">鏇?/span><span class="tabText">鏇茬嚎</span></button>

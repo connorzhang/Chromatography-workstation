@@ -428,18 +428,18 @@ export function initSettings() {
             }
 
             // Load UI Settings (Time settings)
-            const uiRes = await fetch('/api/v1/ui?deviceId=' + encodeURIComponent(deviceId));
-            if (uiRes.ok) {
-                uiSettings = await uiRes.json();
-                // if (uiSettings.acqMin !== undefined) document.getElementById('set-time-acq').value = uiSettings.acqMin;
-                if (hwSettings.cycleInterval !== undefined) document.getElementById('set-time-cycle').value = hwSettings.cycleInterval;
-                if (hwSettings.cycleCount !== undefined) document.getElementById('set-time-cycle-max').value = hwSettings.cycleCount;
-            }
+              const uiRes = await fetch('/api/v1/ui?deviceId=' + encodeURIComponent(deviceId));
+              if (uiRes.ok) {
+                  uiSettings = await uiRes.json();
+              }
 
-            // Load Hardware Settings
-            const hwRes = await fetch('/api/v1/hardware?deviceId=' + encodeURIComponent(deviceId));
-            if (hwRes.ok) {
-                hwSettings = await hwRes.json();
+              // Load Hardware Settings
+              const hwRes = await fetch('/api/v1/hardware?deviceId=' + encodeURIComponent(deviceId));
+              if (hwRes.ok) {
+                  hwSettings = await hwRes.json();
+                  
+                  if (hwSettings.cycleInterval !== undefined) document.getElementById('set-time-cycle').value = hwSettings.cycleInterval;
+                  if (hwSettings.cycleCount !== undefined) document.getElementById('set-time-cycle-max').value = hwSettings.cycleCount;
                 
                 // Populate Events
                   if (hwSettings.events && hwSettings.events.length > 0) {
@@ -892,7 +892,7 @@ export function initSettings() {
             window.showToast('正在向设备下发查询指令...');
             try {
                 // 1. 下发 Cmd 0
-                await fetch('/api/v1/hardware', {
+                await fetch('/api/control/temp', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({control: 'query'})
