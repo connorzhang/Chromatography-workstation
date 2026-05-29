@@ -34,6 +34,6 @@ func main() {
 	}
 	defer conn.Close()
 	session, _ := conn.NewSession()
-	out, _ := session.CombinedOutput("tail -n 100 /opt/edge-collector/edge.log")
+	out, _ := session.CombinedOutput("tail -n 500 /opt/edge-collector/edge.log")
 	fmt.Println(string(out))
 }

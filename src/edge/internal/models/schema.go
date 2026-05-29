@@ -100,6 +100,9 @@ type SysConfig struct {
 	MqttUploadStatus bool   `json:"mqtt_upload_status"` // 是否上传实时状态
 	MqttUploadResult bool   `json:"mqtt_upload_result"` // 是否上传分析结果
 	MqttUploadLog    bool   `json:"mqtt_upload_log"`    // 是否上传系统日志
-	AdminPass        string `json:"admin_pass"`         // 菜单加密密码
-	DriverMode       string `json:"driver_mode"`        // 驱动模式: "legacy" 或 "modular"
+	AdminPass           string `json:"admin_pass"`            // 菜单加密密码
+	DriverMode          string `json:"driver_mode"`           // 驱动模式: "legacy" 或 "modular"
+	ModbusServerPort    int    `json:"modbus_server_port"`    // Modbus TCP Server 端口 (默认 1502)
+	ModbusServerAddress string `json:"modbus_server_address"` // Modbus Server 设备地址标识
+	ModbusUploadLog     bool   `json:"modbus_upload_log"`     // 是否将日志上传至 Modbus
 }
