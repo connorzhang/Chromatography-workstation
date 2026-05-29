@@ -35,6 +35,19 @@ func init() {
 // PushLog is called by any component to add a log
 func PushLog(level, msg string) {
 	log.Printf("[%s] %s", level, msg)
+
+	if mbSlave != nil && level != "DEBUG" {
+		if pstore != nil {
+			cfg := pstore.LoadSysConfig()
+			if cfg.ModbusUploadLog {
+				mbSlave.PushLog(fmt.Sprintf("[%s] %s", level, msg))
+			}
+		} else {
+			// pstore 还没初始化好时，默认按开启处理
+			mbSlave.PushLog(fmt.Sprintf("[%s] %s", level, msg))
+		}
+	}
+
 	logMu.Lock()
 	defer logMu.Unlock()
 	entry := LogEntry{

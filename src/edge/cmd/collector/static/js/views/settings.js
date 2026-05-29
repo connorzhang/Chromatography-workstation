@@ -384,6 +384,27 @@ export function initSettings() {
                             <input type="text" id="daq-chrom-ip" class="input" style="flex: 1;" value="192.168.1.20">
                         </div>
 
+                        <!-- Modbus TCP Server 配置部分 -->
+                        <h4 style="margin: 15px 0 0 0; color: #38bdf8; border-bottom: 1px dashed #334155; padding-bottom: 5px;">Modbus TCP Server</h4>
+                        
+                        <div style="display: flex; align-items: center; gap: 10px; margin-top: 10px;">
+                            <label style="width: 80px;">服务端口</label>
+                            <input type="number" id="modbus-server-port" class="input" style="flex: 1;" value="1502">
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <label style="width: 80px;">设备标识</label>
+                            <input type="text" id="modbus-server-addr" class="input" style="flex: 1;" value="1">
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 10px; margin-top: 10px;">
+                            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                                <input type="checkbox" id="modbus-upload-log" checked>
+                                <div>
+                                    <div style="color: #f8fafc;">上传日志 (Modbus 700)</div>
+                                    <div style="font-size: 11px; color: #94a3b8;">控制是否将INFO及以上级别的系统日志推送到 Modbus 队列</div>
+                                </div>
+                            </label>
+                        </div>
+
                         <!-- MQTT 上传配置部分 -->
                         <h4 style="margin: 15px 0 0 0; color: #38bdf8; border-bottom: 1px dashed #334155; padding-bottom: 5px;">MQTT 边缘网关上传</h4>
                         
@@ -1308,6 +1329,10 @@ export function initSettings() {
 
                     document.getElementById('sys-driver-mode').value = cfg.driver_mode || 'legacy';
                     document.getElementById('sys-admin-pass-new').value = '';
+                    
+                    document.getElementById('modbus-server-port').value = cfg.modbus_server_port || 1502;
+                    document.getElementById('modbus-server-addr').value = cfg.modbus_server_address || '1';
+                    document.getElementById('modbus-upload-log').checked = cfg.modbus_upload_log !== false;
 
                     // Check MQTT status
                     fetch('/api/sysconfig/mqtt_test').then(r => r.json()).then(st => {
@@ -1386,7 +1411,10 @@ export function initSettings() {
                 mqtt_upload_result: document.getElementById('mqtt-upload-result').checked,
                 mqtt_upload_log: document.getElementById('mqtt-upload-log').checked,
                 driver_mode: document.getElementById('sys-driver-mode').value,
-                admin_pass: document.getElementById('sys-admin-pass-new').value
+                admin_pass: document.getElementById('sys-admin-pass-new').value,
+                modbus_server_port: parseInt(document.getElementById('modbus-server-port').value) || 1502,
+                modbus_server_address: document.getElementById('modbus-server-addr').value,
+                modbus_upload_log: document.getElementById('modbus-upload-log').checked
             };
             try {
                 const res = await fetch('/api/sysconfig', {

@@ -117,6 +117,7 @@ func (s *persistStore) LoadSysConfig() models.SysConfig {
 	cfg.MqttUploadStatus = true
 	cfg.MqttUploadResult = true
 	cfg.MqttUploadLog = true
+	cfg.ModbusUploadLog = true
 
 	if v, ok := s.LoadKV("sys.config"); ok && v != "" {
 		_ = json.Unmarshal([]byte(v), &cfg)
@@ -130,6 +131,12 @@ func (s *persistStore) LoadSysConfig() models.SysConfig {
 	}
 	if cfg.AdminPass == "" {
 		cfg.AdminPass = "123456" // 默认密码
+	}
+	if cfg.ModbusServerPort == 0 {
+		cfg.ModbusServerPort = 1502 // 默认端口 1502
+	}
+	if cfg.ModbusServerAddress == "" {
+		cfg.ModbusServerAddress = "1" // 默认设备地址 1 (不过当前系统里我们用设备ID或者标识来初始化)
 	}
 	return cfg
 }

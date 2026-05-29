@@ -83,10 +83,17 @@ export function initDebug() {
     const channelsContainer = document.getElementById('modbus-channels-container');
     for (let i = 1; i <= 8; i++) {
         channelsContainer.innerHTML += `
-            <div style="border: 1px solid #334155; padding: 15px; border-radius: 6px; background: #0f172a;">
+            <div style="border: 1px solid #334155; padding: 15px; border-radius: 6px; background: #0f172a; position: relative;">
                 <div style="font-weight: bold; margin-bottom: 12px; color: var(--accent); border-bottom: 1px dashed #334155; padding-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
                     <span>CH ${i}</span>
                     <span id="modbus-ch${i}-status" style="font-size: 12px; font-weight: normal; color: #94a3b8;">未知</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <span style="color: #94a3b8; font-size: 14px;">当前模式:</span>
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <span id="modbus-ch${i}-mode-text" style="font-size: 13px; font-weight: bold; color: var(--text);">--</span>
+                        <button class="btn btn-mode-toggle" data-ch="${i}" style="padding: 2px 8px; font-size: 11px; background: #334155;">切换</button>
+                    </div>
                 </div>
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                     <span style="color: #94a3b8; font-size: 14px;">设定温度:</span>
@@ -186,6 +193,31 @@ export function initDebug() {
         });
     });
 
+    document.querySelectorAll('.btn-mode-toggle').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            const ch = parseInt(e.target.getAttribute('data-ch'));
+            const currentModeText = document.getElementById(`modbus-ch${ch}-mode-text`).innerText;
+            const targetMode = currentModeText === 'IO模式' ? 0 : 1; // Toggle 0 and 1
+            
+            try {
+                const res = await fetch('/api/v1/modbus_temp/set_mode', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ channel: ch, mode: targetMode })
+                });
+                if (res.ok) {
+                    window.showToast(`CH${ch} 模式切换指令下发成功`);
+                    pollModbusState();
+                } else {
+                    const data = await res.json();
+                    window.showToast('模式切换失败: ' + data.error, true);
+                }
+            } catch (err) {
+                window.showToast('模式切换请求异常', true);
+            }
+        });
+    });
+
     async function pollModbusState() {
         try {
             const res = await fetch('/api/v1/modbus_temp/state');
@@ -203,6 +235,15 @@ export function initDebug() {
                 for (let i = 0; i < 8; i++) {
                     document.getElementById(`modbus-ch${i+1}-set`).innerText = data.set_temps[i];
                     
+                    const modeElem = document.getElementById(`modbus-ch${i+1}-mode-text`);
+                    if (data.modes && data.modes[i] === 1) {
+                        modeElem.innerText = 'IO模式';
+                        modeElem.style.color = '#eab308'; // yellow-500
+                    } else {
+                        modeElem.innerText = '温控模式';
+                        modeElem.style.color = '#38bdf8'; // emerald-400
+                    }
+
                     const rtElem = document.getElementById(`modbus-ch${i+1}-rt`);
                     const statusElem = document.getElementById(`modbus-ch${i+1}-status`);
                     
@@ -230,6 +271,8 @@ export function initDebug() {
         for (let i = 1; i <= 8; i++) {
             document.getElementById(`modbus-ch${i}-set`).innerText = '--';
             document.getElementById(`modbus-ch${i}-rt`).innerText = '--';
+            document.getElementById(`modbus-ch${i}-mode-text`).innerText = '--';
+            document.getElementById(`modbus-ch${i}-mode-text`).style.color = 'var(--text)';
             document.getElementById(`modbus-ch${i}-rt`).style.color = 'var(--text)';
             const statusElem = document.getElementById(`modbus-ch${i}-status`);
             statusElem.innerText = '未知';

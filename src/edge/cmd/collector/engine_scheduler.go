@@ -52,8 +52,6 @@ func schedulerTick(hub *realtime.Hub, states *sync.Map, method v1.Method) {
 			// 1. Check if we need to stop acquisition / generate results
 			if !snapshotDone && timeSinceStart >= acqDur {
 				// AcqMin reached: perform snapshot and result calculation
-				_, _ = publishSessionResultSnapshot(hub, st, deviceID, ch, method)
-				
 				// We no longer send STOP (245) or START (22) from the local scheduler 
 				// if we are in Loop mode. The hardware's Cycle Interval will handle the auto-cycle!
 				// We finalize locally to save the result. The hardware will send Cmd 150 when the next cycle begins.

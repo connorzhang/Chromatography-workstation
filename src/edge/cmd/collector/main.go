@@ -32,6 +32,8 @@ import (
 //go:embed static/*
 var staticFS embed.FS
 
+const AppVersion = "v0.3.26"
+
 var startedAt = time.Now().UTC()
 
 var mbSlave *modbusslave.Server
@@ -69,9 +71,9 @@ type runSession struct {
 	lastSample   float64
 }
 
-func newRunSession() *runSession {
+func newRunSession(active bool) *runSession {
 	n := atomic.AddUint64(&runSessionSeq, 1)
-	return &runSession{token: fmt.Sprintf("%d-%d", time.Now().UnixNano(), n), active: true, startedAt: time.Now()}
+	return &runSession{token: fmt.Sprintf("%d-%d", time.Now().UnixNano(), n), active: active, startedAt: time.Now()}
 }
 
 type event struct {
@@ -601,24 +603,6 @@ func main() {
 		}
 	}()
 
-	// Initialize Modbus Server
-	mbDeviceID := os.Getenv("EDGE_MODBUS_DEVICE_ID")
-	if mbDeviceID == "" {
-		mbDeviceID = "69000000001ABCDEFG123456"
-	}
-	mbRTUPort := os.Getenv("EDGE_MODBUS_RTU_PORT") // e.g. COM1 or /dev/ttyUSB0
-	if srv, err := modbusslave.NewServer(1502, mbDeviceID, mbRTUPort); err == nil {
-		mbSlave = srv
-		go func() {
-			LogInfof("Starting Modbus TCP (1502) and RTU (%s)", mbRTUPort)
-			if err := mbSlave.Start(); err != nil {
-				LogErrorf("Modbus slave failed: %v", err)
-			}
-		}()
-	} else {
-		LogErrorf("Failed to init Modbus slave: %v", err)
-	}
-
 	if ps, err := openPersistStore(filepath.Join(".run", "db")); err == nil {
 		pstore = ps
 		if v, ok := ps.LoadLastDeviceID(); ok {
@@ -631,6 +615,35 @@ func main() {
 		sysCfg := ps.LoadSysConfig()
 		if sysCfg.MqttEnabled {
 			mqttClient = telemetry.NewMqttClient(sysCfg)
+		}
+
+		// Initialize Modbus Server
+		mbDeviceID := os.Getenv("EDGE_MODBUS_DEVICE_ID")
+		if mbDeviceID == "" {
+			mbDeviceID = sysCfg.ModbusServerAddress
+			if mbDeviceID == "" {
+				mbDeviceID = "1"
+			}
+		}
+		mbPort := sysCfg.ModbusServerPort
+		if mbPort == 0 {
+			mbPort = 1502
+		}
+		mbRTUPort := os.Getenv("EDGE_MODBUS_RTU_PORT") // e.g. COM1 or /dev/ttyUSB0
+		if srv, err := modbusslave.NewServer(mbPort, mbDeviceID, mbRTUPort); err == nil {
+			mbSlave = srv
+			// 初始化时同步设备编码到 Modbus 801
+			if upCfg, ok := ps.LoadUploadConfig(uiLastDevice); ok && upCfg.DeviceNo != "" {
+				mbSlave.SetDeviceNo(upCfg.DeviceNo)
+			}
+			go func() {
+				LogInfof("Starting Modbus TCP (%d) and RTU (%s)", mbPort, mbRTUPort)
+				if err := mbSlave.Start(); err != nil {
+					LogErrorf("Modbus slave failed: %v", err)
+				}
+			}()
+		} else {
+			LogErrorf("Failed to init Modbus slave: %v", err)
 		}
 
 		startPersistence(states)
@@ -663,6 +676,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"pid":       os.Getpid(),
+			"version":   AppVersion,
 			"startedAt": startedAt.Format(time.RFC3339),
 			"httpPort":  port,
 			"tcpPorts":  []int{25001, 8000},
@@ -931,6 +945,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 				return
 			}
+			LogInfof("开始控温")
 			writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 			return
 		} else if in.Control == "stop" {
@@ -938,6 +953,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 				return
 			}
+			LogInfof("停止控温")
 			writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 			return
 		} else if in.Control == "query" {
@@ -1556,6 +1572,9 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 				return
 			}
 			pstore.SaveUploadConfig(deviceID, cfg)
+			if mbSlave != nil {
+				mbSlave.SetDeviceNo(cfg.DeviceNo)
+			}
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 			return
 		default:
@@ -2034,8 +2053,11 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			http.Error(w, "index.html not found", http.StatusInternalServerError)
 			return
 		}
+
+		htmlStr := strings.ReplaceAll(string(content), "{{.AppVersion}}", AppVersion)
+
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write(content)
+		w.Write([]byte(htmlStr))
 	})
 	host := strings.TrimSpace(os.Getenv("EDGE_HTTP_BIND"))
 	if host == "" {
@@ -2182,6 +2204,18 @@ func processFrame(c net.Conn, f gckc.Frame, hub *realtime.Hub, states *sync.Map,
 			te.DeviceID = f.DeviceID
 			hub.Publish(f.DeviceID, te)
 
+			if mbSlave != nil {
+				if te.SetTempCol != nil {
+					mbSlave.SetFloat32(111, float32(*te.SetTempCol))
+				}
+				if te.SetTempInj1 != nil {
+					mbSlave.SetFloat32(115, float32(*te.SetTempInj1))
+				}
+				if te.SetTempDet1 != nil {
+					mbSlave.SetFloat32(119, float32(*te.SetTempDet1))
+				}
+			}
+
 			// Save the fetched settings to hardware config so UI can query them
 			hwCfg, _ := pstore.LoadHardwareConfig(f.DeviceID)
 			if hwCfg.Temperatures == nil {
@@ -2264,15 +2298,28 @@ func processFrame(c net.Conn, f gckc.Frame, hub *realtime.Hub, states *sync.Map,
 				e.CarrierPsi = f64p(items[0].ActualPsi)
 				e.CarrierSccm = f64p(items[0].ActualSccm)
 			}
-			if len(items) > 1 {
-				e.H2Psi = f64p(items[1].ActualPsi)
-				e.H2Sccm = f64p(items[1].ActualSccm)
+			// 载气1=EPC 1, 氢气1=EPC 10(index 9), 空气1=EPC 11(index 10)
+			if len(items) > 9 {
+				e.H2Psi = f64p(items[9].ActualPsi)
+				e.H2Sccm = f64p(items[9].ActualSccm)
 			}
-			if len(items) > 2 {
-				e.AirPsi = f64p(items[2].ActualPsi)
-				e.AirSccm = f64p(items[2].ActualSccm)
+			if len(items) > 10 {
+				e.AirPsi = f64p(items[10].ActualPsi)
+				e.AirSccm = f64p(items[10].ActualSccm)
 			}
 			hub.Publish(f.DeviceID, e)
+
+			if mbSlave != nil {
+				if e.CarrierPsi != nil {
+					mbSlave.SetFloat32(131, float32(*e.CarrierPsi))
+				}
+				if e.H2Sccm != nil {
+					mbSlave.SetFloat32(127, float32(*e.H2Sccm))
+				}
+				if e.AirSccm != nil {
+					mbSlave.SetFloat32(125, float32(*e.AirSccm))
+				}
+			}
 		}
 	case 250:
 		if len(f.Payload) >= 2 {
@@ -2310,6 +2357,27 @@ func processFrame(c net.Conn, f gckc.Frame, hub *realtime.Hub, states *sync.Map,
 	if te, ok := parseTemps143(f.Payload); ok {
 		te.DeviceID = f.DeviceID
 		hub.Publish(f.DeviceID, te)
+
+		if mbSlave != nil {
+			if te.TempCol != nil {
+				mbSlave.SetFloat32(113, float32(*te.TempCol))
+			}
+			if te.TempInj1 != nil {
+				mbSlave.SetFloat32(117, float32(*te.TempInj1))
+			}
+			if te.TempDet1 != nil {
+				mbSlave.SetFloat32(121, float32(*te.TempDet1))
+			}
+			if te.Heating != nil {
+				v := uint16(0)
+				if *te.Heating {
+					v = 1
+				}
+				mbSlave.SetUint16(147, v)
+				mbSlave.SetUint16(146, v)
+				mbSlave.SetUint16(145, v)
+			}
+		}
 	}
 	parsedAll, has, err := chromsend143.ParseAll(f.Payload, cfg)
 	if err != nil || !has || len(parsedAll) == 0 {
@@ -2343,7 +2411,7 @@ func resetAllSessions(st *deviceState) {
 		st.sessions = map[int]*runSession{}
 	}
 	for ch := range st.sessions {
-		st.sessions[ch] = newRunSession()
+		st.sessions[ch] = newRunSession(true)
 	}
 }
 
@@ -2357,13 +2425,19 @@ func resetSession(st *deviceState, ch int) {
 	if st.sessions == nil {
 		st.sessions = map[int]*runSession{}
 	}
-	st.sessions[ch] = newRunSession()
+	st.sessions[ch] = newRunSession(true)
+
+	LogInfof("开始分析")
+
+	if mbSlave != nil {
+		mbSlave.SetUint16(101, 1) // 1: 测量中
+	}
 }
 
 func appendSessionSamplesLocked(st *deviceState, ch int, dtS float64, t0 float64, vals []float64) (string, bool) {
 	s, ok := st.sessions[ch]
 	if !ok || s == nil {
-		s = newRunSession()
+		s = newRunSession(false) // 默认不处于分析状态，除非主动收到开始分析指令
 		st.sessions[ch] = s
 	}
 	if !s.active {
@@ -2439,10 +2513,10 @@ func finalizeSession(hub *realtime.Hub, st *deviceState, deviceID string, ch int
 	res, err := analyzer.Analyze(trace, activeMethod, "dev", time.Now())
 	e := resultEvent{Type: "result", DeviceID: deviceID, Channel: ch, SessionToken: tok, At: time.Now(), Trace: trace, Method: activeMethod}
 	if err != nil {
-		LogErrorf("Analyze error 1: %v", err)
+		LogErrorf("分析异常: %v", err)
 		e.Error = err.Error()
 	} else {
-		LogInfof("Analyze success 1, saving to DB...")
+		LogInfof("分析结束, 数据已存入数据库")
 		e.Result = res
 		st.mu.Lock()
 		if st.lastResultByCh == nil {
@@ -2472,6 +2546,9 @@ func finalizeSession(hub *realtime.Hub, st *deviceState, deviceID string, ch int
 			// 同步更新 Modbus 寄存器
 			if mbSlave != nil {
 				mbSlave.UpdateFullResult(res)
+				mbSlave.SetUint16(101, 0) // 0: 空闲
+				// 假设我们这里简单地将当前检测的 Unix 时间戳作为唯一标示或只更新状态
+				// 这里暂时不累加运行次数，除非业务有硬性要求。也可以在这自增 143。
 			}
 
 			// 澧為噺涓婃姤 MQTT
@@ -2489,6 +2566,13 @@ func finalizeSession(hub *realtime.Hub, st *deviceState, deviceID string, ch int
 					"results":  polls,
 				}
 				mqttClient.PublishResult(deviceID, payload)
+			}
+
+			// 谱图文件上传（HJ212-2025 VOC标准谱图通讯）
+			if pstore != nil {
+				if upCfg, ok := pstore.LoadUploadConfig(deviceID); ok {
+					uploadSpectrum(trace, res, e.At, upCfg)
+				}
 			}
 		}
 	}
@@ -2524,10 +2608,10 @@ func publishSessionResultSnapshot(hub *realtime.Hub, st *deviceState, deviceID s
 	e := resultEvent{Type: "result", DeviceID: deviceID, Channel: ch, SessionToken: tok, At: time.Now().UTC(), Trace: trace, Method: activeMethod}
 	res, err := analyzer.Analyze(trace, activeMethod, deviceID, time.Now())
 	if err != nil {
-		LogErrorf("Analyze error 2: %v", err)
+		LogErrorf("分析异常: %v", err)
 		e.Error = err.Error()
 	} else {
-		LogInfof("Analyze success 2, saving to DB...")
+		LogInfof("分析结束, 数据已存入数据库")
 		e.Result = res
 		st.mu.Lock()
 		if st.lastResultByCh == nil {
@@ -2557,6 +2641,7 @@ func publishSessionResultSnapshot(hub *realtime.Hub, st *deviceState, deviceID s
 			// 同步更新 Modbus 寄存器
 			if mbSlave != nil {
 				mbSlave.UpdateFullResult(res)
+				mbSlave.SetUint16(101, 0) // 0: 空闲
 			}
 
 			// 增量上报 MQTT
@@ -2956,7 +3041,7 @@ var indexHTML = `<!doctype html>
 <body>
   <div class="shell">
     <header class="topbar">
-      <div class="brand">在线监测 <span style="font-size:12px;opacity:0.6;margin-left:10px">v0.3.18</span></div>
+      <div class="brand">在线监测 <span style="font-size:12px;opacity:0.6;margin-left:10px">{{.AppVersion}}</span></div>
       <nav class="tabs" id="tabs">
         <button class="tab active" data-tab="overview"><span class="tabIcon">姒?/span><span class="tabText">姒傝</span></button>
         <button class="tab" data-tab="curve"><span class="tabIcon">鏇?/span><span class="tabText">鏇茬嚎</span></button>

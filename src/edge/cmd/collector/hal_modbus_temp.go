@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,7 +20,7 @@ var (
 
 type ModbusTempController struct {
 	client  modbus.Client
-	handler *modbus.RTUClientHandler
+	handler modbus.ClientHandler
 	mu      sync.Mutex
 	port    string
 	address byte
@@ -28,18 +29,36 @@ type ModbusTempController struct {
 type TempModuleState struct {
 	RealTimeTemps [8]float64 `json:"realtime_temps"`
 	SetTemps      [8]int16   `json:"set_temps"`
+	Modes         [8]int16   `json:"modes"` // 0: 温控模式, 1: IO模式
 	Disconnected  [8]bool    `json:"disconnected"`
 	Connected     bool       `json:"connected"`
 }
 
+type modbusClientHandler interface {
+	Connect() error
+	Close() error
+}
+
 func NewModbusTempController(port string, slaveID byte) *ModbusTempController {
-	handler := modbus.NewRTUClientHandler(port)
-	handler.BaudRate = 9600
-	handler.DataBits = 8
-	handler.Parity = "N"
-	handler.StopBits = 1
-	handler.SlaveId = slaveID
-	handler.Timeout = 1 * time.Second
+	var handler modbus.ClientHandler
+	
+	// 如果带有端口号 (如 192.168.1.100:502)，则使用 TCP 客户端
+	if strings.Contains(port, ":") {
+		tcpHandler := modbus.NewTCPClientHandler(port)
+		tcpHandler.SlaveId = slaveID
+		tcpHandler.Timeout = 2 * time.Second
+		handler = tcpHandler
+	} else {
+		// 否则作为串口 RTU 处理 (如 /dev/ttyUSB0 或 COM3)
+		rtuHandler := modbus.NewRTUClientHandler(port)
+		rtuHandler.BaudRate = 9600
+		rtuHandler.DataBits = 8
+		rtuHandler.Parity = "N"
+		rtuHandler.StopBits = 1
+		rtuHandler.SlaveId = slaveID
+		rtuHandler.Timeout = 1 * time.Second
+		handler = rtuHandler
+	}
 
 	return &ModbusTempController{
 		handler: handler,
@@ -56,9 +75,14 @@ func (m *ModbusTempController) Connect() error {
 		return nil
 	}
 
-	err := m.handler.Connect()
-	if err != nil {
-		return fmt.Errorf("failed to connect modbus temp controller on %s: %v", m.port, err)
+	if h, ok := m.handler.(*modbus.RTUClientHandler); ok {
+		if err := h.Connect(); err != nil {
+			return fmt.Errorf("failed to connect modbus RTU on %s: %v", m.port, err)
+		}
+	} else if h, ok := m.handler.(*modbus.TCPClientHandler); ok {
+		if err := h.Connect(); err != nil {
+			return fmt.Errorf("failed to connect modbus TCP on %s: %v", m.port, err)
+		}
 	}
 
 	m.client = modbus.NewClient(m.handler)
@@ -68,9 +92,13 @@ func (m *ModbusTempController) Connect() error {
 func (m *ModbusTempController) Close() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.handler != nil {
-		m.handler.Close()
+	
+	if h, ok := m.handler.(*modbus.RTUClientHandler); ok {
+		h.Close()
+	} else if h, ok := m.handler.(*modbus.TCPClientHandler); ok {
+		h.Close()
 	}
+	
 	m.client = nil
 }
 
@@ -90,6 +118,17 @@ func (m *ModbusTempController) ReadState() (TempModuleState, error) {
 	}
 	for i := 0; i < 8; i++ {
 		state.SetTemps[i] = int16(binary.BigEndian.Uint16(setResults[i*2 : i*2+2]))
+	}
+
+	// Read Modes (Address 78, 8 registers)
+	modeResults, err := m.client.ReadHoldingRegisters(78, 8)
+	if err == nil {
+		for i := 0; i < 8; i++ {
+			state.Modes[i] = int16(binary.BigEndian.Uint16(modeResults[i*2 : i*2+2]))
+		}
+	} else {
+		// Ignore error for modes if hardware doesn't support it or timeouts, just print a warning internally
+		fmt.Printf("Warning: read modes failed: %v\n", err)
 	}
 
 	// Read RealTime Temps (Address 360, 16 registers)
@@ -130,6 +169,22 @@ func (m *ModbusTempController) SetTemperature(channel int, targetTemp int16) err
 
 	address := uint16(42 + (channel - 1))
 	_, err := m.client.WriteSingleRegister(address, uint16(targetTemp))
+	return err
+}
+
+func (m *ModbusTempController) SetMode(channel int, mode int16) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.client == nil {
+		return fmt.Errorf("modbus client not initialized")
+	}
+	if channel < 1 || channel > 8 {
+		return fmt.Errorf("invalid channel %d", channel)
+	}
+
+	address := uint16(78 + (channel - 1))
+	_, err := m.client.WriteSingleRegister(address, uint16(mode))
 	return err
 }
 
@@ -254,6 +309,39 @@ func handleModbusTempSet(w http.ResponseWriter, r *http.Request) {
 	}
 
 	err := ctrl.SetTemperature(req.Channel, req.TargetTemp)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"message": "success"})
+}
+
+func handleModbusTempSetMode(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Channel int   `json:"channel"`
+		Mode    int16 `json:"mode"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	modbusTempCtrlMu.Lock()
+	ctrl := globalModbusTempCtrl
+	modbusTempCtrlMu.Unlock()
+
+	if ctrl == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "not connected"})
+		return
+	}
+
+	err := ctrl.SetMode(req.Channel, req.Mode)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
 		return
