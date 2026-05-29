@@ -350,10 +350,10 @@ export function initSettings() {
 
         <!-- 隐藏的高级设置 Modal -->
         <div id="sysconfig-modal" class="modal-overlay" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:999; justify-content:center; align-items:center;">
-            <div class="modal-content" style="background:#1e293b; padding:20px; border-radius:8px; width:450px; color:#fff; max-height: 90vh; overflow-y: auto;">
-                <h3 style="margin-top:0; border-bottom:1px solid #334155; padding-bottom:10px;">系统高级配置</h3>
-                
-                <div id="sysconfig-login" style="margin-top:20px;">
+            <div class="modal-content" style="background:#1e293b; padding:20px; border-radius:8px; width:650px; height:600px; display:flex; flex-direction:column; color:#fff; overflow:hidden;">
+                <h3 style="margin-top:0; border-bottom:1px solid #334155; padding-bottom:10px; flex-shrink:0;">系统高级配置</h3>
+
+                <div id="sysconfig-login" style="margin-top:20px; flex:1; overflow-y:auto;">
                     <div style="display:flex; flex-direction:column; gap:10px;">
                         <label>请输入加密密码：</label>
                         <input type="password" id="sys-auth-pass" class="input" placeholder="输入密码以解锁配置">
@@ -362,16 +362,17 @@ export function initSettings() {
                     </div>
                 </div>
 
-                <div id="sysconfig-form" style="display:none; margin-top:10px;">
+                <div id="sysconfig-form" style="display:none; margin-top:10px; flex:1; flex-direction:column; overflow:hidden;">
                     <!-- Tabs Header -->
-                    <div style="display:flex; border-bottom:1px solid #334155; margin-bottom:15px; gap:15px;" id="sysconfig-tabs">
+                    <div style="display:flex; border-bottom:1px solid #334155; margin-bottom:15px; gap:15px; flex-shrink:0;" id="sysconfig-tabs">
                         <div class="sys-tab" data-target="sys-tab-basic" style="padding:8px 12px; cursor:pointer; border-bottom:2px solid #38bdf8; color:#38bdf8; font-weight:bold;">基础设置</div>
                         <div class="sys-tab" data-target="sys-tab-mqtt" style="padding:8px 12px; cursor:pointer; color:#94a3b8;">MQTT 遥测</div>
                         <div class="sys-tab" data-target="sys-tab-daq" style="padding:8px 12px; cursor:pointer; color:#94a3b8;">环保数采仪</div>
                         <div class="sys-tab" data-target="sys-tab-modbus" style="padding:8px 12px; cursor:pointer; color:#94a3b8;">Modbus TCP</div>
                     </div>
 
-                    <div id="sys-tab-basic" class="sys-tab-content-pane" style="display:flex; flex-direction:column; gap:10px;">
+                    <div style="flex:1; overflow-y:auto; padding-right:10px;">
+                        <div id="sys-tab-basic" class="sys-tab-content-pane" style="display:flex; flex-direction:column; gap:10px;">
                         <!-- 硬件驱动模式 -->
                         <h4 style="margin: 0; color: #38bdf8; border-bottom: 1px dashed #334155; padding-bottom: 5px;">硬件架构模式</h4>
                         <div style="display: flex; align-items: center; gap: 10px;">
@@ -409,7 +410,10 @@ export function initSettings() {
                         </div>
                         <div style="display: flex; align-items: center; gap: 10px;">
                             <label style="width: 80px;">Client ID</label>
-                            <input type="text" id="sys-mqtt-clientid" class="input" style="flex: 1;" placeholder="为空则默认使用设备唯一标识">
+                            <input type="text" id="sys-mqtt-clientid" class="input" style="flex: 1;" placeholder="自定义 Client ID">
+                            <label style="display: flex; align-items: center; gap: 4px; color: #94a3b8; font-size: 13px; cursor: pointer; white-space: nowrap;">
+                                <input type="checkbox" id="sys-mqtt-use-deviceid"> 使用设备唯一ID
+                            </label>
                         </div>
                         <div style="display: flex; align-items: center; gap: 10px;">
                             <label style="width: 80px;">Username</label>
@@ -508,8 +512,9 @@ export function initSettings() {
                             </label>
                         </div>
                     </div>
+                    </div> <!-- End of scrollable area -->
 
-                    <div style="display:flex; gap:10px; margin-top:20px;">
+                    <div style="display:flex; gap:10px; margin-top:20px; flex-shrink:0;">
                         <button class="btn" id="btn-sys-save" style="flex:1;">保存并应用</button>
                         <button class="btn btn-danger" id="btn-sys-close2" style="flex:1; background:transparent; border:1px solid #475569;">关闭</button>
                     </div>
@@ -550,6 +555,20 @@ export function initSettings() {
             container.querySelector('#' + tab.dataset.target).style.display = 'flex';
         });
     });
+
+    const useDeviceIdCheck = document.getElementById('sys-mqtt-use-deviceid');
+    const clientIdInput = document.getElementById('sys-mqtt-clientid');
+    if (useDeviceIdCheck) {
+        useDeviceIdCheck.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                clientIdInput.value = '';
+                clientIdInput.disabled = true;
+            } else {
+                clientIdInput.disabled = false;
+                clientIdInput.focus();
+            }
+        });
+    }
 
     let uiSettings = {};
     let hwSettings = {};
@@ -1358,8 +1377,20 @@ export function initSettings() {
                     document.getElementById('sys-mqtt-enable').checked = cfg.mqtt_enabled;
                     document.getElementById('sys-mqtt-broker').value = cfg.mqtt_broker || '';
                     document.getElementById('sys-mqtt-topic').value = cfg.mqtt_topic || '';
-                    document.getElementById('sys-mqtt-clientid').value = cfg.mqtt_client_id || '';
-                    document.getElementById('sys-mqtt-user').value = cfg.mqtt_user || '';
+                        
+                        const clientIdInput = document.getElementById('sys-mqtt-clientid');
+                        const useDeviceIdCheck = document.getElementById('sys-mqtt-use-deviceid');
+                        if (!cfg.mqtt_client_id || cfg.mqtt_client_id === '') {
+                            useDeviceIdCheck.checked = true;
+                            clientIdInput.value = '';
+                            clientIdInput.disabled = true;
+                        } else {
+                            useDeviceIdCheck.checked = false;
+                            clientIdInput.value = cfg.mqtt_client_id;
+                            clientIdInput.disabled = false;
+                        }
+                        
+                        document.getElementById('sys-mqtt-user').value = cfg.mqtt_user || '';
                     document.getElementById('sys-mqtt-pass').value = cfg.mqtt_pass || '';
                     
                     document.getElementById('mqtt-upload-info').checked = cfg.mqtt_upload_info !== false; // default true
