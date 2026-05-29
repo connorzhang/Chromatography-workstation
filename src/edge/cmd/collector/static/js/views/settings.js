@@ -424,6 +424,7 @@ export function initSettings() {
                             <label style="width: 80px;">Password</label>
                             <input type="password" id="sys-mqtt-pass" class="input" style="flex: 1;">
                         </div>
+                        </div> <!-- 关闭左侧列 -->
 
                         <!-- 右侧：上传内容控制 -->
                         <div style="flex:1; display:flex; flex-direction:column; gap:10px;">
