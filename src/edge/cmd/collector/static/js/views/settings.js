@@ -350,7 +350,7 @@ export function initSettings() {
 
         <!-- 隐藏的高级设置 Modal -->
         <div id="sysconfig-modal" class="modal-overlay" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:999; justify-content:center; align-items:center;">
-            <div class="modal-content" style="background:#1e293b; padding:20px; border-radius:8px; width:650px; height:600px; display:flex; flex-direction:column; color:#fff; overflow:hidden;">
+            <div class="modal-content" style="background:#1e293b; padding:20px; border-radius:8px; width:850px; height:600px; display:flex; flex-direction:column; color:#fff; overflow:hidden;">
                 <h3 style="margin-top:0; border-bottom:1px solid #334155; padding-bottom:10px; flex-shrink:0;">系统高级配置</h3>
 
                 <div id="sysconfig-login" style="margin-top:20px; flex:1; overflow-y:auto;">
@@ -389,9 +389,10 @@ export function initSettings() {
                         <input type="password" id="sys-admin-pass-new" class="input" placeholder="留空则不修改">
                     </div>
 
-                    <div id="sys-tab-mqtt" class="sys-tab-content-pane" style="display:none; flex-direction:column; gap:10px;">
-                        <!-- MQTT配置部分 -->
-                        <div style="display: flex; align-items: center; justify-content: space-between; margin: 0 0 0 0; border-bottom: 1px dashed #334155; padding-bottom: 5px;">
+                    <div id="sys-tab-mqtt" class="sys-tab-content-pane" style="display:none; flex-direction:row; gap:20px;">
+                        <!-- 左侧：MQTT参数 -->
+                        <div style="flex:1; display:flex; flex-direction:column; gap:10px;">
+                            <div style="display: flex; align-items: center; justify-content: space-between; margin: 0 0 0 0; border-bottom: 1px dashed #334155; padding-bottom: 5px;">
                             <h4 style="margin: 0; color: #38bdf8;">MQTT 增量遥测参数</h4>
                             <div style="display: flex; align-items: center; gap: 10px;">
                                 <span id="mqtt-status-indicator" style="font-size: 12px; color: #94a3b8;">状态: 未知</span>
@@ -424,9 +425,10 @@ export function initSettings() {
                             <input type="password" id="sys-mqtt-pass" class="input" style="flex: 1;">
                         </div>
 
-                        <!-- MQTT 上传内容控制 -->
-                        <h4 style="margin: 10px 0 0 0; color: #38bdf8; border-bottom: 1px dashed #334155; padding-bottom: 5px;">上传内容控制</h4>
-                        <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 5px;">
+                        <!-- 右侧：上传内容控制 -->
+                        <div style="flex:1; display:flex; flex-direction:column; gap:10px;">
+                            <h4 style="margin: 0; color: #38bdf8; border-bottom: 1px dashed #334155; padding-bottom: 5px;">上传内容控制</h4>
+                            <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 5px;">
                             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
                                 <input type="checkbox" id="mqtt-upload-info" checked>
                                 <div>
@@ -462,6 +464,7 @@ export function initSettings() {
                                     <div style="font-size: 11px; color: #94a3b8;">默认关闭，开启后将上传心跳和报文等频繁日志</div>
                                 </div>
                             </label>
+                        </div>
                         </div>
                     </div>
 
