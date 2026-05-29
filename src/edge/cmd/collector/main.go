@@ -32,7 +32,7 @@ import (
 //go:embed static/*
 var staticFS embed.FS
 
-const AppVersion = "v0.3.27"
+const AppVersion = "v0.3.28"
 
 var startedAt = time.Now().UTC()
 
@@ -313,6 +313,15 @@ type uiState struct {
 var uiMu sync.Mutex
 var uiByDevice = map[string]uiState{}
 var uiLastDevice string
+
+func getDeviceNo(defaultID string) string {
+	if pstore != nil {
+		if cfg, ok := pstore.LoadUploadConfig(defaultID); ok && cfg.DeviceNo != "" {
+			return cfg.DeviceNo
+		}
+	}
+	return defaultID
+}
 
 func defaultUIState(deviceID string) uiState {
 	return uiState{DeviceID: deviceID, ActiveTab: "overview", SelectedChannel: 0, FullMin: 2, YLow: 0, YHigh: 40, AutoY: true, AcqMin: 2, Loop: true, CycleMin: 2, CycleMax: 9999, EpcCarrier: 0, EpcH2: 1, EpcAir: 2}
@@ -614,6 +623,9 @@ func main() {
 		// 启动 MQTT 客户端
 		sysCfg := ps.LoadSysConfig()
 		if sysCfg.MqttEnabled {
+			if sysCfg.MqttClientID == "" {
+				sysCfg.MqttClientID = getDeviceNo(uiLastDevice)
+			}
 			mqttClient = telemetry.NewMqttClient(sysCfg)
 		}
 
@@ -789,6 +801,9 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 				mqttClient.Disconnect()
 			}
 			if cfg.MqttEnabled {
+				if cfg.MqttClientID == "" {
+					cfg.MqttClientID = getDeviceNo(uiLastDevice)
+				}
 				mqttClient = telemetry.NewMqttClient(cfg)
 			} else {
 				mqttClient = nil

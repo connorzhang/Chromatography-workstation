@@ -362,52 +362,66 @@ export function initSettings() {
                     </div>
                 </div>
 
-                <div id="sysconfig-form" style="display:none; margin-top:20px;">
-                    <div style="display:flex; flex-direction:column; gap:10px;">
-                        <!-- 数采仪配置部分 -->
-                        <h4 style="margin: 0; color: #38bdf8; border-bottom: 1px dashed #334155; padding-bottom: 5px;">数采仪 (HJ212)</h4>
-                        
+                <div id="sysconfig-form" style="display:none; margin-top:10px;">
+                    <!-- Tabs Header -->
+                    <div style="display:flex; border-bottom:1px solid #334155; margin-bottom:15px; gap:15px;" id="sysconfig-tabs">
+                        <div class="sys-tab" data-target="sys-tab-basic" style="padding:8px 12px; cursor:pointer; border-bottom:2px solid #38bdf8; color:#38bdf8; font-weight:bold;">基础设置</div>
+                        <div class="sys-tab" data-target="sys-tab-mqtt" style="padding:8px 12px; cursor:pointer; color:#94a3b8;">MQTT 遥测</div>
+                        <div class="sys-tab" data-target="sys-tab-daq" style="padding:8px 12px; cursor:pointer; color:#94a3b8;">环保数采仪</div>
+                        <div class="sys-tab" data-target="sys-tab-modbus" style="padding:8px 12px; cursor:pointer; color:#94a3b8;">Modbus TCP</div>
+                    </div>
+
+                    <div id="sys-tab-basic" class="sys-tab-content-pane" style="display:flex; flex-direction:column; gap:10px;">
+                        <!-- 硬件驱动模式 -->
+                        <h4 style="margin: 0; color: #38bdf8; border-bottom: 1px dashed #334155; padding-bottom: 5px;">硬件架构模式</h4>
                         <div style="display: flex; align-items: center; gap: 10px;">
-                            <label style="width: 80px;">设备号</label>
-                            <input type="text" id="daq-device-no" class="input" style="flex: 1;" value="1A1GBHKL9011202180011101">
-                        </div>
-                        <div style="display: flex; align-items: center; gap: 10px;">
-                            <label style="width: 80px;">上传IP</label>
-                            <input type="text" id="daq-upload-ip" class="input" style="flex: 1;" value="192.168.1.105">
-                        </div>
-                        <div style="display: flex; align-items: center; gap: 10px;">
-                            <label style="width: 80px;">上传端口</label>
-                            <input type="text" id="daq-upload-port" class="input" style="flex: 1;" value="5300">
-                        </div>
-                        <div style="display: flex; align-items: center; gap: 10px;">
-                            <label style="width: 80px;">色谱IP</label>
-                            <input type="text" id="daq-chrom-ip" class="input" style="flex: 1;" value="192.168.1.20">
+                            <label style="width: 80px;">驱动模式</label>
+                            <select id="sys-driver-mode" class="input" style="flex: 1;">
+                                <option value="legacy">Legacy (原厂高集成主板 Cmd 143/159)</option>
+                                <option value="modular">Modular (散件模块化 HAL)</option>
+                            </select>
                         </div>
 
-                        <!-- Modbus TCP Server 配置部分 -->
-                        <h4 style="margin: 15px 0 0 0; color: #38bdf8; border-bottom: 1px dashed #334155; padding-bottom: 5px;">Modbus TCP Server</h4>
+                        <!-- 密码修改部分 -->
+                        <h4 style="margin: 15px 0 0 0; color: #38bdf8; border-bottom: 1px dashed #334155; padding-bottom: 5px;">安全设置</h4>
+                        <label>修改管理员密码 (可选)</label>
+                        <input type="password" id="sys-admin-pass-new" class="input" placeholder="留空则不修改">
+                    </div>
+
+                    <div id="sys-tab-mqtt" class="sys-tab-content-pane" style="display:none; flex-direction:column; gap:10px;">
+                        <!-- MQTT配置部分 -->
+                        <div style="display: flex; align-items: center; justify-content: space-between; margin: 0 0 0 0; border-bottom: 1px dashed #334155; padding-bottom: 5px;">
+                            <h4 style="margin: 0; color: #38bdf8;">MQTT 增量遥测参数</h4>
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <span id="mqtt-status-indicator" style="font-size: 12px; color: #94a3b8;">状态: 未知</span>
+                                <button class="btn" id="btn-mqtt-test" style="padding: 2px 8px; font-size: 12px;">测试连接</button>
+                            </div>
+                        </div>
+                        <label style="color:#10b981; margin-top: 5px; display: block;"><input type="checkbox" id="sys-mqtt-enable"> 启用 MQTT 上传</label>
                         
-                        <div style="display: flex; align-items: center; gap: 10px; margin-top: 10px;">
-                            <label style="width: 80px;">服务端口</label>
-                            <input type="number" id="modbus-server-port" class="input" style="flex: 1;" value="1502">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <label style="width: 80px;">Broker</label>
+                            <input type="text" id="sys-mqtt-broker" class="input" style="flex: 1;" placeholder="tcp://127.0.0.1:1883">
                         </div>
                         <div style="display: flex; align-items: center; gap: 10px;">
-                            <label style="width: 80px;">设备标识</label>
-                            <input type="text" id="modbus-server-addr" class="input" style="flex: 1;" value="1">
+                            <label style="width: 80px;">Topic</label>
+                            <input type="text" id="sys-mqtt-topic" class="input" style="flex: 1;" placeholder="vocs/telemetry/results">
                         </div>
-                        <div style="display: flex; align-items: center; gap: 10px; margin-top: 10px;">
-                            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                                <input type="checkbox" id="modbus-upload-log" checked>
-                                <div>
-                                    <div style="color: #f8fafc;">上传日志 (Modbus 700)</div>
-                                    <div style="font-size: 11px; color: #94a3b8;">控制是否将INFO及以上级别的系统日志推送到 Modbus 队列</div>
-                                </div>
-                            </label>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <label style="width: 80px;">Client ID</label>
+                            <input type="text" id="sys-mqtt-clientid" class="input" style="flex: 1;" placeholder="为空则默认使用设备唯一标识">
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <label style="width: 80px;">Username</label>
+                            <input type="text" id="sys-mqtt-user" class="input" style="flex: 1;">
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <label style="width: 80px;">Password</label>
+                            <input type="password" id="sys-mqtt-pass" class="input" style="flex: 1;">
                         </div>
 
-                        <!-- MQTT 上传配置部分 -->
-                        <h4 style="margin: 15px 0 0 0; color: #38bdf8; border-bottom: 1px dashed #334155; padding-bottom: 5px;">MQTT 边缘网关上传</h4>
-                        
+                        <!-- MQTT 上传内容控制 -->
+                        <h4 style="margin: 10px 0 0 0; color: #38bdf8; border-bottom: 1px dashed #334155; padding-bottom: 5px;">上传内容控制</h4>
                         <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 5px;">
                             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
                                 <input type="checkbox" id="mqtt-upload-info" checked>
@@ -431,74 +445,73 @@ export function initSettings() {
                                 </div>
                             </label>
                             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-              <input type="checkbox" id="mqtt-upload-log" checked>
-              <div>
-                  <div style="color: #f8fafc;">上传系统日志 (log)</div>
-                  <div style="font-size: 11px; color: #94a3b8;">包含系统错误、警告等关键事件记录</div>
-              </div>
-          </label>
-          <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; padding-left: 20px;">
-              <input type="checkbox" id="mqtt-upload-debug">
-              <div>
-                  <div style="color: #f8fafc;">包含底层通信 (DEBUG) 日志</div>
-                  <div style="font-size: 11px; color: #94a3b8;">默认关闭，开启后将上传心跳和报文等频繁日志</div>
-              </div>
-          </label>
-      </div>
-                        <div style="margin-bottom: 10px; padding-left: 90px;">
-                            <label style="color: #10b981;"><input type="checkbox" id="daq-enable" checked> 启用数采仪上传</label>
+                                <input type="checkbox" id="mqtt-upload-log" checked>
+                                <div>
+                                    <div style="color: #f8fafc;">上传系统日志 (log)</div>
+                                    <div style="font-size: 11px; color: #94a3b8;">包含系统错误、警告等关键事件记录</div>
+                                </div>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; padding-left: 20px;">
+                                <input type="checkbox" id="mqtt-upload-debug">
+                                <div>
+                                    <div style="color: #f8fafc;">包含底层通信 (DEBUG) 日志</div>
+                                    <div style="font-size: 11px; color: #94a3b8;">默认关闭，开启后将上传心跳和报文等频繁日志</div>
+                                </div>
+                            </label>
                         </div>
+                    </div>
 
-                        <!-- MQTT配置部分 -->
-                        <div style="display: flex; align-items: center; justify-content: space-between; margin: 10px 0 0 0; border-bottom: 1px dashed #334155; padding-bottom: 5px;">
-                            <h4 style="margin: 0; color: #38bdf8;">MQTT 增量遥测</h4>
-                            <div style="display: flex; align-items: center; gap: 10px;">
-                                <span id="mqtt-status-indicator" style="font-size: 12px; color: #94a3b8;">状态: 未知</span>
-                                <button class="btn" id="btn-mqtt-test" style="padding: 2px 8px; font-size: 12px;">测试连接</button>
-                            </div>
+                    <div id="sys-tab-daq" class="sys-tab-content-pane" style="display:none; flex-direction:column; gap:10px;">
+                        <!-- 数采仪配置部分 -->
+                        <h4 style="margin: 0; color: #38bdf8; border-bottom: 1px dashed #334155; padding-bottom: 5px;">数采仪 (HJ212)</h4>
+                        <div style="margin-top: 5px; margin-bottom: 5px;">
+                            <label style="color: #10b981;"><input type="checkbox" id="daq-enable" checked> 启用数采仪谱图上传</label>
                         </div>
-                        <label style="color:#10b981; margin-top: 10px; display: block;"><input type="checkbox" id="sys-mqtt-enable"> 启用 MQTT 上传</label>
                         
                         <div style="display: flex; align-items: center; gap: 10px;">
-                            <label style="width: 80px;">Broker</label>
-                            <input type="text" id="sys-mqtt-broker" class="input" style="flex: 1;" placeholder="tcp://127.0.0.1:1883">
+                            <label style="width: 80px;">设备唯一标识</label>
+                            <input type="text" id="daq-device-no" class="input" style="flex: 1;" value="1A1GBHKL9011202180011101">
                         </div>
                         <div style="display: flex; align-items: center; gap: 10px;">
-                            <label style="width: 80px;">Topic</label>
-                            <input type="text" id="sys-mqtt-topic" class="input" style="flex: 1;" placeholder="vocs/telemetry/results">
+                            <label style="width: 80px;">上传IP</label>
+                            <input type="text" id="daq-upload-ip" class="input" style="flex: 1;" value="192.168.1.105">
                         </div>
                         <div style="display: flex; align-items: center; gap: 10px;">
-                            <label style="width: 80px;">Client ID</label>
-                            <input type="text" id="sys-mqtt-clientid" class="input" style="flex: 1;" placeholder="edge_collector_01">
+                            <label style="width: 80px;">上传端口</label>
+                            <input type="text" id="daq-upload-port" class="input" style="flex: 1;" value="5300">
                         </div>
                         <div style="display: flex; align-items: center; gap: 10px;">
-                            <label style="width: 80px;">Username</label>
-                            <input type="text" id="sys-mqtt-user" class="input" style="flex: 1;">
+                            <label style="width: 80px;">色谱IP</label>
+                            <input type="text" id="daq-chrom-ip" class="input" style="flex: 1;" value="192.168.1.20">
                         </div>
-                        <div style="display: flex; align-items: center; gap: 10px;">
-                            <label style="width: 80px;">Password</label>
-                            <input type="password" id="sys-mqtt-pass" class="input" style="flex: 1;">
-                        </div>
+                    </div>
 
-                        <!-- 硬件驱动模式 -->
-                        <h4 style="margin: 10px 0 0 0; color: #38bdf8; border-bottom: 1px dashed #334155; padding-bottom: 5px;">硬件架构模式</h4>
-                        <div style="display: flex; align-items: center; gap: 10px;">
-                            <label style="width: 80px;">驱动模式</label>
-                            <select id="sys-driver-mode" class="input" style="flex: 1;">
-                                <option value="legacy">Legacy (原厂高集成主板 Cmd 143/159)</option>
-                                <option value="modular">Modular (散件模块化 HAL)</option>
-                            </select>
-                        </div>
-
-                        <!-- 密码修改部分 -->
-                        <h4 style="margin: 10px 0 0 0; color: #38bdf8; border-bottom: 1px dashed #334155; padding-bottom: 5px;">安全设置</h4>
-                        <label>修改管理员密码 (可选)</label>
-                        <input type="password" id="sys-admin-pass-new" class="input" placeholder="留空则不修改">
+                    <div id="sys-tab-modbus" class="sys-tab-content-pane" style="display:none; flex-direction:column; gap:10px;">
+                        <!-- Modbus TCP Server 配置部分 -->
+                        <h4 style="margin: 0; color: #38bdf8; border-bottom: 1px dashed #334155; padding-bottom: 5px;">Modbus TCP Server</h4>
                         
-                        <div style="display:flex; gap:10px; margin-top:20px;">
-                            <button class="btn" id="btn-sys-save" style="flex:1;">保存并应用</button>
-                            <button class="btn btn-danger" id="btn-sys-close2" style="flex:1; background:transparent; border:1px solid #475569;">关闭</button>
+                        <div style="display: flex; align-items: center; gap: 10px; margin-top: 10px;">
+                            <label style="width: 80px;">服务端口</label>
+                            <input type="number" id="modbus-server-port" class="input" style="flex: 1;" value="1502">
                         </div>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <label style="width: 80px;">设备标识</label>
+                            <input type="text" id="modbus-server-addr" class="input" style="flex: 1;" value="1">
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 10px; margin-top: 10px;">
+                            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                                <input type="checkbox" id="modbus-upload-log" checked>
+                                <div>
+                                    <div style="color: #f8fafc;">上传日志 (Modbus 700)</div>
+                                    <div style="font-size: 11px; color: #94a3b8;">控制是否将INFO及以上级别的系统日志推送到 Modbus 队列</div>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div style="display:flex; gap:10px; margin-top:20px;">
+                        <button class="btn" id="btn-sys-save" style="flex:1;">保存并应用</button>
+                        <button class="btn btn-danger" id="btn-sys-close2" style="flex:1; background:transparent; border:1px solid #475569;">关闭</button>
                     </div>
                 </div>
             </div>
@@ -515,6 +528,26 @@ export function initSettings() {
             contents.forEach(c => c.classList.remove('active'));
             tab.classList.add('active');
             container.querySelector('#' + tab.dataset.target).classList.add('active');
+        });
+    });
+
+    // Sysconfig Modal Tabs logic
+    const sysTabs = container.querySelectorAll('.sys-tab');
+    const sysContents = container.querySelectorAll('.sys-tab-content-pane');
+    
+    sysTabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            sysTabs.forEach(t => {
+                t.style.fontWeight = 'normal';
+                t.style.color = '#94a3b8';
+                t.style.borderBottom = 'none';
+            });
+            sysContents.forEach(c => c.style.display = 'none');
+            
+            tab.style.fontWeight = 'bold';
+            tab.style.color = '#38bdf8';
+            tab.style.borderBottom = '2px solid #38bdf8';
+            container.querySelector('#' + tab.dataset.target).style.display = 'flex';
         });
     });
 
