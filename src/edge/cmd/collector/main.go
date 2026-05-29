@@ -32,7 +32,7 @@ import (
 //go:embed static/*
 var staticFS embed.FS
 
-const AppVersion = "v0.3.26"
+const AppVersion = "v0.3.27"
 
 var startedAt = time.Now().UTC()
 
@@ -2555,10 +2555,10 @@ func finalizeSession(hub *realtime.Hub, st *deviceState, deviceID string, ch int
 			if mqttClient != nil {
 				polls := make(map[string]float64)
 				for _, p := range res.Pollutants {
-					polls[p.Code] = p.Amount
+					polls[p.Code] = math.Round(p.Amount*1000) / 1000
 				}
 				for _, g := range res.Groups {
-					polls[g.Code] = g.Amount
+					polls[g.Code] = math.Round(g.Amount*1000) / 1000
 				}
 				payload := map[string]any{
 					"time":     e.At.Unix(),
@@ -2648,10 +2648,10 @@ func publishSessionResultSnapshot(hub *realtime.Hub, st *deviceState, deviceID s
 			if mqttClient != nil {
 				polls := make(map[string]float64)
 				for _, p := range res.Pollutants {
-					polls[p.Code] = p.Amount
+					polls[p.Code] = math.Round(p.Amount*1000) / 1000
 				}
 				for _, g := range res.Groups {
-					polls[g.Code] = g.Amount
+					polls[g.Code] = math.Round(g.Amount*1000) / 1000
 				}
 				payload := map[string]any{
 					"time":     e.At.Unix(),

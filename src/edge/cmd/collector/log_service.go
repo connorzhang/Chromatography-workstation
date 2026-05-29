@@ -5,6 +5,8 @@ import (
 	"log"
 	"sync"
 	"time"
+
+	"chromatography-workstation/edge/internal/models"
 )
 
 type LogEntry struct {
@@ -118,11 +120,27 @@ func logWorker() {
 				deviceID := uiLastDevice
 				uiMu.Unlock()
 				if deviceID != "" {
-					payload := map[string]any{
-						"timestamp": lb.Timestamp,
-						"logs":      lb.Logs,
+					var cfg models.SysConfig
+					if pstore != nil {
+						cfg = pstore.LoadSysConfig()
 					}
-					mqttClient.PublishLog(deviceID, payload)
+					
+					// Filter logs for MQTT
+					var mqttBatch []LogEntry
+					for _, l := range batch {
+						if l.Level == "DEBUG" && !cfg.MqttUploadDebug {
+							continue
+						}
+						mqttBatch = append(mqttBatch, l)
+					}
+					
+					if len(mqttBatch) > 0 {
+						payload := map[string]any{
+							"timestamp": lb.Timestamp,
+							"logs":      mqttBatch,
+						}
+						mqttClient.PublishLog(deviceID, payload)
+					}
 				}
 			}
 

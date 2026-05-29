@@ -431,13 +431,20 @@ export function initSettings() {
                                 </div>
                             </label>
                             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                                <input type="checkbox" id="mqtt-upload-log" checked>
-                                <div>
-                                    <div style="color: #f8fafc;">上传系统日志 (log)</div>
-                                    <div style="font-size: 11px; color: #94a3b8;">包含系统错误、警告等关键事件记录</div>
-                                </div>
-                            </label>
-                        </div>
+              <input type="checkbox" id="mqtt-upload-log" checked>
+              <div>
+                  <div style="color: #f8fafc;">上传系统日志 (log)</div>
+                  <div style="font-size: 11px; color: #94a3b8;">包含系统错误、警告等关键事件记录</div>
+              </div>
+          </label>
+          <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; padding-left: 20px;">
+              <input type="checkbox" id="mqtt-upload-debug">
+              <div>
+                  <div style="color: #f8fafc;">包含底层通信 (DEBUG) 日志</div>
+                  <div style="font-size: 11px; color: #94a3b8;">默认关闭，开启后将上传心跳和报文等频繁日志</div>
+              </div>
+          </label>
+      </div>
                         <div style="margin-bottom: 10px; padding-left: 90px;">
                             <label style="color: #10b981;"><input type="checkbox" id="daq-enable" checked> 启用数采仪上传</label>
                         </div>
@@ -1325,9 +1332,10 @@ export function initSettings() {
                     document.getElementById('mqtt-upload-info').checked = cfg.mqtt_upload_info !== false; // default true
                     document.getElementById('mqtt-upload-status').checked = cfg.mqtt_upload_status !== false;
                     document.getElementById('mqtt-upload-result').checked = cfg.mqtt_upload_result !== false;
-                    document.getElementById('mqtt-upload-log').checked = cfg.mqtt_upload_log !== false;
+   document.getElementById('mqtt-upload-log').checked = cfg.mqtt_upload_log !== false;
+   document.getElementById('mqtt-upload-debug').checked = cfg.mqtt_upload_debug === true;
 
-                    document.getElementById('sys-driver-mode').value = cfg.driver_mode || 'legacy';
+   document.getElementById('sys-driver-mode').value = cfg.driver_mode || 'legacy';
                     document.getElementById('sys-admin-pass-new').value = '';
                     
                     document.getElementById('modbus-server-port').value = cfg.modbus_server_port || 1502;
@@ -1410,6 +1418,7 @@ export function initSettings() {
                 mqtt_upload_status: document.getElementById('mqtt-upload-status').checked,
                 mqtt_upload_result: document.getElementById('mqtt-upload-result').checked,
                 mqtt_upload_log: document.getElementById('mqtt-upload-log').checked,
+                mqtt_upload_debug: document.getElementById('mqtt-upload-debug').checked,
                 driver_mode: document.getElementById('sys-driver-mode').value,
                 admin_pass: document.getElementById('sys-admin-pass-new').value,
                 modbus_server_port: parseInt(document.getElementById('modbus-server-port').value) || 1502,
