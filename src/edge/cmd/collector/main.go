@@ -32,7 +32,7 @@ import (
 //go:embed static/*
 var staticFS embed.FS
 
-const AppVersion = "v0.3.29"
+const AppVersion = "v0.3.31"
 
 var startedAt = time.Now().UTC()
 
