@@ -5,16 +5,6 @@ export function initDebug() {
             <h3 style="margin-top: 0; border-bottom: 1px solid #334155; padding-bottom: 10px; color: var(--text);">温控模块 Modbus 连接设置</h3>
             <div style="display: flex; gap: 15px; align-items: center; margin-top: 15px; flex-wrap: wrap;">
                 <div style="display: flex; align-items: center; gap: 8px;">
-                    <label style="color: #94a3b8;">串口号:</label>
-                    <input type="text" id="modbus-port" value="/dev/ttyUSB3" class="input" style="width: 150px; margin-right: 0;">
-                </div>
-                <div style="display: flex; align-items: center; gap: 8px;">
-                    <label style="color: #94a3b8;">从机地址:</label>
-                    <input type="number" id="modbus-slave" value="20" class="input" style="width: 80px; margin-right: 0;">
-                </div>
-                <button class="btn" id="btn-modbus-connect">连接</button>
-                <button class="btn btn-danger" id="btn-modbus-disconnect">断开</button>
-                <div style="margin-left: auto; display: flex; align-items: center; gap: 8px;">
                     <span style="color: #94a3b8;">状态:</span>
                     <span id="modbus-status" style="font-weight: bold; color: #94a3b8;">未连接</span>
                 </div>
@@ -78,6 +68,7 @@ export function initDebug() {
                 </div>
             </div>
         </div>
+
     `;
 
     const channelsContainer = document.getElementById('modbus-channels-container');
@@ -107,48 +98,7 @@ export function initDebug() {
         `;
     }
 
-    let pollInterval = null;
-
-    document.getElementById('btn-modbus-connect').addEventListener('click', async () => {
-        const port = document.getElementById('modbus-port').value;
-        const slave = parseInt(document.getElementById('modbus-slave').value);
-        try {
-            const res = await fetch('/api/v1/modbus_temp/connect', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ port, slave_id: slave })
-            });
-            if (res.ok) {
-                window.showToast('温控模块连接成功');
-                document.getElementById('modbus-status').innerText = '已连接';
-                document.getElementById('modbus-status').style.color = 'var(--success)';
-                if (!pollInterval) {
-                    pollInterval = setInterval(pollModbusState, 1000);
-                }
-            } else {
-                const data = await res.json();
-                window.showToast('连接失败: ' + data.error, true);
-            }
-        } catch (e) {
-            window.showToast('连接请求异常', true);
-        }
-    });
-
-    document.getElementById('btn-modbus-disconnect').addEventListener('click', async () => {
-        try {
-            await fetch('/api/v1/modbus_temp/disconnect', { method: 'POST' });
-            window.showToast('已断开连接');
-            document.getElementById('modbus-status').innerText = '未连接';
-            document.getElementById('modbus-status').style.color = 'var(--text-muted)';
-            if (pollInterval) {
-                clearInterval(pollInterval);
-                pollInterval = null;
-            }
-            resetChannels();
-        } catch (e) {
-            window.showToast('断开请求异常', true);
-        }
-    });
+    let pollInterval = setInterval(pollModbusState, 1000);
 
     document.getElementById('btn-modbus-set').addEventListener('click', async () => {
         const ch = parseInt(document.getElementById('modbus-set-channel').value);
@@ -280,4 +230,6 @@ export function initDebug() {
             statusElem.style.background = 'transparent';
         }
     }
+
+
 }

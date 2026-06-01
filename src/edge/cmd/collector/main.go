@@ -32,7 +32,7 @@ import (
 //go:embed static/*
 var staticFS embed.FS
 
-const AppVersion = "v0.3.31"
+const AppVersion = "v0.3.41"
 
 var startedAt = time.Now().UTC()
 
@@ -591,6 +591,9 @@ func main() {
 	cfg := chromsend143.Config{ShuaiJian1: 1, ShuaiJian2: 1, ShuaiJian3: 1}
 	method := loadMethod()
 	nmhcStore.Load()
+
+	// 启动后端自动连接设备协程
+	startAutoConnect()
 
 	// Forward batched logs to SSE Hub (for future MQTT or other uses)
 	go func() {
@@ -1912,6 +1915,14 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 	mux.HandleFunc("/api/v1/modbus_temp/state", handleModbusTempState)
 	mux.HandleFunc("/api/v1/modbus_temp/set", handleModbusTempSet)
 	mux.HandleFunc("/api/v1/modbus_temp/set_io", handleModbusTempSetIO)
+
+	// TCD 测试接口
+	mux.HandleFunc("/api/v1/tcd/connect", handleTCDConnect)
+	mux.HandleFunc("/api/v1/tcd/disconnect", handleTCDDisconnect)
+	mux.HandleFunc("/api/v1/tcd/state", handleTCDState)
+	mux.HandleFunc("/api/v1/tcd/set_bridge", handleTCDSetBridge)
+	mux.HandleFunc("/api/v1/tcd/zeroing", handleTCDZeroing)
+	mux.HandleFunc("/api/v1/tcd/read_bridge", handleTCDReadBridge)
 
 	mux.HandleFunc("/api/v1/devices/", func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/api/v1/devices/")

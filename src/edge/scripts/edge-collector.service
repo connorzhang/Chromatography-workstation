@@ -1,0 +1,16 @@
+[Unit]
+Description=Chromatography Edge Collector Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/edge-collector
+ExecStart=/opt/edge-collector/collector-linux-arm64
+Restart=always
+RestartSec=3
+Environment=EDGE_HTTP_BIND=0.0.0.0
+Environment=EDGE_ALLOW_CONTROL=true
+
+[Install]
+WantedBy=multi-user.target

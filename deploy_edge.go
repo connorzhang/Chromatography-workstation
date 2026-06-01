@@ -62,9 +62,9 @@ func main() {
 	}
 	defer conn.Close()
 
-	fmt.Println("Killing existing process...")
+	fmt.Println("Stopping systemd service...")
 	session1, _ := conn.NewSession()
-	session1.Run("fuser -k 8080/tcp; fuser -k 25001/tcp; pkill -f collector")
+	session1.Run("systemctl stop edge-collector.service; fuser -k 8080/tcp; fuser -k 25001/tcp; pkill -f collector")
 	session1.Close()
 
 	time.Sleep(1 * time.Second)
@@ -104,14 +104,12 @@ func main() {
 	fmt.Printf("Remote Log:\n%s\n", string(out))
 	sessionMd5.Close()
 
-	fmt.Println("Starting new process...")
+	fmt.Println("Restarting systemd service...")
 	session2, _ := conn.NewSession()
-	err = session2.Start("bash -lc 'cd /opt/edge-collector && nohup ./collector-linux-arm64 > edge.log 2>&1 < /dev/null &'")
+	err = session2.Run("systemctl restart edge-collector.service")
 	if err != nil {
-		log.Printf("Start command returned: %v", err)
+		log.Printf("Restart service command returned: %v", err)
 	}
-	// Give it a brief moment to detach before closing session
-	time.Sleep(1 * time.Second)
 	session2.Close()
 	fmt.Println("Upgrade to test screen finished!")
 }

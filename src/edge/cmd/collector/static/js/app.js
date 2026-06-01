@@ -4,7 +4,8 @@ import { initMethod } from './views/method.js?v=0.3.21';
 import { initSettings } from './views/settings.js?v=0.3.21';
 import { initProcess } from './views/process.js?v=0.3.21';
 import { initReport } from './views/report.js?v=0.3.21';
-import { initDebug } from './views/debug.js?v=0.3.21';
+import { initDebug } from './views/debug.js?v=0.3.41';
+import { initTCD } from './views/tcd.js?v=0.3.41';
 
 document.addEventListener('DOMContentLoaded', () => {
     const navItems = document.querySelectorAll('.nav-item');
@@ -22,6 +23,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initProcess();
     initReport();
     initDebug();
+    initTCD();
 
     navItems.forEach(item => {
         item.addEventListener('click', () => {
