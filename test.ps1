@@ -1,0 +1,1 @@
+"Hello World" | Out-File -FilePath "D:\GIT\VS2022\Chromatography-workstation\test_ps1.txt"

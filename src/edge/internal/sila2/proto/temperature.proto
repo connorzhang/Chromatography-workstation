@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package sila2.temperature;
+
+option go_package = "chromatography-workstation/edge/internal/sila2/pb;pb";
+
+// The standard SiLA 2 service for a Temperature Controller (e.g. Column Oven, Detector Heater)
+service TemperatureControllerService {
+  // Set the target temperature for a specific zone
+  rpc SetTargetTemperature(SetTargetTemperatureRequest) returns (SetTargetTemperatureResponse) {}
+
+  // Get the current actual and target temperatures
+  rpc GetTemperature(GetTemperatureRequest) returns (GetTemperatureResponse) {}
+
+  // Enable or disable heating
+  rpc SetHeatingState(SetHeatingStateRequest) returns (SetHeatingStateResponse) {}
+}
+
+message SetTargetTemperatureRequest {
+  string zone_id = 1;
+  double target_temperature = 2; // in Celsius
+  double protect_temperature = 3; // safety limit in Celsius
+}
+
+message SetTargetTemperatureResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message GetTemperatureRequest {
+  string zone_id = 1;
+}
+
+message GetTemperatureResponse {
+  double actual_temperature = 1;
+  double target_temperature = 2;
+  double protect_temperature = 3;
+  bool heating_enabled = 4;
+}
+
+message SetHeatingStateRequest {
+  string zone_id = 1;
+  bool enable = 2;
+}
+
+message SetHeatingStateResponse {
+  bool success = 1;
+  string message = 2;
+}

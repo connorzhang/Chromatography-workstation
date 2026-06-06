@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package sila2.valve;
+
+option go_package = "chromatography-workstation/edge/internal/sila2/pb;pb";
+
+// The standard SiLA 2 service for Valve Control (Events/Valves)
+service ValveControllerService {
+  // Switch a specific valve to a given position
+  rpc SwitchValve(SwitchValveRequest) returns (SwitchValveResponse) {}
+
+  // Get the current position/state of a valve
+  rpc GetValveState(GetValveStateRequest) returns (GetValveStateResponse) {}
+}
+
+message SwitchValveRequest {
+  string valve_id = 1;
+  int32 position = 2; // e.g. 0 (Off/Load) or 1 (On/Inject)
+}
+
+message SwitchValveResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message GetValveStateRequest {
+  string valve_id = 1;
+}
+
+message GetValveStateResponse {
+  int32 current_position = 1;
+}

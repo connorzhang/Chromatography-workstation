@@ -75,7 +75,7 @@ func main() {
 	}
 	defer client.Close()
 
-	localFile := "src/edge/build/collector-linux-arm64"
+	localFile := "src/edge/release/collector-linux-arm64"
 	remoteFile := "/opt/edge-collector/collector-linux-arm64"
 
 	srcFile, err := os.Open(localFile)

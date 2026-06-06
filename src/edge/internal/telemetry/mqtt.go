@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"chromatography-workstation/edge/internal/models"
@@ -74,19 +75,33 @@ func (m *MqttClient) Disconnect() {
 	}
 }
 
-func (m *MqttClient) TestPublish() error {
+func (m *MqttClient) getTopic(mn string, sub string) string {
+	base := strings.TrimSpace(m.cfg.MqttTopic)
+	if base == "" {
+		base = "vocs/device"
+	} else {
+		base = strings.TrimSuffix(base, "/")
+	}
+	return fmt.Sprintf("%s/%s/%s", base, mn, sub)
+}
+
+func (m *MqttClient) TestPublish(extNo string) error {
 	if m == nil {
 		return fmt.Errorf("MQTT 客户端未初始化 (可能未启用)")
 	}
 	if !m.client.IsConnected() {
 		return fmt.Errorf("MQTT 尚未连接到 Broker")
 	}
+	if extNo == "" {
+		extNo = "test_device"
+	}
 	payload := map[string]any{
-		"event": "test_connection",
-		"time":  time.Now().Unix(),
+		"event":     "test_connection",
+		"device_id": extNo,
+		"time":      time.Now().Unix(),
 	}
 	b, _ := json.Marshal(payload)
-	topic := "vocs/device/test/info"
+	topic := m.getTopic(extNo, "test")
 	token := m.client.Publish(topic, 1, false, b)
 	if !token.WaitTimeout(3 * time.Second) {
 		return fmt.Errorf("发布超时")
@@ -98,7 +113,7 @@ func (m *MqttClient) PublishInfo(mn string, payload map[string]any) {
 	if m == nil || !m.client.IsConnected() || !m.cfg.MqttUploadInfo {
 		return
 	}
-	topic := fmt.Sprintf("vocs/device/%s/info", mn)
+	topic := m.getTopic(mn, "info")
 	b, _ := json.Marshal(payload)
 	m.client.Publish(topic, 1, false, b)
 }
@@ -107,7 +122,7 @@ func (m *MqttClient) PublishStatus(mn string, payload map[string]any) {
 	if m == nil || !m.client.IsConnected() || !m.cfg.MqttUploadStatus {
 		return
 	}
-	topic := fmt.Sprintf("vocs/device/%s/status", mn)
+	topic := m.getTopic(mn, "status")
 	b, _ := json.Marshal(payload)
 	m.client.Publish(topic, 1, false, b)
 }
@@ -116,7 +131,7 @@ func (m *MqttClient) PublishResult(mn string, payload map[string]any) {
 	if m == nil || !m.client.IsConnected() || !m.cfg.MqttUploadResult {
 		return
 	}
-	topic := fmt.Sprintf("vocs/device/%s/result", mn)
+	topic := m.getTopic(mn, "result")
 	b, _ := json.Marshal(payload)
 	m.client.Publish(topic, 1, false, b)
 }
@@ -125,7 +140,21 @@ func (m *MqttClient) PublishLog(mn string, payload map[string]any) {
 	if m == nil || !m.client.IsConnected() || !m.cfg.MqttUploadLog {
 		return
 	}
-	topic := fmt.Sprintf("vocs/device/%s/log", mn)
+	// Use detailed categorization: log/<level>
+	level, _ := payload["level"].(string)
+	if level == "" {
+		level = "info"
+	}
+	topic := m.getTopic(mn, "log/"+level)
+	b, _ := json.Marshal(payload)
+	m.client.Publish(topic, 1, false, b)
+}
+
+func (m *MqttClient) PublishAudit(mn string, payload map[string]any) {
+	if m == nil || !m.client.IsConnected() || !m.cfg.MqttUploadLog { // Using log config toggle
+		return
+	}
+	topic := m.getTopic(mn, "audit")
 	b, _ := json.Marshal(payload)
 	m.client.Publish(topic, 1, false, b)
 }

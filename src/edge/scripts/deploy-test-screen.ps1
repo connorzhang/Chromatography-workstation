@@ -117,10 +117,10 @@ function Copy-RemoteDir([string]$srcDir, [string]$dstDir) {
   if ($LASTEXITCODE -ne 0) { throw "pscp failed ($LASTEXITCODE)" }
 }
 
-$stopCmd = "set -e; mkdir -p `"$RemoteDir`"; cd `"$RemoteDir`"; if [ -f collector.pid ]; then kill -9 `$(cat collector.pid) 2>/dev/null || true; rm -f collector.pid; fi; killall -9 collector 2>/dev/null || true; fuser -k 8080/tcp 2>/dev/null || true; sleep 1; rm -f collector"
+$stopCmd = "set -e; mkdir -p `"$RemoteDir`"; systemctl stop edge-collector 2>/dev/null || true; cd `"$RemoteDir`"; if [ -f collector.pid ]; then kill -9 `$(cat collector.pid) 2>/dev/null || true; rm -f collector.pid; fi; killall -9 collector collector-linux-arm64 2>/dev/null || true; fuser -k 8080/tcp 2>/dev/null || true; sleep 1; rm -f collector collector-linux-arm64"
 Run-Remote $stopCmd
 
-Copy-Remote $localBin "$RemoteDir/collector"
+Copy-Remote $localBin "$RemoteDir/collector-linux-arm64"
 
 if ($WithData) {
   $localRun = Join-Path $root "publish/edge-collector/.run"
@@ -128,5 +128,5 @@ if ($WithData) {
   Copy-RemoteDir $localRun "$RemoteDir/.run"
 }
 
-$startCmd = "set -e; cd `"$RemoteDir`"; chmod +x ./collector; EDGE_HTTP_BIND=0.0.0.0 EDGE_ALLOW_CONTROL=1 nohup ./collector > collector.log 2>&1 & echo `$! > collector.pid; sleep 1; tail -n 80 collector.log || true"
+$startCmd = "set -e; cd `"$RemoteDir`"; chmod +x ./collector-linux-arm64; if systemctl list-unit-files | grep -q edge-collector; then systemctl start edge-collector; else EDGE_HTTP_BIND=0.0.0.0 EDGE_ALLOW_CONTROL=1 nohup ./collector-linux-arm64 > collector.log 2>&1 & echo `$! > collector.pid; fi; sleep 1"
 Run-Remote $startCmd

@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package sila2.chromatograph;
+
+option go_package = "chromatography-workstation/edge/internal/sila2/pb;pb";
+
+// The standard SiLA 2 service for a Chromatography device
+service ChromatographService {
+  // Starts a new chromatography run
+  rpc StartRun(StartRunRequest) returns (StartRunResponse) {}
+
+  // Stops the current run
+  rpc StopRun(StopRunRequest) returns (StopRunResponse) {}
+
+  // Gets the current standard state of the digital twin
+  rpc GetState(GetStateRequest) returns (GetStateResponse) {}
+
+  // Configures the cycle parameters for autonomous loop
+  rpc SetCycleParameters(SetCycleRequest) returns (SetCycleResponse) {}
+}
+
+message StartRunRequest {
+  string method_id = 1;
+}
+
+message StartRunResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message StopRunRequest {}
+
+message StopRunResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message GetStateRequest {}
+
+message GetStateResponse {
+  string current_state = 1;
+  int32 cycle_count = 2;
+  int32 target_cycle_count = 3;
+}
+
+message SetCycleRequest {
+  int32 cycle_count = 1;      // Target total number of cycles
+  double cycle_interval = 2;  // Interval between cycles in minutes
+}
+
+message SetCycleResponse {
+  bool success = 1;
+  string message = 2;
+}

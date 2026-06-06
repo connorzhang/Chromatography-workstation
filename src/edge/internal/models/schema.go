@@ -88,6 +88,25 @@ type UploadConfig struct {
 	EnableUpload    bool                 `json:"enableUpload"`    // 是否启用上传
 }
 
+// ComponentCapability 定义标准硬件能力项 (符合 SiLA 2 Feature / OPC-UA LADS Component)
+type ComponentCapability struct {
+	ID       string  `json:"id"`                 // 内部标识, 如 "Col", "Event1", "TCD"
+	Label    string  `json:"label"`              // 前端展示的中文名
+	Type     string  `json:"type"`               // 类型: TemperatureZone, Valve, Detector, EPC
+	MaxTemp  float64 `json:"max_temp,omitempty"` // 温度区最高限制
+	MinTemp  float64 `json:"min_temp,omitempty"`
+	MaxFlow  float64 `json:"max_flow,omitempty"`
+	MaxPress float64 `json:"max_press,omitempty"`
+}
+
+// Capabilities 包含当前色谱仪支持的所有模块列表
+type Capabilities struct {
+	Temperatures []ComponentCapability `json:"temperatures"`
+	Events       []ComponentCapability `json:"events"`
+	Detectors    []ComponentCapability `json:"detectors"`
+	EPCs         []ComponentCapability `json:"epcs"`
+}
+
 // SysConfig 系统高级配置 (如 MQTT，不依赖环境变量)
 type SysConfig struct {
 	MqttBroker       string `json:"mqtt_broker"`

@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package sila2.org.silastandard.instruments.chromatographyservice.v1;
+
+// Feature: ChromatographyService
+// This feature allows controlling and monitoring a Gas Chromatograph (GC)
+// based on SiLA 2 (Standard in Lab Automation) specifications.
+service ChromatographyService {
+  // Commands
+  rpc StartAnalysis (StartAnalysis_Parameters) returns (StartAnalysis_Responses);
+  rpc StopAnalysis (StopAnalysis_Parameters) returns (StopAnalysis_Responses);
+  
+  // Properties (Observables)
+  rpc Subscribe_CurrentState (Subscribe_CurrentState_Parameters) returns (stream Subscribe_CurrentState_Responses);
+  rpc Subscribe_Temperatures (Subscribe_Temperatures_Parameters) returns (stream Subscribe_Temperatures_Responses);
+}
+
+// ----------------- Data Types -----------------
+message StartAnalysis_Parameters {
+  string method_name = 1;
+}
+message StartAnalysis_Responses {
+  string session_id = 1;
+}
+
+message StopAnalysis_Parameters {}
+message StopAnalysis_Responses {}
+
+message Subscribe_CurrentState_Parameters {}
+message Subscribe_CurrentState_Responses {
+  string state = 1; // e.g., "Idle", "Running", "Error", "Cooling"
+  double progress_percent = 2;
+}
+
+message Subscribe_Temperatures_Parameters {}
+message Subscribe_Temperatures_Responses {
+  map<string, double> zone_temperatures = 1; // e.g., {"Inj1": 250.0, "Col": 80.0, "Det1": 300.0}
+}

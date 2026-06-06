@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+package sila2.detector;
+
+option go_package = "chromatography-workstation/edge/internal/sila2/pb;pb";
+
+service FlameIonizationDetectorService {
+  rpc Ignite(IgniteRequest) returns (IgniteResponse) {}
+  rpc IgniteConfig(IgniteConfigRequest) returns (IgniteConfigResponse) {}
+}
+
+service ThermalConductivityDetectorService {
+  rpc SetBridge(SetBridgeRequest) returns (SetBridgeResponse) {}
+  rpc Zeroing(ZeroingRequest) returns (ZeroingResponse) {}
+  rpc State(StateRequest) returns (StateResponse) {}
+}
+
+message IgniteRequest {
+  string device_id = 1;
+}
+
+message IgniteResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message IgniteConfigRequest {
+  string device_id = 1;
+  double threshold1 = 2;
+  double threshold2 = 3;
+  double duration = 4;
+}
+
+message IgniteConfigResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message SetBridgeRequest {
+  string device_id = 1;
+  int32 current = 2; // mA
+}
+
+message SetBridgeResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message ZeroingRequest {
+  string device_id = 1;
+}
+
+message ZeroingResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message StateRequest {
+  string device_id = 1;
+}
+
+message StateResponse {
+  bool is_ready = 1;
+  double current_value = 2;
+}
