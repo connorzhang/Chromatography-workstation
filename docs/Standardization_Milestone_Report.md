@@ -60,3 +60,13 @@
 5. [x] **后端自主运行验证**：确认 `engine_scheduler.go` 的循环计算机制脱离前端依赖，完全根据底层 `DigitalTwin` 及 `CycleCount` 独立运行。
 6. [x] **Milestone 2 数据分发机制**：设计并完成了 MQTT 及 Modbus 外发数据的 `GlobalPublisher` 机制。
 7. [x] **扩展接口联调与修正**：修复 MQTT 唯一编码读取遗漏问题，修复 MQTT Topic 层级拼装问题，修复环保数采仪 HTTP 谱图上传 501 路径报错问题，确保对接标准外部系统。
+
+- **Milestone 3: 数据导出接口彻底原生标准化 (已完成)**
+  - 彻底废弃了遗留的 /api/v1/results/nmhc/export.csv 和 /api/history/export.csv 导出路由及其代理转发。
+  - 将 CSV 导出、NMHC 专用 CSV 导出和 XML (AnIML) 导出直接重构并挂载到标准的 DataExportService 命名空间下：
+    - /api/animl/v1/DataExportService/ExportCSV
+    - /api/animl/v1/DataExportService/ExportNMHC
+    - /api/animl/v1/DataExportService/ExportXML
+  - 修复了因为依赖旧版内存存储 (
+mhcStore) 导致导出 CSV 文件为空（只有表头）的严重 Bug，现已直接对接底层的 SQLite JSON 存储引擎 (pstore) 并动态解析数据字段。
+  - 彻底解决了 update_frontend_api.ps1 在 Windows 下追加多重 BOM 导致前端页面黑屏的语法错误。
