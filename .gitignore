@@ -370,3 +370,8 @@ FodyWeavers.xsd
 
 .env
 src/edge/.run/
+
+# License and DRM
+*.lic
+docs/keys/
+
