@@ -285,6 +285,270 @@ func (x *StopRunResponse) GetMessage() string {
 	return ""
 }
 
+type PauseRunRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PauseRunRequest) Reset() {
+	*x = PauseRunRequest{}
+	mi := &file_proto_chromatograph_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PauseRunRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PauseRunRequest) ProtoMessage() {}
+
+func (x *PauseRunRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_chromatograph_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PauseRunRequest.ProtoReflect.Descriptor instead.
+func (*PauseRunRequest) Descriptor() ([]byte, []int) {
+	return file_proto_chromatograph_proto_rawDescGZIP(), []int{6}
+}
+
+type PauseRunResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PauseRunResponse) Reset() {
+	*x = PauseRunResponse{}
+	mi := &file_proto_chromatograph_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PauseRunResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PauseRunResponse) ProtoMessage() {}
+
+func (x *PauseRunResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_chromatograph_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PauseRunResponse.ProtoReflect.Descriptor instead.
+func (*PauseRunResponse) Descriptor() ([]byte, []int) {
+	return file_proto_chromatograph_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *PauseRunResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *PauseRunResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+type ResumeRunRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResumeRunRequest) Reset() {
+	*x = ResumeRunRequest{}
+	mi := &file_proto_chromatograph_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResumeRunRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResumeRunRequest) ProtoMessage() {}
+
+func (x *ResumeRunRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_chromatograph_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResumeRunRequest.ProtoReflect.Descriptor instead.
+func (*ResumeRunRequest) Descriptor() ([]byte, []int) {
+	return file_proto_chromatograph_proto_rawDescGZIP(), []int{8}
+}
+
+type ResumeRunResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResumeRunResponse) Reset() {
+	*x = ResumeRunResponse{}
+	mi := &file_proto_chromatograph_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResumeRunResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResumeRunResponse) ProtoMessage() {}
+
+func (x *ResumeRunResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_chromatograph_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResumeRunResponse.ProtoReflect.Descriptor instead.
+func (*ResumeRunResponse) Descriptor() ([]byte, []int) {
+	return file_proto_chromatograph_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *ResumeRunResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *ResumeRunResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+type AbortRunRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AbortRunRequest) Reset() {
+	*x = AbortRunRequest{}
+	mi := &file_proto_chromatograph_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AbortRunRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AbortRunRequest) ProtoMessage() {}
+
+func (x *AbortRunRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_chromatograph_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AbortRunRequest.ProtoReflect.Descriptor instead.
+func (*AbortRunRequest) Descriptor() ([]byte, []int) {
+	return file_proto_chromatograph_proto_rawDescGZIP(), []int{10}
+}
+
+type AbortRunResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AbortRunResponse) Reset() {
+	*x = AbortRunResponse{}
+	mi := &file_proto_chromatograph_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AbortRunResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AbortRunResponse) ProtoMessage() {}
+
+func (x *AbortRunResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_chromatograph_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AbortRunResponse.ProtoReflect.Descriptor instead.
+func (*AbortRunResponse) Descriptor() ([]byte, []int) {
+	return file_proto_chromatograph_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *AbortRunResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *AbortRunResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
 type GetStateRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -293,7 +557,7 @@ type GetStateRequest struct {
 
 func (x *GetStateRequest) Reset() {
 	*x = GetStateRequest{}
-	mi := &file_proto_chromatograph_proto_msgTypes[6]
+	mi := &file_proto_chromatograph_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -305,7 +569,7 @@ func (x *GetStateRequest) String() string {
 func (*GetStateRequest) ProtoMessage() {}
 
 func (x *GetStateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_chromatograph_proto_msgTypes[6]
+	mi := &file_proto_chromatograph_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -318,7 +582,7 @@ func (x *GetStateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetStateRequest.ProtoReflect.Descriptor instead.
 func (*GetStateRequest) Descriptor() ([]byte, []int) {
-	return file_proto_chromatograph_proto_rawDescGZIP(), []int{6}
+	return file_proto_chromatograph_proto_rawDescGZIP(), []int{12}
 }
 
 type GetStateResponse struct {
@@ -332,7 +596,7 @@ type GetStateResponse struct {
 
 func (x *GetStateResponse) Reset() {
 	*x = GetStateResponse{}
-	mi := &file_proto_chromatograph_proto_msgTypes[7]
+	mi := &file_proto_chromatograph_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -344,7 +608,7 @@ func (x *GetStateResponse) String() string {
 func (*GetStateResponse) ProtoMessage() {}
 
 func (x *GetStateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_chromatograph_proto_msgTypes[7]
+	mi := &file_proto_chromatograph_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -357,7 +621,7 @@ func (x *GetStateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetStateResponse.ProtoReflect.Descriptor instead.
 func (*GetStateResponse) Descriptor() ([]byte, []int) {
-	return file_proto_chromatograph_proto_rawDescGZIP(), []int{7}
+	return file_proto_chromatograph_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *GetStateResponse) GetCurrentState() string {
@@ -391,7 +655,7 @@ type SetCycleRequest struct {
 
 func (x *SetCycleRequest) Reset() {
 	*x = SetCycleRequest{}
-	mi := &file_proto_chromatograph_proto_msgTypes[8]
+	mi := &file_proto_chromatograph_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -403,7 +667,7 @@ func (x *SetCycleRequest) String() string {
 func (*SetCycleRequest) ProtoMessage() {}
 
 func (x *SetCycleRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_chromatograph_proto_msgTypes[8]
+	mi := &file_proto_chromatograph_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -416,7 +680,7 @@ func (x *SetCycleRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetCycleRequest.ProtoReflect.Descriptor instead.
 func (*SetCycleRequest) Descriptor() ([]byte, []int) {
-	return file_proto_chromatograph_proto_rawDescGZIP(), []int{8}
+	return file_proto_chromatograph_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *SetCycleRequest) GetCycleCount() int32 {
@@ -443,7 +707,7 @@ type SetCycleResponse struct {
 
 func (x *SetCycleResponse) Reset() {
 	*x = SetCycleResponse{}
-	mi := &file_proto_chromatograph_proto_msgTypes[9]
+	mi := &file_proto_chromatograph_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -455,7 +719,7 @@ func (x *SetCycleResponse) String() string {
 func (*SetCycleResponse) ProtoMessage() {}
 
 func (x *SetCycleResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_chromatograph_proto_msgTypes[9]
+	mi := &file_proto_chromatograph_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -468,7 +732,7 @@ func (x *SetCycleResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetCycleResponse.ProtoReflect.Descriptor instead.
 func (*SetCycleResponse) Descriptor() ([]byte, []int) {
-	return file_proto_chromatograph_proto_rawDescGZIP(), []int{9}
+	return file_proto_chromatograph_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *SetCycleResponse) GetSuccess() bool {
@@ -505,6 +769,18 @@ const file_proto_chromatograph_proto_rawDesc = "" +
 	"\x0fStopRunResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"\x11\n" +
+	"\x0fPauseRunRequest\"F\n" +
+	"\x10PauseRunResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"\x12\n" +
+	"\x10ResumeRunRequest\"G\n" +
+	"\x11ResumeRunResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"\x11\n" +
+	"\x0fAbortRunRequest\"F\n" +
+	"\x10AbortRunResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"\x11\n" +
 	"\x0fGetStateRequest\"\x86\x01\n" +
 	"\x10GetStateResponse\x12#\n" +
 	"\rcurrent_state\x18\x01 \x01(\tR\fcurrentState\x12\x1f\n" +
@@ -517,10 +793,13 @@ const file_proto_chromatograph_proto_rawDesc = "" +
 	"\x0ecycle_interval\x18\x02 \x01(\x01R\rcycleInterval\"F\n" +
 	"\x10SetCycleResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage2\x9e\x04\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage2\xb2\x06\n" +
 	"\x14ChromatographService\x12Y\n" +
 	"\bStartRun\x12$.sila2.chromatograph.StartRunRequest\x1a%.sila2.chromatograph.StartRunResponse\"\x00\x12V\n" +
 	"\aStopRun\x12#.sila2.chromatograph.StopRunRequest\x1a$.sila2.chromatograph.StopRunResponse\"\x00\x12Y\n" +
+	"\bPauseRun\x12$.sila2.chromatograph.PauseRunRequest\x1a%.sila2.chromatograph.PauseRunResponse\"\x00\x12\\\n" +
+	"\tResumeRun\x12%.sila2.chromatograph.ResumeRunRequest\x1a&.sila2.chromatograph.ResumeRunResponse\"\x00\x12Y\n" +
+	"\bAbortRun\x12$.sila2.chromatograph.AbortRunRequest\x1a%.sila2.chromatograph.AbortRunResponse\"\x00\x12Y\n" +
 	"\bGetState\x12$.sila2.chromatograph.GetStateRequest\x1a%.sila2.chromatograph.GetStateResponse\"\x00\x12c\n" +
 	"\x12SetCycleParameters\x12$.sila2.chromatograph.SetCycleRequest\x1a%.sila2.chromatograph.SetCycleResponse\"\x00\x12\x92\x01\n" +
 	"\x1bSubscribe_AnalyticalResults\x126.sila2.chromatograph.SubscribeAnalyticalResultsRequest\x1a7.sila2.chromatograph.SubscribeAnalyticalResultsResponse\"\x000\x01B6Z4chromatography-workstation/edge/internal/sila2/pb;pbb\x06proto3"
@@ -537,7 +816,7 @@ func file_proto_chromatograph_proto_rawDescGZIP() []byte {
 	return file_proto_chromatograph_proto_rawDescData
 }
 
-var file_proto_chromatograph_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_proto_chromatograph_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
 var file_proto_chromatograph_proto_goTypes = []any{
 	(*SubscribeAnalyticalResultsRequest)(nil),  // 0: sila2.chromatograph.SubscribeAnalyticalResultsRequest
 	(*SubscribeAnalyticalResultsResponse)(nil), // 1: sila2.chromatograph.SubscribeAnalyticalResultsResponse
@@ -545,26 +824,38 @@ var file_proto_chromatograph_proto_goTypes = []any{
 	(*StartRunResponse)(nil),                   // 3: sila2.chromatograph.StartRunResponse
 	(*StopRunRequest)(nil),                     // 4: sila2.chromatograph.StopRunRequest
 	(*StopRunResponse)(nil),                    // 5: sila2.chromatograph.StopRunResponse
-	(*GetStateRequest)(nil),                    // 6: sila2.chromatograph.GetStateRequest
-	(*GetStateResponse)(nil),                   // 7: sila2.chromatograph.GetStateResponse
-	(*SetCycleRequest)(nil),                    // 8: sila2.chromatograph.SetCycleRequest
-	(*SetCycleResponse)(nil),                   // 9: sila2.chromatograph.SetCycleResponse
-	nil,                                        // 10: sila2.chromatograph.SubscribeAnalyticalResultsResponse.ResultsEntry
+	(*PauseRunRequest)(nil),                    // 6: sila2.chromatograph.PauseRunRequest
+	(*PauseRunResponse)(nil),                   // 7: sila2.chromatograph.PauseRunResponse
+	(*ResumeRunRequest)(nil),                   // 8: sila2.chromatograph.ResumeRunRequest
+	(*ResumeRunResponse)(nil),                  // 9: sila2.chromatograph.ResumeRunResponse
+	(*AbortRunRequest)(nil),                    // 10: sila2.chromatograph.AbortRunRequest
+	(*AbortRunResponse)(nil),                   // 11: sila2.chromatograph.AbortRunResponse
+	(*GetStateRequest)(nil),                    // 12: sila2.chromatograph.GetStateRequest
+	(*GetStateResponse)(nil),                   // 13: sila2.chromatograph.GetStateResponse
+	(*SetCycleRequest)(nil),                    // 14: sila2.chromatograph.SetCycleRequest
+	(*SetCycleResponse)(nil),                   // 15: sila2.chromatograph.SetCycleResponse
+	nil,                                        // 16: sila2.chromatograph.SubscribeAnalyticalResultsResponse.ResultsEntry
 }
 var file_proto_chromatograph_proto_depIdxs = []int32{
-	10, // 0: sila2.chromatograph.SubscribeAnalyticalResultsResponse.results:type_name -> sila2.chromatograph.SubscribeAnalyticalResultsResponse.ResultsEntry
+	16, // 0: sila2.chromatograph.SubscribeAnalyticalResultsResponse.results:type_name -> sila2.chromatograph.SubscribeAnalyticalResultsResponse.ResultsEntry
 	2,  // 1: sila2.chromatograph.ChromatographService.StartRun:input_type -> sila2.chromatograph.StartRunRequest
 	4,  // 2: sila2.chromatograph.ChromatographService.StopRun:input_type -> sila2.chromatograph.StopRunRequest
-	6,  // 3: sila2.chromatograph.ChromatographService.GetState:input_type -> sila2.chromatograph.GetStateRequest
-	8,  // 4: sila2.chromatograph.ChromatographService.SetCycleParameters:input_type -> sila2.chromatograph.SetCycleRequest
-	0,  // 5: sila2.chromatograph.ChromatographService.Subscribe_AnalyticalResults:input_type -> sila2.chromatograph.SubscribeAnalyticalResultsRequest
-	3,  // 6: sila2.chromatograph.ChromatographService.StartRun:output_type -> sila2.chromatograph.StartRunResponse
-	5,  // 7: sila2.chromatograph.ChromatographService.StopRun:output_type -> sila2.chromatograph.StopRunResponse
-	7,  // 8: sila2.chromatograph.ChromatographService.GetState:output_type -> sila2.chromatograph.GetStateResponse
-	9,  // 9: sila2.chromatograph.ChromatographService.SetCycleParameters:output_type -> sila2.chromatograph.SetCycleResponse
-	1,  // 10: sila2.chromatograph.ChromatographService.Subscribe_AnalyticalResults:output_type -> sila2.chromatograph.SubscribeAnalyticalResultsResponse
-	6,  // [6:11] is the sub-list for method output_type
-	1,  // [1:6] is the sub-list for method input_type
+	6,  // 3: sila2.chromatograph.ChromatographService.PauseRun:input_type -> sila2.chromatograph.PauseRunRequest
+	8,  // 4: sila2.chromatograph.ChromatographService.ResumeRun:input_type -> sila2.chromatograph.ResumeRunRequest
+	10, // 5: sila2.chromatograph.ChromatographService.AbortRun:input_type -> sila2.chromatograph.AbortRunRequest
+	12, // 6: sila2.chromatograph.ChromatographService.GetState:input_type -> sila2.chromatograph.GetStateRequest
+	14, // 7: sila2.chromatograph.ChromatographService.SetCycleParameters:input_type -> sila2.chromatograph.SetCycleRequest
+	0,  // 8: sila2.chromatograph.ChromatographService.Subscribe_AnalyticalResults:input_type -> sila2.chromatograph.SubscribeAnalyticalResultsRequest
+	3,  // 9: sila2.chromatograph.ChromatographService.StartRun:output_type -> sila2.chromatograph.StartRunResponse
+	5,  // 10: sila2.chromatograph.ChromatographService.StopRun:output_type -> sila2.chromatograph.StopRunResponse
+	7,  // 11: sila2.chromatograph.ChromatographService.PauseRun:output_type -> sila2.chromatograph.PauseRunResponse
+	9,  // 12: sila2.chromatograph.ChromatographService.ResumeRun:output_type -> sila2.chromatograph.ResumeRunResponse
+	11, // 13: sila2.chromatograph.ChromatographService.AbortRun:output_type -> sila2.chromatograph.AbortRunResponse
+	13, // 14: sila2.chromatograph.ChromatographService.GetState:output_type -> sila2.chromatograph.GetStateResponse
+	15, // 15: sila2.chromatograph.ChromatographService.SetCycleParameters:output_type -> sila2.chromatograph.SetCycleResponse
+	1,  // 16: sila2.chromatograph.ChromatographService.Subscribe_AnalyticalResults:output_type -> sila2.chromatograph.SubscribeAnalyticalResultsResponse
+	9,  // [9:17] is the sub-list for method output_type
+	1,  // [1:9] is the sub-list for method input_type
 	1,  // [1:1] is the sub-list for extension type_name
 	1,  // [1:1] is the sub-list for extension extendee
 	0,  // [0:1] is the sub-list for field type_name
@@ -581,7 +872,7 @@ func file_proto_chromatograph_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_chromatograph_proto_rawDesc), len(file_proto_chromatograph_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   11,
+			NumMessages:   17,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

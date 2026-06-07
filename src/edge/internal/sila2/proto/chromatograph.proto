@@ -9,8 +9,17 @@ service ChromatographService {
   // Starts a new chromatography run
   rpc StartRun(StartRunRequest) returns (StartRunResponse) {}
 
-  // Stops the current run
+  // Stops the current run (Graceful stop)
   rpc StopRun(StopRunRequest) returns (StopRunResponse) {}
+
+  // Pauses the current run
+  rpc PauseRun(PauseRunRequest) returns (PauseRunResponse) {}
+
+  // Resumes a paused run
+  rpc ResumeRun(ResumeRunRequest) returns (ResumeRunResponse) {}
+
+  // Aborts the current run (Emergency stop)
+  rpc AbortRun(AbortRunRequest) returns (AbortRunResponse) {}
 
   // Gets the current standard state of the digital twin
   rpc GetState(GetStateRequest) returns (GetStateResponse) {}
@@ -40,6 +49,27 @@ message StartRunResponse {
 message StopRunRequest {}
 
 message StopRunResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message PauseRunRequest {}
+
+message PauseRunResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message ResumeRunRequest {}
+
+message ResumeRunResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message AbortRunRequest {}
+
+message AbortRunResponse {
   bool success = 1;
   string message = 2;
 }

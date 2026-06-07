@@ -16,19 +16,17 @@ const (
 	// StateIdle indicates the device is idle and not actively controlling.
 	StateIdle TwinState = "Idle"
 
-	// StatePreProcessing indicates the device is preparing for a run
-	// (e.g., heating up the column oven, waiting for baseline stability).
-	StatePreProcessing TwinState = "PreProcessing"
-
-	// StateReady indicates the device is ready to accept a Start command.
-	StateReady TwinState = "Ready"
+	// StateStarting indicates the device is preparing for a run
+	StateStarting TwinState = "Starting"
 
 	// StateRunning indicates the device is currently executing a method/acquiring data.
 	StateRunning TwinState = "Running"
 
-	// StatePostProcessing indicates the device has finished data acquisition
-	// and is performing post-run activities (e.g., purging, cooling down).
-	StatePostProcessing TwinState = "PostProcessing"
+	// StatePaused indicates the device execution has been paused.
+	StatePaused TwinState = "Paused"
+
+	// StateAborted indicates the device run was aborted.
+	StateAborted TwinState = "Aborted"
 
 	// StateError indicates a hardware or software fault.
 	StateError TwinState = "Error"

@@ -21,6 +21,9 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	ChromatographService_StartRun_FullMethodName                    = "/sila2.chromatograph.ChromatographService/StartRun"
 	ChromatographService_StopRun_FullMethodName                     = "/sila2.chromatograph.ChromatographService/StopRun"
+	ChromatographService_PauseRun_FullMethodName                    = "/sila2.chromatograph.ChromatographService/PauseRun"
+	ChromatographService_ResumeRun_FullMethodName                   = "/sila2.chromatograph.ChromatographService/ResumeRun"
+	ChromatographService_AbortRun_FullMethodName                    = "/sila2.chromatograph.ChromatographService/AbortRun"
 	ChromatographService_GetState_FullMethodName                    = "/sila2.chromatograph.ChromatographService/GetState"
 	ChromatographService_SetCycleParameters_FullMethodName          = "/sila2.chromatograph.ChromatographService/SetCycleParameters"
 	ChromatographService_Subscribe_AnalyticalResults_FullMethodName = "/sila2.chromatograph.ChromatographService/Subscribe_AnalyticalResults"
@@ -34,8 +37,14 @@ const (
 type ChromatographServiceClient interface {
 	// Starts a new chromatography run
 	StartRun(ctx context.Context, in *StartRunRequest, opts ...grpc.CallOption) (*StartRunResponse, error)
-	// Stops the current run
+	// Stops the current run (Graceful stop)
 	StopRun(ctx context.Context, in *StopRunRequest, opts ...grpc.CallOption) (*StopRunResponse, error)
+	// Pauses the current run
+	PauseRun(ctx context.Context, in *PauseRunRequest, opts ...grpc.CallOption) (*PauseRunResponse, error)
+	// Resumes a paused run
+	ResumeRun(ctx context.Context, in *ResumeRunRequest, opts ...grpc.CallOption) (*ResumeRunResponse, error)
+	// Aborts the current run (Emergency stop)
+	AbortRun(ctx context.Context, in *AbortRunRequest, opts ...grpc.CallOption) (*AbortRunResponse, error)
 	// Gets the current standard state of the digital twin
 	GetState(ctx context.Context, in *GetStateRequest, opts ...grpc.CallOption) (*GetStateResponse, error)
 	// Configures the cycle parameters for autonomous loop
@@ -66,6 +75,36 @@ func (c *chromatographServiceClient) StopRun(ctx context.Context, in *StopRunReq
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(StopRunResponse)
 	err := c.cc.Invoke(ctx, ChromatographService_StopRun_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chromatographServiceClient) PauseRun(ctx context.Context, in *PauseRunRequest, opts ...grpc.CallOption) (*PauseRunResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PauseRunResponse)
+	err := c.cc.Invoke(ctx, ChromatographService_PauseRun_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chromatographServiceClient) ResumeRun(ctx context.Context, in *ResumeRunRequest, opts ...grpc.CallOption) (*ResumeRunResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResumeRunResponse)
+	err := c.cc.Invoke(ctx, ChromatographService_ResumeRun_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chromatographServiceClient) AbortRun(ctx context.Context, in *AbortRunRequest, opts ...grpc.CallOption) (*AbortRunResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AbortRunResponse)
+	err := c.cc.Invoke(ctx, ChromatographService_AbortRun_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -119,8 +158,14 @@ type ChromatographService_Subscribe_AnalyticalResultsClient = grpc.ServerStreami
 type ChromatographServiceServer interface {
 	// Starts a new chromatography run
 	StartRun(context.Context, *StartRunRequest) (*StartRunResponse, error)
-	// Stops the current run
+	// Stops the current run (Graceful stop)
 	StopRun(context.Context, *StopRunRequest) (*StopRunResponse, error)
+	// Pauses the current run
+	PauseRun(context.Context, *PauseRunRequest) (*PauseRunResponse, error)
+	// Resumes a paused run
+	ResumeRun(context.Context, *ResumeRunRequest) (*ResumeRunResponse, error)
+	// Aborts the current run (Emergency stop)
+	AbortRun(context.Context, *AbortRunRequest) (*AbortRunResponse, error)
 	// Gets the current standard state of the digital twin
 	GetState(context.Context, *GetStateRequest) (*GetStateResponse, error)
 	// Configures the cycle parameters for autonomous loop
@@ -142,6 +187,15 @@ func (UnimplementedChromatographServiceServer) StartRun(context.Context, *StartR
 }
 func (UnimplementedChromatographServiceServer) StopRun(context.Context, *StopRunRequest) (*StopRunResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method StopRun not implemented")
+}
+func (UnimplementedChromatographServiceServer) PauseRun(context.Context, *PauseRunRequest) (*PauseRunResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method PauseRun not implemented")
+}
+func (UnimplementedChromatographServiceServer) ResumeRun(context.Context, *ResumeRunRequest) (*ResumeRunResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResumeRun not implemented")
+}
+func (UnimplementedChromatographServiceServer) AbortRun(context.Context, *AbortRunRequest) (*AbortRunResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AbortRun not implemented")
 }
 func (UnimplementedChromatographServiceServer) GetState(context.Context, *GetStateRequest) (*GetStateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetState not implemented")
@@ -209,6 +263,60 @@ func _ChromatographService_StopRun_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ChromatographService_PauseRun_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PauseRunRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChromatographServiceServer).PauseRun(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChromatographService_PauseRun_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChromatographServiceServer).PauseRun(ctx, req.(*PauseRunRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ChromatographService_ResumeRun_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResumeRunRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChromatographServiceServer).ResumeRun(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChromatographService_ResumeRun_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChromatographServiceServer).ResumeRun(ctx, req.(*ResumeRunRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ChromatographService_AbortRun_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AbortRunRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChromatographServiceServer).AbortRun(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChromatographService_AbortRun_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChromatographServiceServer).AbortRun(ctx, req.(*AbortRunRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ChromatographService_GetState_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetStateRequest)
 	if err := dec(in); err != nil {
@@ -270,6 +378,18 @@ var ChromatographService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "StopRun",
 			Handler:    _ChromatographService_StopRun_Handler,
+		},
+		{
+			MethodName: "PauseRun",
+			Handler:    _ChromatographService_PauseRun_Handler,
+		},
+		{
+			MethodName: "ResumeRun",
+			Handler:    _ChromatographService_ResumeRun_Handler,
+		},
+		{
+			MethodName: "AbortRun",
+			Handler:    _ChromatographService_AbortRun_Handler,
 		},
 		{
 			MethodName: "GetState",

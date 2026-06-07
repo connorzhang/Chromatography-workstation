@@ -1,7 +1,7 @@
 package publisher
 
 import (
-	"chromatography-workstation/edge/internal/contracts/v1"
+	v1 "chromatography-workstation/edge/internal/contracts/v1"
 	"chromatography-workstation/edge/internal/modbusslave"
 	"chromatography-workstation/edge/internal/models"
 	"fmt"
@@ -37,13 +37,13 @@ func (m *ModbusAdapter) PublishState(deviceID string, deviceNo string, state mod
 	switch state {
 	case models.StateIdle:
 		st = 0
-	case models.StatePreProcessing:
+	case models.StateStarting:
 		st = 2
 	case models.StateRunning:
 		st = 1 // Measuring
-	case models.StatePostProcessing:
+	case models.StatePaused:
 		st = 3
-	case models.StateError:
+	case models.StateError, models.StateAborted:
 		st = 4
 	}
 	m.Server.SetUint16(101, st)
@@ -91,7 +91,7 @@ func (m *ModbusAdapter) PublishAudit(deviceID string, deviceNo string, user stri
 	return nil
 }
 
-// GetUnderlyingServer returns the raw modbusslave.Server to maintain backward compatibility 
+// GetUnderlyingServer returns the raw modbusslave.Server to maintain backward compatibility
 // for specific register writes in main.go (e.g. SetFloat32(111, ...))
 func (m *ModbusAdapter) GetUnderlyingServer() *modbusslave.Server {
 	return m.Server
