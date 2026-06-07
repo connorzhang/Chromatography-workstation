@@ -43,7 +43,7 @@ func browseRecursive(ctx context.Context, client *opcua.Client, n *opcua.Node, i
 	}
 
 	for _, ref := range resp.Results[0].References {
-		fmt.Printf("%s- %s (%s)", indent, ref.BrowseName.Name, ref.NodeClass)
+		fmt.Printf("%s- %s (%s) [NodeID: %v]", indent, ref.BrowseName.Name, ref.NodeClass, ref.NodeID.NodeID)
 		childNode := client.Node(ref.NodeID.NodeID)
 		if ref.NodeClass == ua.NodeClassVariable {
 			if val, err := childNode.Value(ctx); err == nil && val != nil {
