@@ -1,53 +1,48 @@
 package license
 
 import (
-	"crypto"
-	"crypto/rsa"
+	"crypto/ecdsa"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
-	"encoding/json"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/pem"
 	"fmt"
+	"math/big"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 )
 
-// In a real production environment, you should use //go:embed to embed the key file.
-// For this setup, we'll embed the public key directly as a string constant.
 const PublicKeyPEM = `-----BEGIN PUBLIC KEY-----
-MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA6NtVqXbt/MKPw6LHZ3u6
-/eBQAf8x5SMMBhkWKVF+Y1DL84gSbpkt6HMExhCrYt2mpMI2uSFZ1W/Jt5ieXwU2
-DuBN0gCxAPUWMg3zAE46BEz/ZR5gOySGJNa9X1cGkbWX9czo4gOKnD8wpLANgUOg
-YwmcifxDTykxZGKcHor6mJDH5F0ikeQAyu1YvkmP6iawnhSeGAbkjDjwAUyDaqdr
-BGH9SRkk8/LZ0DuFc3HnnGAdx+RuV2/xoehVGc/ua8UnQQyA73OiY0EXyzPMxNzc
-hpaVCkttZbD6aNBTER99ynQDfG4cR4INudYao3NM/5NJfuXnpJUMlPAy2GrxAqdN
-vwIDAQAB
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEX316Bc9ZzHiahYMe53/0QSqZJfIN
+pPwhzMnEW08ap6OIcAuE2Ic4kAtQ8BP21ua4DbKDeOSLJHM2idVVMZ0UbA==
 -----END PUBLIC KEY-----`
 
 type LicensePayload struct {
 	MachineID string `json:"machine_id"`
-	Exp       int64  `json:"exp"` // Unix timestamp, 0 means permanent
-	IssuedAt  int64  `json:"issued_at"`
-	Tier      string `json:"tier"` // e.g. "standard", "advanced"
-	Signature string `json:"signature"` // base64 encoded RSA signature
+	Exp       int64  `json:"exp"`
+	Tier      string `json:"tier"`
 }
 
-// VerifyLicense checks the license file for authenticity and expiration.
-func VerifyLicense(filePath string) (*LicensePayload, error) {
-	data, err := os.ReadFile(filePath)
+// VerifyCode checks the short activation code
+func VerifyCode(code string) (*LicensePayload, error) {
+	data, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(code))
 	if err != nil {
-		return nil, fmt.Errorf("无法读取授权文件 (未找到 license.lic): %v", err)
+		return nil, fmt.Errorf("无效的授权码格式")
+	}
+	if len(data) != 77 {
+		return nil, fmt.Errorf("授权码长度或类型不匹配")
 	}
 
-	var payload LicensePayload
-	if err := json.Unmarshal(data, &payload); err != nil {
-		return nil, fmt.Errorf("授权文件格式错误: %v", err)
-	}
+	payloadBytes := data[:13]
+	rBytes := data[13:45]
+	sBytes := data[45:77]
 
-	// 1. Verify RSA Signature
-	raw := fmt.Sprintf("%s|%d|%d|%s", payload.MachineID, payload.Exp, payload.IssuedAt, payload.Tier)
-	hash := sha256.Sum256([]byte(raw))
+	// Verify ECC Signature
+	hash := sha256.Sum256(payloadBytes)
 
 	block, _ := pem.Decode([]byte(PublicKeyPEM))
 	if block == nil {
@@ -59,29 +54,51 @@ func VerifyLicense(filePath string) (*LicensePayload, error) {
 		return nil, fmt.Errorf("公钥解析失败: %v", err)
 	}
 
-	rsaPub, ok := pub.(*rsa.PublicKey)
+	ecdsaPub, ok := pub.(*ecdsa.PublicKey)
 	if !ok {
-		return nil, fmt.Errorf("非RSA公钥")
+		return nil, fmt.Errorf("非ECC公钥")
 	}
 
-	sig, err := base64.StdEncoding.DecodeString(payload.Signature)
+	r := new(big.Int).SetBytes(rBytes)
+	s := new(big.Int).SetBytes(sBytes)
+
+	if !ecdsa.Verify(ecdsaPub, hash[:], r, s) {
+		return nil, fmt.Errorf("授权签名校验失败，授权码伪造或损坏")
+	}
+
+	// Parse payload
+	macIDBytes := payloadBytes[0:8]
+	macIDHex := strings.ToUpper(hex.EncodeToString(macIDBytes))
+	macIDStr := macIDHex[0:4] + "-" + macIDHex[4:8] + "-" + macIDHex[8:12] + "-" + macIDHex[12:16]
+
+	exp := int64(binary.BigEndian.Uint32(payloadBytes[8:12]))
+	tierByte := payloadBytes[12]
+	tier := "standard"
+	if tierByte == 1 {
+		tier = "advanced"
+	}
+
+	// Check Machine ID
+	if macIDStr != GetMachineID() {
+		return nil, fmt.Errorf("授权码与本机不匹配 (当前: %s, 授权: %s)", GetMachineID(), macIDStr)
+	}
+
+	// Check Expiration
+	if exp > 0 && time.Now().Unix() > exp {
+		return nil, fmt.Errorf("授权已过期 (过期时间: %s)", time.Unix(exp, 0).Format("2006-01-02"))
+	}
+
+	return &LicensePayload{MachineID: macIDStr, Exp: exp, Tier: tier}, nil
+}
+
+func SaveCode(dataDir string, code string) error {
+	return os.WriteFile(filepath.Join(dataDir, "activation.key"), []byte(strings.TrimSpace(code)), 0644)
+}
+
+func LoadAndVerify(dataDir string) (*LicensePayload, error) {
+	code, err := os.ReadFile(filepath.Join(dataDir, "activation.key"))
 	if err != nil {
-		return nil, fmt.Errorf("签名解码失败")
+		return nil, fmt.Errorf("设备未激活，找不到授权记录")
 	}
-
-	if err := rsa.VerifyPKCS1v15(rsaPub, crypto.SHA256, hash[:], sig); err != nil {
-		return nil, fmt.Errorf("授权签名校验失败，文件被篡改")
-	}
-
-	// 2. Check Machine ID
-	if payload.MachineID != GetMachineID() {
-		return nil, fmt.Errorf("授权文件不属于本机，机器码不匹配 (当前: %s, 授权: %s)", GetMachineID(), payload.MachineID)
-	}
-
-	// 3. Check Expiration
-	if payload.Exp > 0 && time.Now().Unix() > payload.Exp {
-		return nil, fmt.Errorf("授权已过期 (过期时间: %s)", time.Unix(payload.Exp, 0).Format(time.RFC3339))
-	}
-
-	return &payload, nil
+	return VerifyCode(string(code))
 }

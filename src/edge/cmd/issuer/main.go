@@ -1,34 +1,26 @@
 package main
 
 import (
-	"crypto"
+	"crypto/ecdsa"
 	"crypto/rand"
-	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
-	"encoding/json"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/pem"
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
-
-type LicensePayload struct {
-	MachineID string `json:"machine_id"`
-	Exp       int64  `json:"exp"`
-	IssuedAt  int64  `json:"issued_at"`
-	Tier      string `json:"tier"`
-	Signature string `json:"signature"`
-}
 
 func main() {
 	machineID := flag.String("m", "", "Machine ID of the client (required)")
 	days := flag.Int("d", 365, "Valid days (0 for permanent)")
 	tier := flag.String("t", "advanced", "License tier (e.g. standard, advanced)")
-	keyPath := flag.String("k", "../../docs/keys/license_private.pem", "Path to RSA private key")
-	outPath := flag.String("o", "license.lic", "Output license file path")
+	keyPath := flag.String("k", "docs/keys/license_private.pem", "Path to ECC private key")
 	flag.Parse()
 
 	if *machineID == "" {
@@ -49,49 +41,67 @@ func main() {
 		os.Exit(1)
 	}
 
-	privKey, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+	privKey, err := x509.ParseECPrivateKey(block.Bytes)
 	if err != nil {
 		fmt.Printf("Failed to parse private key: %v\n", err)
 		os.Exit(1)
 	}
 
 	// 2. Prepare payload
-	issuedAt := time.Now().Unix()
-	var exp int64 = 0
-	if *days > 0 {
-		exp = time.Now().AddDate(0, 0, *days).Unix()
+	macStr := strings.ReplaceAll(*machineID, "-", "")
+	macBytes, err := hex.DecodeString(macStr)
+	if err != nil || len(macBytes) != 8 {
+		fmt.Println("Error: Invalid Machine ID format. Must be XXXX-XXXX-XXXX-XXXX")
+		os.Exit(1)
 	}
 
-	raw := fmt.Sprintf("%s|%d|%d|%s", *machineID, exp, issuedAt, *tier)
-	hash := sha256.Sum256([]byte(raw))
+	var exp uint32 = 0
+	if *days > 0 {
+		exp = uint32(time.Now().AddDate(0, 0, *days).Unix())
+	}
+
+	payload := make([]byte, 13)
+	copy(payload[0:8], macBytes)
+	binary.BigEndian.PutUint32(payload[8:12], exp)
+	if *tier == "advanced" {
+		payload[12] = 1
+	} else {
+		payload[12] = 0
+	}
 
 	// 3. Sign
-	sig, err := rsa.SignPKCS1v15(rand.Reader, privKey, crypto.SHA256, hash[:])
+	hash := sha256.Sum256(payload)
+	r, s, err := ecdsa.Sign(rand.Reader, privKey, hash[:])
 	if err != nil {
 		fmt.Printf("Failed to sign: %v\n", err)
 		os.Exit(1)
 	}
 
-	payload := LicensePayload{
-		MachineID: *machineID,
-		Exp:       exp,
-		IssuedAt:  issuedAt,
-		Tier:      *tier,
-		Signature: base64.StdEncoding.EncodeToString(sig),
-	}
+	// Enforce 32 bytes for P-256 r and s
+	rBytes := make([]byte, 32)
+	r.FillBytes(rBytes)
+	sBytes := make([]byte, 32)
+	s.FillBytes(sBytes)
 
-	// 4. Save
-	outData, _ := json.MarshalIndent(payload, "", "  ")
-	if err := os.WriteFile(*outPath, outData, 0644); err != nil {
-		fmt.Printf("Failed to write license file: %v\n", err)
-		os.Exit(1)
-	}
+	// 4. Construct final 77-byte data
+	finalData := append(payload, rBytes...)
+	finalData = append(finalData, sBytes...)
 
-	fmt.Printf("License generated successfully at %s\n", *outPath)
+	// 5. Encode
+	code := base64.RawURLEncoding.EncodeToString(finalData)
+
+	fmt.Println("============================================")
 	fmt.Printf("Machine ID: %s\n", *machineID)
 	if exp == 0 {
 		fmt.Println("Expiration: Permanent")
 	} else {
-		fmt.Printf("Expiration: %s\n", time.Unix(exp, 0).Format(time.RFC3339))
+		fmt.Printf("Expiration: %s\n", time.Unix(int64(exp), 0).Format("2006-01-02 15:04:05"))
 	}
+	fmt.Printf("Tier      : %s\n", *tier)
+	fmt.Println("============================================")
+	fmt.Println("ACTIVATION CODE (Copy and paste this into the software):")
+	fmt.Println()
+	fmt.Println(code)
+	fmt.Println()
+	fmt.Println("============================================")
 }
