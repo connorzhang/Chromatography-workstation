@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"chromatography-workstation/edge/internal/components"
 	"chromatography-workstation/edge/internal/models"
 	pb "chromatography-workstation/edge/internal/sila2/pb"
 )
@@ -18,6 +19,16 @@ func NewFlameIonizationDetectorServer(twin *models.DigitalTwin) *FlameIonization
 }
 
 func (s *FlameIonizationDetectorServer) Ignite(ctx context.Context, req *pb.IgniteRequest) (*pb.IgniteResponse, error) {
+	comp, exists := s.twin.GetComponent(req.DeviceId) // Assumes DeviceId is the component ID (e.g. FID1)
+	if exists {
+		if dComp, ok := comp.(components.DetectorComponent); ok {
+			err := dComp.SetIgnite(true)
+			if err != nil {
+				return &pb.IgniteResponse{Success: false, Message: err.Error()}, nil
+			}
+		}
+	}
+	
 	s.twin.AppendAuditLog("Ignite", "gRPC_Client", fmt.Sprintf("Igniting FID on device %s", req.DeviceId))
 	return &pb.IgniteResponse{
 		Success: true,
@@ -43,6 +54,16 @@ func NewThermalConductivityDetectorServer(twin *models.DigitalTwin) *ThermalCond
 }
 
 func (s *ThermalConductivityDetectorServer) SetBridge(ctx context.Context, req *pb.SetBridgeRequest) (*pb.SetBridgeResponse, error) {
+	comp, exists := s.twin.GetComponent(req.DeviceId) // Assumes DeviceId is the component ID (e.g. TCD1)
+	if exists {
+		if dComp, ok := comp.(components.DetectorComponent); ok {
+			err := dComp.SetBridgeCurrent(int(req.Current))
+			if err != nil {
+				return &pb.SetBridgeResponse{Success: false, Message: err.Error()}, nil
+			}
+		}
+	}
+
 	s.twin.AppendAuditLog("SetBridge", "gRPC_Client", fmt.Sprintf("Setting TCD Bridge current to %d on device %s", req.Current, req.DeviceId))
 	return &pb.SetBridgeResponse{
 		Success: true,

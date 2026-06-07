@@ -4,6 +4,7 @@ import (
         "context"
         "fmt"
 
+		"chromatography-workstation/edge/internal/components"
         pb "chromatography-workstation/edge/internal/sila2/pb"
         "chromatography-workstation/edge/internal/models"
 )
@@ -20,10 +21,17 @@ func NewValveServer(twin *models.DigitalTwin) *ValveServer {
 }
 
 func (s *ValveServer) SwitchValve(ctx context.Context, req *pb.SwitchValveRequest) (*pb.SwitchValveResponse, error) {
-        _, exists := s.twin.GetComponent(req.ValveId)
+        comp, exists := s.twin.GetComponent(req.ValveId)
         if !exists {
                 return &pb.SwitchValveResponse{Success: false, Message: "Valve not found"}, nil
         }
+
+		if vComp, ok := comp.(components.ValveComponent); ok {
+			err := vComp.Toggle(req.Position > 0)
+			if err != nil {
+				return &pb.SwitchValveResponse{Success: false, Message: err.Error()}, nil
+			}
+		}
 
         s.twin.AppendAuditLog("SwitchValve", "gRPC_Client", fmt.Sprintf("Switched Valve %s to position %d", req.ValveId, req.Position))
 
@@ -34,12 +42,19 @@ func (s *ValveServer) SwitchValve(ctx context.Context, req *pb.SwitchValveReques
 }
 
 func (s *ValveServer) GetValveState(ctx context.Context, req *pb.GetValveStateRequest) (*pb.GetValveStateResponse, error) {
-        _, exists := s.twin.GetComponent(req.ValveId)
+        comp, exists := s.twin.GetComponent(req.ValveId)
         if !exists {
                 return &pb.GetValveStateResponse{}, fmt.Errorf("Valve not found")
         }
 
+		pos := int32(0)
+		if vComp, ok := comp.(components.ValveComponent); ok {
+			if vComp.IsOn() {
+				pos = 1
+			}
+		}
+
         return &pb.GetValveStateResponse{
-                CurrentPosition: 0,
+                CurrentPosition: pos,
         }, nil
 }

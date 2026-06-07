@@ -19,10 +19,11 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ChromatographService_StartRun_FullMethodName           = "/sila2.chromatograph.ChromatographService/StartRun"
-	ChromatographService_StopRun_FullMethodName            = "/sila2.chromatograph.ChromatographService/StopRun"
-	ChromatographService_GetState_FullMethodName           = "/sila2.chromatograph.ChromatographService/GetState"
-	ChromatographService_SetCycleParameters_FullMethodName = "/sila2.chromatograph.ChromatographService/SetCycleParameters"
+	ChromatographService_StartRun_FullMethodName                    = "/sila2.chromatograph.ChromatographService/StartRun"
+	ChromatographService_StopRun_FullMethodName                     = "/sila2.chromatograph.ChromatographService/StopRun"
+	ChromatographService_GetState_FullMethodName                    = "/sila2.chromatograph.ChromatographService/GetState"
+	ChromatographService_SetCycleParameters_FullMethodName          = "/sila2.chromatograph.ChromatographService/SetCycleParameters"
+	ChromatographService_Subscribe_AnalyticalResults_FullMethodName = "/sila2.chromatograph.ChromatographService/Subscribe_AnalyticalResults"
 )
 
 // ChromatographServiceClient is the client API for ChromatographService service.
@@ -39,6 +40,8 @@ type ChromatographServiceClient interface {
 	GetState(ctx context.Context, in *GetStateRequest, opts ...grpc.CallOption) (*GetStateResponse, error)
 	// Configures the cycle parameters for autonomous loop
 	SetCycleParameters(ctx context.Context, in *SetCycleRequest, opts ...grpc.CallOption) (*SetCycleResponse, error)
+	// Observable Property: Streams analytical results whenever they are updated
+	Subscribe_AnalyticalResults(ctx context.Context, in *SubscribeAnalyticalResultsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SubscribeAnalyticalResultsResponse], error)
 }
 
 type chromatographServiceClient struct {
@@ -89,6 +92,25 @@ func (c *chromatographServiceClient) SetCycleParameters(ctx context.Context, in 
 	return out, nil
 }
 
+func (c *chromatographServiceClient) Subscribe_AnalyticalResults(ctx context.Context, in *SubscribeAnalyticalResultsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SubscribeAnalyticalResultsResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &ChromatographService_ServiceDesc.Streams[0], ChromatographService_Subscribe_AnalyticalResults_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[SubscribeAnalyticalResultsRequest, SubscribeAnalyticalResultsResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ChromatographService_Subscribe_AnalyticalResultsClient = grpc.ServerStreamingClient[SubscribeAnalyticalResultsResponse]
+
 // ChromatographServiceServer is the server API for ChromatographService service.
 // All implementations must embed UnimplementedChromatographServiceServer
 // for forward compatibility.
@@ -103,6 +125,8 @@ type ChromatographServiceServer interface {
 	GetState(context.Context, *GetStateRequest) (*GetStateResponse, error)
 	// Configures the cycle parameters for autonomous loop
 	SetCycleParameters(context.Context, *SetCycleRequest) (*SetCycleResponse, error)
+	// Observable Property: Streams analytical results whenever they are updated
+	Subscribe_AnalyticalResults(*SubscribeAnalyticalResultsRequest, grpc.ServerStreamingServer[SubscribeAnalyticalResultsResponse]) error
 	mustEmbedUnimplementedChromatographServiceServer()
 }
 
@@ -124,6 +148,9 @@ func (UnimplementedChromatographServiceServer) GetState(context.Context, *GetSta
 }
 func (UnimplementedChromatographServiceServer) SetCycleParameters(context.Context, *SetCycleRequest) (*SetCycleResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetCycleParameters not implemented")
+}
+func (UnimplementedChromatographServiceServer) Subscribe_AnalyticalResults(*SubscribeAnalyticalResultsRequest, grpc.ServerStreamingServer[SubscribeAnalyticalResultsResponse]) error {
+	return status.Error(codes.Unimplemented, "method Subscribe_AnalyticalResults not implemented")
 }
 func (UnimplementedChromatographServiceServer) mustEmbedUnimplementedChromatographServiceServer() {}
 func (UnimplementedChromatographServiceServer) testEmbeddedByValue()                              {}
@@ -218,6 +245,17 @@ func _ChromatographService_SetCycleParameters_Handler(srv interface{}, ctx conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ChromatographService_Subscribe_AnalyticalResults_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(SubscribeAnalyticalResultsRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(ChromatographServiceServer).Subscribe_AnalyticalResults(m, &grpc.GenericServerStream[SubscribeAnalyticalResultsRequest, SubscribeAnalyticalResultsResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ChromatographService_Subscribe_AnalyticalResultsServer = grpc.ServerStreamingServer[SubscribeAnalyticalResultsResponse]
+
 // ChromatographService_ServiceDesc is the grpc.ServiceDesc for ChromatographService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -242,6 +280,12 @@ var ChromatographService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _ChromatographService_SetCycleParameters_Handler,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "Subscribe_AnalyticalResults",
+			Handler:       _ChromatographService_Subscribe_AnalyticalResults_Handler,
+			ServerStreams: true,
+		},
+	},
 	Metadata: "proto/chromatograph.proto",
 }

@@ -17,6 +17,15 @@ service ChromatographService {
 
   // Configures the cycle parameters for autonomous loop
   rpc SetCycleParameters(SetCycleRequest) returns (SetCycleResponse) {}
+
+  // Observable Property: Streams analytical results whenever they are updated
+  rpc Subscribe_AnalyticalResults(SubscribeAnalyticalResultsRequest) returns (stream SubscribeAnalyticalResultsResponse) {}
+}
+
+message SubscribeAnalyticalResultsRequest {}
+
+message SubscribeAnalyticalResultsResponse {
+  map<string, double> results = 1;
 }
 
 message StartRunRequest {

@@ -82,6 +82,61 @@ func (s *SilaServer) SetCycleParameters(ctx context.Context, req *pb.SetCycleReq
         }, nil
 }
 
+func (s *SilaServer) Subscribe_AnalyticalResults(req *pb.SubscribeAnalyticalResultsRequest, stream pb.ChromatographService_Subscribe_AnalyticalResultsServer) error {
+	ch := make(chan map[string]float64, 10)
+	
+	// Hook into the twin's results change callback
+	// Note: In a real production scenario with multiple subscribers,
+	// you'd want a registry of channels. For now, we'll replace the global callback.
+	originalCb := s.twin.OnResultsChange
+	s.twin.Mu.Lock()
+	s.twin.OnResultsChange = func(devID string, results map[string]float64) {
+		if originalCb != nil {
+			originalCb(devID, results)
+		}
+		select {
+		case ch <- results:
+		default:
+		}
+	}
+	s.twin.Mu.Unlock()
+
+	// Send initial value immediately
+	s.twin.Mu.RLock()
+	initialResults := make(map[string]float64)
+	for k, v := range s.twin.LatestResults {
+		initialResults[k] = v
+	}
+	s.twin.Mu.RUnlock()
+	
+	if err := stream.Send(&pb.SubscribeAnalyticalResultsResponse{
+		Results: initialResults,
+	}); err != nil {
+		return err
+	}
+
+	defer func() {
+		s.twin.Mu.Lock()
+		s.twin.OnResultsChange = originalCb
+		s.twin.Mu.Unlock()
+		close(ch)
+	}()
+
+	for {
+		select {
+		case <-stream.Context().Done():
+			return nil
+		case results := <-ch:
+			err := stream.Send(&pb.SubscribeAnalyticalResultsResponse{
+				Results: results,
+			})
+			if err != nil {
+				return err
+			}
+		}
+	}
+}
+
 func StartServer(twin *models.DigitalTwin, port int) error {
         lis, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
         if err != nil {

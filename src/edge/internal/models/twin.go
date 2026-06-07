@@ -52,11 +52,15 @@ type DigitalTwin struct {
 	CycleInterval     float64
 	CycleIntervalMin  float64
 	MaxCycleCount     int
+	SamplingInterval  float64 // dtS
 
 	// LADS Alarms & Audit
 	ActiveAlarms []string
 	LastAuditLog string
 	AuditTrail   []string // Keep a short history of standard audit logs
+
+	// Analytical Results
+	LatestResults map[string]float64
 
 	// Components registry holding all standard hardware components (LADS Component)
 	Components map[string]components.LadsComponent
@@ -74,15 +78,19 @@ type DigitalTwin struct {
 
 	// OnAuditLogChange is a callback triggered whenever a new audit log is appended.
 	OnAuditLogChange func(deviceID string, user string, action string, details string)
+
+	// OnResultsChange is a callback triggered whenever new analytical results are available.
+	OnResultsChange func(deviceID string, results map[string]float64)
 }
 
 // NewDigitalTwin creates a new instance of a standardized digital twin.
 func NewDigitalTwin(deviceID string) *DigitalTwin {
 	return &DigitalTwin{
-		DeviceID:     deviceID,
-		CurrentState: StateIdle,
-		Components:   make(map[string]components.LadsComponent),
-		UpdatedAt:    time.Now(),
+		DeviceID:      deviceID,
+		CurrentState:  StateIdle,
+		Components:    make(map[string]components.LadsComponent),
+		LatestResults: make(map[string]float64),
+		UpdatedAt:     time.Now(),
 	}
 }
 
@@ -111,6 +119,56 @@ func (dt *DigitalTwin) SetAlarms(alarms []string) {
 
 	if cb != nil {
 		cb(dt.DeviceID, alarms)
+	}
+}
+
+// TriggerAlarm adds a new alarm to the active alarms list if it doesn't exist.
+func (dt *DigitalTwin) TriggerAlarm(alarm string) {
+	dt.Mu.Lock()
+	exists := false
+	for _, a := range dt.ActiveAlarms {
+		if a == alarm {
+			exists = true
+			break
+		}
+	}
+	var currentAlarms []string
+	if !exists {
+		dt.ActiveAlarms = append(dt.ActiveAlarms, alarm)
+		dt.UpdatedAt = time.Now()
+	}
+	currentAlarms = make([]string, len(dt.ActiveAlarms))
+	copy(currentAlarms, dt.ActiveAlarms)
+	cb := dt.OnAlarmsChange
+	dt.Mu.Unlock()
+
+	if !exists && cb != nil {
+		cb(dt.DeviceID, currentAlarms)
+	}
+}
+
+// ClearAlarm removes an alarm from the active alarms list.
+func (dt *DigitalTwin) ClearAlarm(alarm string) {
+	dt.Mu.Lock()
+	idx := -1
+	for i, a := range dt.ActiveAlarms {
+		if a == alarm {
+			idx = i
+			break
+		}
+	}
+	var currentAlarms []string
+	if idx != -1 {
+		dt.ActiveAlarms = append(dt.ActiveAlarms[:idx], dt.ActiveAlarms[idx+1:]...)
+		dt.UpdatedAt = time.Now()
+	}
+	currentAlarms = make([]string, len(dt.ActiveAlarms))
+	copy(currentAlarms, dt.ActiveAlarms)
+	cb := dt.OnAlarmsChange
+	dt.Mu.Unlock()
+
+	if idx != -1 && cb != nil {
+		cb(dt.DeviceID, currentAlarms)
 	}
 }
 
@@ -144,6 +202,29 @@ func (dt *DigitalTwin) AppendAuditLog(action, user, details string) {
 
 	if cb != nil {
 		cb(dt.DeviceID, user, action, details)
+	}
+}
+
+// UpdateResults updates the analytical results cache.
+func (dt *DigitalTwin) UpdateResults(results map[string]float64) {
+	dt.Mu.Lock()
+	if dt.LatestResults == nil {
+		dt.LatestResults = make(map[string]float64)
+	}
+	for k, v := range results {
+		dt.LatestResults[k] = v
+	}
+	dt.UpdatedAt = time.Now()
+	// Copy to pass to callback without holding lock
+	copied := make(map[string]float64)
+	for k, v := range dt.LatestResults {
+		copied[k] = v
+	}
+	cb := dt.OnResultsChange
+	dt.Mu.Unlock()
+
+	if cb != nil {
+		cb(dt.DeviceID, copied)
 	}
 }
 
