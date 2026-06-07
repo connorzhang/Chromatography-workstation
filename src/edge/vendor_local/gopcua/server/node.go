@@ -80,9 +80,9 @@ func NewNode(id *ua.NodeID, attr Attributes, refs References, val ValueFunc) *No
 }
 
 func NewFolderNode(nodeID *ua.NodeID, name string) *Node {
-	reftype := ua.NewTwoByteNodeID(uint8(id.HasComponent)) // folder
-	eoid := ua.NewNumericExpandedNodeID(nodeID.Namespace(), id.ObjectsFolder)
-	typedef := ua.NewNumericExpandedNodeID(0, id.ObjectsFolder)
+	reftype := ua.NewNumericNodeID(0, id.HasTypeDefinition)
+	eoid := ua.NewNumericExpandedNodeID(0, id.FolderType)
+	typedef := ua.NewNumericExpandedNodeID(0, id.FolderType)
 	n := NewNode(
 		nodeID,
 		map[ua.AttributeID]*ua.DataValue{
@@ -96,9 +96,9 @@ func NewFolderNode(nodeID *ua.NodeID, name string) *Node {
 			ReferenceTypeID: reftype,
 			IsForward:       true,
 			NodeID:          eoid,
-			BrowseName:      &ua.QualifiedName{NamespaceIndex: nodeID.Namespace(), Name: name},
-			DisplayName:     &ua.LocalizedText{EncodingMask: ua.LocalizedTextText, Text: name},
-			NodeClass:       ua.NodeClassObject,
+			BrowseName:      &ua.QualifiedName{NamespaceIndex: 0, Name: "FolderType"},
+			DisplayName:     &ua.LocalizedText{EncodingMask: ua.LocalizedTextText, Text: "FolderType"},
+			NodeClass:       ua.NodeClassObjectType,
 			TypeDefinition:  typedef,
 		}},
 		nil,

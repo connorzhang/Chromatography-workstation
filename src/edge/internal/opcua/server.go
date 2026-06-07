@@ -88,8 +88,31 @@ func (s *Server) updateLoop() {
 				s.deviceRoots[deviceID] = ladsRoot
 				s.deviceNodes[deviceID] = make(map[string]*server.Node)
 				
-				// LADS Basic Information
-				s.createLinkedVar(ladsRoot, "DeviceID", twin.DeviceID)
+				nodesMap := s.deviceNodes[deviceID]
+				
+				// Standard OPC-UA DI / LADS Folders
+				paramSet := server.NewFolderNode(ua.NewNumericNodeID(s.ns.ID(), s.ns.GetNextNodeID()), "ParameterSet")
+				s.ns.AddNode(paramSet)
+				ladsRoot.AddRef(paramSet, id.Organizes, true)
+				nodesMap["__ParameterSet"] = paramSet
+
+				compSet := server.NewFolderNode(ua.NewNumericNodeID(s.ns.ID(), s.ns.GetNextNodeID()), "ComponentSet")
+				s.ns.AddNode(compSet)
+				ladsRoot.AddRef(compSet, id.Organizes, true)
+				nodesMap["__ComponentSet"] = compSet
+
+				resultSet := server.NewFolderNode(ua.NewNumericNodeID(s.ns.ID(), s.ns.GetNextNodeID()), "ResultSet")
+				s.ns.AddNode(resultSet)
+				ladsRoot.AddRef(resultSet, id.Organizes, true)
+				nodesMap["__ResultSet"] = resultSet
+				
+				alarmsSet := server.NewFolderNode(ua.NewNumericNodeID(s.ns.ID(), s.ns.GetNextNodeID()), "Alarms")
+				s.ns.AddNode(alarmsSet)
+				ladsRoot.AddRef(alarmsSet, id.Organizes, true)
+				nodesMap["__AlarmsSet"] = alarmsSet
+				
+				// DeviceID goes to ParameterSet
+				s.createLinkedVar(paramSet, "DeviceID", twin.DeviceID)
 			}
 			nodesMap := s.deviceNodes[deviceID]
 			s.mu.Unlock()
@@ -141,59 +164,83 @@ func (s *Server) updateLoop() {
 			twin.Mu.RUnlock()
 
 			// Helper to get or create node
-			getNode := func(name string, initVal interface{}) *server.Node {
+			getNode := func(parent *server.Node, name string, initVal interface{}, mapKey string) *server.Node {
 				s.mu.Lock()
 				defer s.mu.Unlock()
-				node, ok := nodesMap[name]
+				node, ok := nodesMap[mapKey]
 				if !ok {
-					node = s.createLinkedVar(ladsRoot, name, initVal)
-					nodesMap[name] = node
+					node = s.createLinkedVar(parent, name, initVal)
+					nodesMap[mapKey] = node
 				}
 				return node
 			}
 
-			// Update values
-			s.ns.SetAttribute(getNode("State", currentState).ID(), ua.AttributeIDValue, &ua.DataValue{
+			paramSet := nodesMap["__ParameterSet"]
+			compSet := nodesMap["__ComponentSet"]
+			resultSet := nodesMap["__ResultSet"]
+			alarmsSet := nodesMap["__AlarmsSet"]
+
+			// Update values in ParameterSet
+			s.ns.SetAttribute(getNode(paramSet, "State", currentState, "State").ID(), ua.AttributeIDValue, &ua.DataValue{
 				EncodingMask: 1, Value: ua.MustVariant(currentState), Status: ua.StatusOK, SourceTimestamp: time.Now(),
 			})
-			s.ns.SetAttribute(getNode("CurrentCycleCount", currentCycleCount).ID(), ua.AttributeIDValue, &ua.DataValue{
+			s.ns.SetAttribute(getNode(paramSet, "CurrentCycleCount", currentCycleCount, "CurrentCycleCount").ID(), ua.AttributeIDValue, &ua.DataValue{
 				EncodingMask: 1, Value: ua.MustVariant(currentCycleCount), Status: ua.StatusOK, SourceTimestamp: time.Now(),
 			})
-			s.ns.SetAttribute(getNode("TargetCycleCount", targetCycleCount).ID(), ua.AttributeIDValue, &ua.DataValue{
+			s.ns.SetAttribute(getNode(paramSet, "TargetCycleCount", targetCycleCount, "TargetCycleCount").ID(), ua.AttributeIDValue, &ua.DataValue{
 				EncodingMask: 1, Value: ua.MustVariant(targetCycleCount), Status: ua.StatusOK, SourceTimestamp: time.Now(),
 			})
-			s.ns.SetAttribute(getNode("CycleInterval", cycleInterval).ID(), ua.AttributeIDValue, &ua.DataValue{
+			s.ns.SetAttribute(getNode(paramSet, "CycleInterval", cycleInterval, "CycleInterval").ID(), ua.AttributeIDValue, &ua.DataValue{
 				EncodingMask: 1, Value: ua.MustVariant(cycleInterval), Status: ua.StatusOK, SourceTimestamp: time.Now(),
 			})
-			s.ns.SetAttribute(getNode("SamplingInterval", samplingInterval).ID(), ua.AttributeIDValue, &ua.DataValue{
+			s.ns.SetAttribute(getNode(paramSet, "SamplingInterval", samplingInterval, "SamplingInterval").ID(), ua.AttributeIDValue, &ua.DataValue{
 				EncodingMask: 1, Value: ua.MustVariant(samplingInterval), Status: ua.StatusOK, SourceTimestamp: time.Now(),
 			})
-			s.ns.SetAttribute(getNode("ActiveAlarms", activeAlarms).ID(), ua.AttributeIDValue, &ua.DataValue{
+			s.ns.SetAttribute(getNode(paramSet, "ActiveAlarms", activeAlarms, "ActiveAlarms").ID(), ua.AttributeIDValue, &ua.DataValue{
 				EncodingMask: 1, Value: ua.MustVariant(activeAlarms), Status: ua.StatusOK, SourceTimestamp: time.Now(),
 			})
-			s.ns.SetAttribute(getNode("LastAuditLog", lastAuditLog).ID(), ua.AttributeIDValue, &ua.DataValue{
+			s.ns.SetAttribute(getNode(paramSet, "LastAuditLog", lastAuditLog, "LastAuditLog").ID(), ua.AttributeIDValue, &ua.DataValue{
 				EncodingMask: 1, Value: ua.MustVariant(lastAuditLog), Status: ua.StatusOK, SourceTimestamp: time.Now(),
 			})
 
+			// Update values in ResultSet
 			for k, v := range currentResults {
-				s.ns.SetAttribute(getNode("Result_"+k, v).ID(), ua.AttributeIDValue, &ua.DataValue{
+				s.ns.SetAttribute(getNode(resultSet, k, v, "Result_"+k).ID(), ua.AttributeIDValue, &ua.DataValue{
 					EncodingMask: 1, Value: ua.MustVariant(v), Status: ua.StatusOK, SourceTimestamp: time.Now(),
 				})
 			}
 
+			// Update values in ComponentSet
 			for _, c := range currentComps {
-				s.ns.SetAttribute(getNode("Component_"+c.ID+"_State", c.State).ID(), ua.AttributeIDValue, &ua.DataValue{
+				s.mu.Lock()
+				compFolder, ok := nodesMap["__CompFolder_"+c.ID]
+				if !ok {
+					compFolder = server.NewFolderNode(ua.NewNumericNodeID(s.ns.ID(), s.ns.GetNextNodeID()), c.ID)
+					s.ns.AddNode(compFolder)
+					compSet.AddRef(compFolder, id.Organizes, true)
+					nodesMap["__CompFolder_"+c.ID] = compFolder
+					
+					compParamSet := server.NewFolderNode(ua.NewNumericNodeID(s.ns.ID(), s.ns.GetNextNodeID()), "ParameterSet")
+					s.ns.AddNode(compParamSet)
+					compFolder.AddRef(compParamSet, id.Organizes, true)
+					nodesMap["__CompParamSet_"+c.ID] = compParamSet
+				}
+				compParamSet := nodesMap["__CompParamSet_"+c.ID]
+				s.mu.Unlock()
+
+				s.ns.SetAttribute(getNode(compParamSet, "State", c.State, "Comp_"+c.ID+"_State").ID(), ua.AttributeIDValue, &ua.DataValue{
 					EncodingMask: 1, Value: ua.MustVariant(c.State), Status: ua.StatusOK, SourceTimestamp: time.Now(),
 				})
+				
 				if c.Type == "TemperatureZone" {
-					s.ns.SetAttribute(getNode("Component_"+c.ID+"_PV", c.PV).ID(), ua.AttributeIDValue, &ua.DataValue{
+					s.ns.SetAttribute(getNode(compParamSet, "PV", c.PV, "Comp_"+c.ID+"_PV").ID(), ua.AttributeIDValue, &ua.DataValue{
 						EncodingMask: 1, Value: ua.MustVariant(c.PV), Status: ua.StatusOK, SourceTimestamp: time.Now(),
 					})
-					s.ns.SetAttribute(getNode("Component_"+c.ID+"_SV", c.SV).ID(), ua.AttributeIDValue, &ua.DataValue{
+					s.ns.SetAttribute(getNode(compParamSet, "SV", c.SV, "Comp_"+c.ID+"_SV").ID(), ua.AttributeIDValue, &ua.DataValue{
 						EncodingMask: 1, Value: ua.MustVariant(c.SV), Status: ua.StatusOK, SourceTimestamp: time.Now(),
 					})
 				} else if c.Type == "Detector" {
-					s.ns.SetAttribute(getNode("Component_"+c.ID+"_Signal", c.PV).ID(), ua.AttributeIDValue, &ua.DataValue{
+					s.ns.SetAttribute(getNode(compParamSet, "Signal", c.PV, "Comp_"+c.ID+"_Signal").ID(), ua.AttributeIDValue, &ua.DataValue{
 						EncodingMask: 1, Value: ua.MustVariant(c.PV), Status: ua.StatusOK, SourceTimestamp: time.Now(),
 					})
 				}
@@ -212,7 +259,7 @@ func (s *Server) updateLoop() {
 
 			// Set active alarms
 			for _, alarmName := range activeAlarms {
-				s.ns.SetAttribute(getNode("Alarm_"+alarmName, true).ID(), ua.AttributeIDValue, &ua.DataValue{
+				s.ns.SetAttribute(getNode(alarmsSet, alarmName, true, "Alarm_"+alarmName).ID(), ua.AttributeIDValue, &ua.DataValue{
 					EncodingMask: 1, Value: ua.MustVariant(true), Status: ua.StatusOK, SourceTimestamp: time.Now(),
 				})
 			}
