@@ -7,8 +7,10 @@
 .env
 .local-secrets/
 src/edge/.run/
-src/edge/collector
-src/edge/collector.exe
+/bin/collector
+/bin/collector.exe
+/src/edge/collector.exe
+/src/edge/collector-linux-arm64
 src/edge/dist/
 
 # User-specific files
@@ -398,8 +400,6 @@ src/edge/simulator_tcd_linux
 start.go
 **/.run/
 temp_deploy/
-src/edge/collector-linux-arm64
-src/edge/collector
 data/
 deploy/
 deploy_linux/
@@ -419,5 +419,3 @@ src/edge/internal/sila2/certs/
 
 *.sqlite
 *.db
-
-collector
