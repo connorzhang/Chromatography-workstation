@@ -4,10 +4,18 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math"
 	"time"
 
 	"go.bug.st/serial"
 )
+
+type DataPoint struct {
+	Timestamp time.Time
+	Value     float64
+}
+
+var baselineHistory []DataPoint
 
 func main() {
 	mode := &serial.Mode{
@@ -24,21 +32,21 @@ func main() {
 		log.Fatalf("Failed to open %s: %v", portName, err)
 	}
 	defer port.Close()
-	fmt.Println("Port opened successfully. Waiting for TCD data (10 seconds max)...")
+	fmt.Println("Port opened successfully. Waiting for TCD data...")
 
 	port.SetReadTimeout(time.Millisecond * 500)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Run for a long time to allow 2 minutes of data collection
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
 	buf := make([]byte, 1024)
 	frame := make([]byte, 0, 512)
-	framesRead := 0
 
 	done := make(chan struct{})
 
 	go func() {
-		for framesRead < 3 {
+		for {
 			n, err := port.Read(buf)
 			if err != nil {
 				continue
@@ -52,7 +60,7 @@ func main() {
 					idx := -1
 					for i := 0; i <= len(frame)-87; i++ {
 						if frame[i] == 0x45 && frame[i+1] == 0x45 {
-							// Optional: Check if it ends with 0x0D 0x0A
+							// Check if it ends with 0x0D 0x0A
 							if frame[i+85] == 0x0D && frame[i+86] == 0x0A {
 								idx = i
 								break
@@ -67,37 +75,30 @@ func main() {
 
 					validFrame := frame[idx : idx+87]
 					parseFrame87(validFrame)
-					framesRead++
 
 					frame = frame[idx+87:]
-
-					if framesRead >= 3 {
-						break
-					}
 				}
 			}
 		}
-		close(done)
 	}()
 
 	select {
 	case <-ctx.Done():
-		fmt.Println("\nTimeout reached (10s). Did not receive enough data from TCD.")
+		fmt.Println("\nTimeout reached (10m). Test completed.")
 	case <-done:
-		fmt.Println("\nSuccessfully read and parsed 3 frames. Test completed.")
+		fmt.Println("\nTest completed.")
 	}
 }
 
 func parseFrame87(frame []byte) {
 	fmt.Printf("\n--- TCD Frame Received (87 bytes) ---\n")
-	fmt.Printf("Header: %X %X\n", frame[0], frame[1])
-	fmt.Printf("Unknown 2 bytes: %X %X\n", frame[2], frame[3])
-
 	fmt.Printf("Bridge Current Setting (Offset 84): %d\n", frame[84])
 
 	dataOffset := 4
-	fmt.Println("Channel Data (First 4 of 20):")
-	for i := 0; i < 4; i++ {
+	fmt.Println("20组实时数据:")
+
+	now := time.Now()
+	for i := 0; i < 20; i++ {
 		idx := dataOffset + (i * 4)
 		rawValue := uint32(frame[idx])<<24 | uint32(frame[idx+1])<<16 | uint32(frame[idx+2])<<8 | uint32(frame[idx+3])
 
@@ -109,6 +110,42 @@ func parseFrame87(frame []byte) {
 		absValue := rawValue & 0x7FFFFFFF
 		finalValue := float64(sign) * float64(absValue)
 
-		fmt.Printf("  CH%02d: %.0f\n", i+1, finalValue)
+		// Record data for drift calculation (assuming all points are from the same detector channel)
+		baselineHistory = append(baselineHistory, DataPoint{Timestamp: now, Value: finalValue})
+
+		if i < 4 {
+			fmt.Printf("  Data[%02d]: %.0f\n", i+1, finalValue)
+		} else if i == 4 {
+			fmt.Println("  ... (remaining 16 groups omitted for brevity)")
+		}
+	}
+
+	// Remove data older than 2 minutes
+	cutoff := now.Add(-2 * time.Minute)
+	validIdx := 0
+	for i, p := range baselineHistory {
+		if p.Timestamp.After(cutoff) {
+			validIdx = i
+			break
+		}
+	}
+	if validIdx > 0 {
+		baselineHistory = baselineHistory[validIdx:]
+	}
+
+	// Calculate baseline drift if we have data
+	if len(baselineHistory) > 0 {
+		minVal := math.MaxFloat64
+		maxVal := -math.MaxFloat64
+		for _, p := range baselineHistory {
+			if p.Value < minVal {
+				minVal = p.Value
+			}
+			if p.Value > maxVal {
+				maxVal = p.Value
+			}
+		}
+		drift := maxVal - minVal
+		fmt.Printf("=> 2分钟基线漂移数据 (Max - Min): %.3f\n", drift)
 	}
 }
