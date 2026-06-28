@@ -1,93 +1,48 @@
 syntax = "proto3";
 
-package sila2.chromatograph;
+package sila2.org.silastandard.core.chromatographservice.v1;
 
 option go_package = "chromatography-workstation/edge/internal/sila2/pb;pb";
+
+import "SiLAFramework.proto";
 
 // The standard SiLA 2 service for a Chromatography device
 service ChromatographService {
   // Starts a new chromatography run
-  rpc StartRun(StartRunRequest) returns (StartRunResponse) {}
+  rpc StartRun(StartRun_Parameters) returns (StartRun_Responses) {}
 
   // Stops the current run (Graceful stop)
-  rpc StopRun(StopRunRequest) returns (StopRunResponse) {}
+  rpc StopRun(StopRun_Parameters) returns (StopRun_Responses) {}
 
   // Pauses the current run
-  rpc PauseRun(PauseRunRequest) returns (PauseRunResponse) {}
+  rpc PauseRun(PauseRun_Parameters) returns (PauseRun_Responses) {}
 
   // Resumes a paused run
-  rpc ResumeRun(ResumeRunRequest) returns (ResumeRunResponse) {}
+  rpc ResumeRun(ResumeRun_Parameters) returns (ResumeRun_Responses) {}
 
   // Aborts the current run (Emergency stop)
-  rpc AbortRun(AbortRunRequest) returns (AbortRunResponse) {}
+  rpc AbortRun(AbortRun_Parameters) returns (AbortRun_Responses) {}
 
   // Gets the current standard state of the digital twin
-  rpc GetState(GetStateRequest) returns (GetStateResponse) {}
-
-  // Configures the cycle parameters for autonomous loop
-  rpc SetCycleParameters(SetCycleRequest) returns (SetCycleResponse) {}
-
-  // Observable Property: Streams analytical results whenever they are updated
-  rpc Subscribe_AnalyticalResults(SubscribeAnalyticalResultsRequest) returns (stream SubscribeAnalyticalResultsResponse) {}
+  rpc GetState(GetState_Parameters) returns (GetState_Responses) {}
 }
 
-message SubscribeAnalyticalResultsRequest {}
+message StartRun_Parameters {}
+message StartRun_Responses {}
 
-message SubscribeAnalyticalResultsResponse {
-  map<string, double> results = 1;
-}
+message StopRun_Parameters {}
+message StopRun_Responses {}
 
-message StartRunRequest {
-  string method_id = 1;
-}
+message PauseRun_Parameters {}
+message PauseRun_Responses {}
 
-message StartRunResponse {
-  bool success = 1;
-  string message = 2;
-}
+message ResumeRun_Parameters {}
+message ResumeRun_Responses {}
 
-message StopRunRequest {}
+message AbortRun_Parameters {}
+message AbortRun_Responses {}
 
-message StopRunResponse {
-  bool success = 1;
-  string message = 2;
-}
-
-message PauseRunRequest {}
-
-message PauseRunResponse {
-  bool success = 1;
-  string message = 2;
-}
-
-message ResumeRunRequest {}
-
-message ResumeRunResponse {
-  bool success = 1;
-  string message = 2;
-}
-
-message AbortRunRequest {}
-
-message AbortRunResponse {
-  bool success = 1;
-  string message = 2;
-}
-
-message GetStateRequest {}
-
-message GetStateResponse {
-  string current_state = 1;
-  int32 cycle_count = 2;
-  int32 target_cycle_count = 3;
-}
-
-message SetCycleRequest {
-  int32 cycle_count = 1;      // Target total number of cycles
-  double cycle_interval = 2;  // Interval between cycles in minutes
-}
-
-message SetCycleResponse {
-  bool success = 1;
-  string message = 2;
+message GetState_Parameters {}
+message GetState_Responses {
+  sila2.org.silastandard.String CurrentState = 1;
 }

@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Feature SiLA2Version="1.0" FeatureVersion="1.0" Originator="org.silastandard" Category="core"
+         xmlns="http://www.sila-standard.org"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://www.sila-standard.org https://gitlab.com/SiLA2/sila_base/raw/master/schema/FeatureDefinition.xsd">
+  <Identifier>ChromatographService</Identifier>
+  <DisplayName>Chromatograph Service</DisplayName>
+  <Description>Controls a Chromatograph device.</Description>
+
+  <Command>
+    <Identifier>StartRun</Identifier>
+    <DisplayName>Start Run</DisplayName>
+    <Description>Starts a new chromatography run.</Description>
+    <Observable>No</Observable>
+  </Command>
+  <Command>
+    <Identifier>StopRun</Identifier>
+    <DisplayName>Stop Run</DisplayName>
+    <Description>Stops the current run (Graceful stop).</Description>
+    <Observable>No</Observable>
+  </Command>
+  <Command>
+    <Identifier>PauseRun</Identifier>
+    <DisplayName>Pause Run</DisplayName>
+    <Description>Pauses the current run.</Description>
+    <Observable>No</Observable>
+  </Command>
+  <Command>
+    <Identifier>ResumeRun</Identifier>
+    <DisplayName>Resume Run</DisplayName>
+    <Description>Resumes a paused run.</Description>
+    <Observable>No</Observable>
+  </Command>
+  <Command>
+    <Identifier>AbortRun</Identifier>
+    <DisplayName>Abort Run</DisplayName>
+    <Description>Aborts the current run (Emergency stop).</Description>
+    <Observable>No</Observable>
+  </Command>
+  <Command>
+    <Identifier>GetState</Identifier>
+    <DisplayName>Get State</DisplayName>
+    <Description>Gets the current standard state of the digital twin.</Description>
+    <Observable>No</Observable>
+    <Response>
+      <Identifier>CurrentState</Identifier>
+      <DisplayName>Current State</DisplayName>
+      <Description>The current state string.</Description>
+      <DataType><Basic>String</Basic></DataType>
+    </Response>
+  </Command>
+</Feature>

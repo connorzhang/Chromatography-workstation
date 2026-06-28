@@ -17,8 +17,8 @@ import (
 )
 
 const PublicKeyPEM = `-----BEGIN PUBLIC KEY-----
-MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEX316Bc9ZzHiahYMe53/0QSqZJfIN
-pPwhzMnEW08ap6OIcAuE2Ic4kAtQ8BP21ua4DbKDeOSLJHM2idVVMZ0UbA==
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEApzApF7XkOB4Gcfv5VDnbNb94QjZ
+OCq+YCeGq3XPe72j5vV2ztWpQQTbbiGQKilcHjcBVWkrT3L4fKYKoFuYzw==
 -----END PUBLIC KEY-----`
 
 type LicensePayload struct {

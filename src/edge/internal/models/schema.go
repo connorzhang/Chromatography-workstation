@@ -125,4 +125,8 @@ type SysConfig struct {
 	ModbusServerPort    int    `json:"modbus_server_port"`    // Modbus TCP Server 端口 (默认 1502)
 	ModbusServerAddress string `json:"modbus_server_address"` // Modbus Server 设备地址标识
 	ModbusUploadLog     bool   `json:"modbus_upload_log"`     // 是否将日志上传至 Modbus
+	ModularTCDPort      string `json:"modular_tcd_port"`      // Modular架构: TCD串口 (例: COM11)
+	ModularTempPort     string `json:"modular_temp_port"`     // Modular架构: 温控板串口 (例: COM7)
+	ModularTempSlaveID  int    `json:"modular_temp_slave_id"` // Modular架构: 温控板从机ID (默认 20)
+	ModularEPCPort      string `json:"modular_epc_port"`      // Modular架构: EPC串口 (预留)
 }

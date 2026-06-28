@@ -2,6 +2,8 @@ package sila2
 
 import (
 	"context"
+	"crypto/tls"
+	"embed"
 	"fmt"
 	"net"
 
@@ -9,6 +11,7 @@ import (
 	pb "chromatography-workstation/edge/internal/sila2/pb"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/reflection"
 )
 
@@ -23,12 +26,9 @@ func NewSilaServer(twin *models.DigitalTwin) *SilaServer {
 	}
 }
 
-func (s *SilaServer) StartRun(ctx context.Context, req *pb.StartRunRequest) (*pb.StartRunResponse, error) {
+func (s *SilaServer) StartRun(ctx context.Context, req *pb.StartRun_Parameters) (*pb.StartRun_Responses, error) {
 	if s.twin.GetState() != models.StateIdle {
-		return &pb.StartRunResponse{
-			Success: false,
-			Message: fmt.Sprintf("Cannot start run. Current state is %s", s.twin.GetState()),
-		}, nil
+		return &pb.StartRun_Responses{}, fmt.Errorf("Cannot start run. Current state is %s", s.twin.GetState())
 	}
 
 	s.twin.UpdateState(models.StateRunning)
@@ -40,141 +40,47 @@ func (s *SilaServer) StartRun(ctx context.Context, req *pb.StartRunRequest) (*pb
 
 	s.twin.AppendAuditLog("StartRun", "gRPC_Client", "Initiated analysis run")
 
-	return &pb.StartRunResponse{
-		Success: true,
-		Message: "Run started successfully",
-	}, nil
+	return &pb.StartRun_Responses{}, nil
 }
 
-func (s *SilaServer) StopRun(ctx context.Context, req *pb.StopRunRequest) (*pb.StopRunResponse, error) {
+func (s *SilaServer) StopRun(ctx context.Context, req *pb.StopRun_Parameters) (*pb.StopRun_Responses, error) {
 	s.twin.UpdateState(models.StateIdle)
 	s.twin.AppendAuditLog("StopRun", "gRPC_Client", "Terminated analysis run manually (Graceful Stop)")
-	return &pb.StopRunResponse{
-		Success: true,
-		Message: "Run stopped successfully",
-	}, nil
+	return &pb.StopRun_Responses{}, nil
 }
 
-func (s *SilaServer) PauseRun(ctx context.Context, req *pb.PauseRunRequest) (*pb.PauseRunResponse, error) {
+func (s *SilaServer) PauseRun(ctx context.Context, req *pb.PauseRun_Parameters) (*pb.PauseRun_Responses, error) {
 	if s.twin.GetState() != models.StateRunning {
-		return &pb.PauseRunResponse{
-			Success: false,
-			Message: fmt.Sprintf("Cannot pause. Current state is %s", s.twin.GetState()),
-		}, nil
+		return &pb.PauseRun_Responses{}, fmt.Errorf("Cannot pause. Current state is %s", s.twin.GetState())
 	}
 	s.twin.UpdateState(models.StatePaused)
 	s.twin.AppendAuditLog("PauseRun", "gRPC_Client", "Paused analysis run")
-	return &pb.PauseRunResponse{
-		Success: true,
-		Message: "Run paused successfully",
-	}, nil
+	return &pb.PauseRun_Responses{}, nil
 }
 
-func (s *SilaServer) ResumeRun(ctx context.Context, req *pb.ResumeRunRequest) (*pb.ResumeRunResponse, error) {
+func (s *SilaServer) ResumeRun(ctx context.Context, req *pb.ResumeRun_Parameters) (*pb.ResumeRun_Responses, error) {
 	if s.twin.GetState() != models.StatePaused {
-		return &pb.ResumeRunResponse{
-			Success: false,
-			Message: fmt.Sprintf("Cannot resume. Current state is %s", s.twin.GetState()),
-		}, nil
+		return &pb.ResumeRun_Responses{}, fmt.Errorf("Cannot resume. Current state is %s", s.twin.GetState())
 	}
 	s.twin.UpdateState(models.StateRunning)
 	s.twin.AppendAuditLog("ResumeRun", "gRPC_Client", "Resumed analysis run")
-	return &pb.ResumeRunResponse{
-		Success: true,
-		Message: "Run resumed successfully",
-	}, nil
+	return &pb.ResumeRun_Responses{}, nil
 }
 
-func (s *SilaServer) AbortRun(ctx context.Context, req *pb.AbortRunRequest) (*pb.AbortRunResponse, error) {
+func (s *SilaServer) AbortRun(ctx context.Context, req *pb.AbortRun_Parameters) (*pb.AbortRun_Responses, error) {
 	s.twin.UpdateState(models.StateAborted)
 	s.twin.AppendAuditLog("AbortRun", "gRPC_Client", "Aborted analysis run (Emergency Stop)")
-	return &pb.AbortRunResponse{
-		Success: true,
-		Message: "Run aborted successfully",
+	return &pb.AbortRun_Responses{}, nil
+}
+
+func (s *SilaServer) GetState(ctx context.Context, req *pb.GetState_Parameters) (*pb.GetState_Responses, error) {
+	return &pb.GetState_Responses{
+		CurrentState: &pb.String{Value: string(s.twin.GetState())},
 	}, nil
 }
 
-func (s *SilaServer) GetState(ctx context.Context, req *pb.GetStateRequest) (*pb.GetStateResponse, error) {
-	s.twin.Mu.RLock()
-	count := s.twin.CurrentCycleCount
-	target := s.twin.TargetCycleCount
-	s.twin.Mu.RUnlock()
-
-	return &pb.GetStateResponse{
-		CurrentState:     string(s.twin.GetState()),
-		CycleCount:       int32(count),
-		TargetCycleCount: int32(target),
-	}, nil
-}
-
-func (s *SilaServer) SetCycleParameters(ctx context.Context, req *pb.SetCycleRequest) (*pb.SetCycleResponse, error) {
-	s.twin.Mu.Lock()
-	s.twin.TargetCycleCount = int(req.CycleCount)
-	s.twin.CycleInterval = req.CycleInterval
-	s.twin.Mu.Unlock()
-
-	s.twin.AppendAuditLog("SetCycleParameters", "gRPC_Client", fmt.Sprintf("Updated cycle target to %d, interval to %.1f", req.CycleCount, req.CycleInterval))
-
-	return &pb.SetCycleResponse{
-		Success: true,
-		Message: "Cycle parameters updated successfully",
-	}, nil
-}
-
-func (s *SilaServer) Subscribe_AnalyticalResults(req *pb.SubscribeAnalyticalResultsRequest, stream pb.ChromatographService_Subscribe_AnalyticalResultsServer) error {
-	ch := make(chan map[string]float64, 10)
-
-	// Hook into the twin's results change callback
-	// Note: In a real production scenario with multiple subscribers,
-	// you'd want a registry of channels. For now, we'll replace the global callback.
-	originalCb := s.twin.OnResultsChange
-	s.twin.Mu.Lock()
-	s.twin.OnResultsChange = func(devID string, results map[string]float64) {
-		if originalCb != nil {
-			originalCb(devID, results)
-		}
-		select {
-		case ch <- results:
-		default:
-		}
-	}
-	s.twin.Mu.Unlock()
-
-	// Send initial value immediately
-	s.twin.Mu.RLock()
-	initialResults := make(map[string]float64)
-	for k, v := range s.twin.LatestResults {
-		initialResults[k] = v
-	}
-	s.twin.Mu.RUnlock()
-
-	if err := stream.Send(&pb.SubscribeAnalyticalResultsResponse{
-		Results: initialResults,
-	}); err != nil {
-		return err
-	}
-
-	defer func() {
-		s.twin.Mu.Lock()
-		s.twin.OnResultsChange = originalCb
-		s.twin.Mu.Unlock()
-		close(ch)
-	}()
-
-	for {
-		select {
-		case <-stream.Context().Done():
-			return nil
-		case results := <-ch:
-			err := stream.Send(&pb.SubscribeAnalyticalResultsResponse{
-				Results: results,
-			})
-			if err != nil {
-				return err
-			}
-		}
-	}
-}
+//go:embed certs/*
+var certsFS embed.FS
 
 func StartServer(twin *models.DigitalTwin, port int) error {
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
@@ -182,7 +88,23 @@ func StartServer(twin *models.DigitalTwin, port int) error {
 		return fmt.Errorf("failed to listen: %v", err)
 	}
 
-	s := grpc.NewServer()
+	certBytes, err := certsFS.ReadFile("certs/server.crt")
+	if err != nil {
+		return fmt.Errorf("failed to read cert: %v", err)
+	}
+	keyBytes, err := certsFS.ReadFile("certs/server.key")
+	if err != nil {
+		return fmt.Errorf("failed to read key: %v", err)
+	}
+
+	cert, err := tls.X509KeyPair(certBytes, keyBytes)
+	if err != nil {
+		return fmt.Errorf("failed to parse key pair: %v", err)
+	}
+
+	creds := credentials.NewServerTLSFromCert(&cert)
+	s := grpc.NewServer(grpc.Creds(creds))
+	pb.RegisterSiLAServiceServer(s, NewSiLAServiceServer(twin))
 	pb.RegisterChromatographServiceServer(s, NewSilaServer(twin))
 	pb.RegisterTemperatureControllerServiceServer(s, NewTemperatureServer(twin))
 	pb.RegisterValveControllerServiceServer(s, NewValveServer(twin))

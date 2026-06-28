@@ -50,9 +50,11 @@ if ([string]::IsNullOrWhiteSpace($port)) { $port = "22" }
 if ([string]::IsNullOrWhiteSpace($user)) { $user = "root" }
 if ([string]::IsNullOrWhiteSpace($pass)) { throw "TEST_SCREEN_SSH_PASSWORD is missing in .env" }
 
-# Check WSL sshpass & rsync
-wsl -- sshpass -V 2>$null | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "sshpass is required in WSL for rsync deployment. Please install it in WSL (e.g. apt-get install sshpass)." }
+$plink = (Get-Command plink.exe -ErrorAction SilentlyContinue).Source
+$pscp = (Get-Command pscp.exe -ErrorAction SilentlyContinue).Source
+if ([string]::IsNullOrWhiteSpace($plink) -or [string]::IsNullOrWhiteSpace($pscp)) {
+  throw "PuTTY plink.exe and pscp.exe are required for Windows native deployment."
+}
 
 # Build
 Write-Host "Building linux-arm64 binary..."
@@ -74,7 +76,7 @@ $ErrorActionPreference = "Continue"
 $connected = $false
 foreach ($h in $hostsToTry) {
     Write-Host "Testing SSH connection to $h..."
-    wsl -- sshpass -p $pass ssh -o StrictHostKeyChecking=no -o ConnectTimeout=3 -p $port "${user}@${h}" "echo ok" 2>$null | Out-Null
+    & $plink -ssh -P $port -l $user -pw $pass -batch $h "echo ok" 2>$null | Out-Null
     if ($LASTEXITCODE -eq 0) {
         $sshHost = $h
         $connected = $true
@@ -90,36 +92,23 @@ if (-not $connected) {
 }
 $ErrorActionPreference = "Stop"
 
-$remote = "${user}@${sshHost}"
-
-# Convert Windows path to WSL path manually to avoid wslpath issues
-$drive = $outBin.Substring(0, 1).ToLower()
-$pathWithoutDrive = $outBin.Substring(2) -replace '\\', '/'
-$wslBin = "/mnt/$drive$pathWithoutDrive"
-
-# Ensure rsync is installed remotely
-Write-Host "Checking remote rsync..."
-$ErrorActionPreference = "Continue"
-wsl -- sshpass -p $pass ssh -o StrictHostKeyChecking=no -p $port $remote "which rsync || (apt-get update && apt-get install -y rsync)" 2>$null | Out-Null
-$ErrorActionPreference = "Stop"
-
 # 1. Stop remote service
 $stopCmd = "mkdir -p `"$RemoteDir`"; systemctl stop edge-collector 2>/dev/null || true; cd `"$RemoteDir`"; if [ -f collector.pid ]; then kill -9 `$(cat collector.pid) 2>/dev/null || true; rm -f collector.pid; fi; killall -9 collector collector-linux-arm64 2>/dev/null || true; fuser -k 8080/tcp 2>/dev/null || true; fuser -k 50051/tcp 2>/dev/null || true; fuser -k 4840/tcp 2>/dev/null || true; fuser -k 8000/tcp 2>/dev/null || true; fuser -k 25001/tcp 2>/dev/null || true; sleep 1"
 Write-Host "Stopping remote services..."
 $ErrorActionPreference = "Continue"
-wsl -- sshpass -p $pass ssh -o StrictHostKeyChecking=no -p $port $remote $stopCmd
+& $plink -ssh -P $port -l $user -pw $pass -batch $sshHost $stopCmd
 if ($LASTEXITCODE -ne 0) { Write-Warning "Stop command returned non-zero exit code" }
 
-# 2. Rsync binary
-Write-Host "Syncing binary using rsync..."
-wsl -- sshpass -p $pass rsync -avz --progress -e "ssh -o StrictHostKeyChecking=no -p $port" $wslBin "${remote}:${RemoteDir}/"
-if ($LASTEXITCODE -ne 0) { throw "rsync failed" }
+# 2. Upload binary
+Write-Host "Uploading binary using pscp..."
+& $pscp -P $port -l $user -pw $pass -batch $outBin "${sshHost}:${RemoteDir}/collector-linux-arm64"
+if ($LASTEXITCODE -ne 0) { throw "pscp upload failed" }
 
 # 3. Start remote service
 $startCmd = "cd `"$RemoteDir`"; chmod +x ./collector-linux-arm64; if systemctl list-unit-files | grep -q edge-collector; then systemctl start edge-collector; else EDGE_HTTP_BIND=0.0.0.0 EDGE_ALLOW_CONTROL=1 nohup ./collector-linux-arm64 > collector.log 2>&1 & echo `$! > collector.pid; fi"
 Write-Host "Starting remote services..."
-wsl -- sshpass -p $pass ssh -o StrictHostKeyChecking=no -p $port $remote $startCmd
+& $plink -ssh -P $port -l $user -pw $pass -batch $sshHost $startCmd
 if ($LASTEXITCODE -ne 0) { throw "Start command failed" }
 $ErrorActionPreference = "Stop"
 
-Write-Host "Deployment completed successfully using rsync!"
+Write-Host "Deployment completed successfully using Windows native plink/pscp!"

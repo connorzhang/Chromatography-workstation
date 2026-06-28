@@ -9,7 +9,7 @@ import (
 )
 
 const EngineName = "edge-analyzer"
-const EngineVersion = "0.3.83"
+const EngineVersion = "0.3.92"
 
 func Analyze(trace contracts.Trace, method contracts.Method, gitSHA string, now time.Time) (contracts.Result, error) {
 	if trace.DtS <= 0 {
@@ -80,7 +80,7 @@ func calcConcentration(response float64, levels []contracts.Level, curveFunc int
 	if len(levels) == 0 {
 		return response // 如果没有校准点，默认返回响应值本身
 	}
-	
+
 	// 单点校准或所有点都在原点
 	if len(levels) == 1 {
 		l := levels[0]
@@ -100,7 +100,7 @@ func calcConcentration(response float64, levels []contracts.Level, curveFunc int
 		if l1.Response > l2.Response {
 			l1, l2 = l2, l1
 		}
-		
+
 		if response >= l1.Response && response <= l2.Response {
 			if l2.Response == l1.Response {
 				return l1.Amount
@@ -109,19 +109,25 @@ func calcConcentration(response float64, levels []contracts.Level, curveFunc int
 			return l1.Amount + f*(l2.Amount-l1.Amount)
 		}
 	}
-	
+
 	// 如果超出了最大点或小于最小点，采用最近的一段进行线性外推
 	if response < levels[0].Response {
 		l1, l2 := levels[0], levels[1]
-		if l2.Response == l1.Response { return 0 }
+		if l2.Response == l1.Response {
+			return 0
+		}
 		f := (response - l1.Response) / (l2.Response - l1.Response)
 		res := l1.Amount + f*(l2.Amount-l1.Amount)
-		if res < 0 { return 0 }
+		if res < 0 {
+			return 0
+		}
 		return res
 	}
-	
+
 	l1, l2 := levels[len(levels)-2], levels[len(levels)-1]
-	if l2.Response == l1.Response { return l2.Amount }
+	if l2.Response == l1.Response {
+		return l2.Amount
+	}
 	f := (response - l1.Response) / (l2.Response - l1.Response)
 	return l1.Amount + f*(l2.Amount-l1.Amount)
 }
@@ -152,13 +158,17 @@ func smooth(values []float64, windowSize int) []float64 {
 			// 前端边缘保持不变或使用已有的sum平均
 			// 严格对齐老系统的话，此处可以不减不加，直接算当前有效窗口内的平均
 		}
-		
+
 		// 为了严谨，计算实际的窗口大小 (防止边缘越界)
 		start := i - half
 		end := i + (windowSize - half)
-		if start < 0 { start = 0 }
-		if end > n { end = n }
-		
+		if start < 0 {
+			start = 0
+		}
+		if end > n {
+			end = n
+		}
+
 		localSum := 0.0
 		for j := start; j < end; j++ {
 			localSum += values[j]
@@ -194,7 +204,7 @@ func analyzeOne(trace contracts.Trace, p contracts.PollutantSpec) (contracts.Pol
 	// 默认使用线性基线 (General) 连接峰起点和终点
 	y0 := smoothedVals[i0]
 	y1 := smoothedVals[i1]
-	
+
 	// 如果配置了水平前延或水平后延基线 (Horizontal)
 	if p.BaselineMode == "ForwHorz" {
 		y1 = y0 // 水平向后
@@ -235,16 +245,16 @@ func analyzeOne(trace contracts.Trace, p contracts.PollutantSpec) (contracts.Pol
 		b := baselineAt(t)
 		v := math.Max(0, smoothedVals[i]-b)
 		dt := t - lastT
-		
+
 		// 遗留系统在积分时会过滤掉负峰(除非开启 Add Negative)
 		// 这里默认 v 是 math.Max(0, y-b)，即只积分正峰部分
 		area += (lastV + v) * 0.5 * dt
-		
+
 		lastT = t
 		lastB = b
 		lastV = v
 	}
-	
+
 	// C# 代码中面积乘以 60 将单位转化为微伏·秒 (保留时间是分钟)
 	// 这里假设我们的 DtS 已经是秒，因此无需乘 60，但需与遗留单位对齐时，按需求放大。
 	// 这里暂时保留原始秒级积分值。
@@ -253,7 +263,7 @@ func analyzeOne(trace contracts.Trace, p contracts.PollutantSpec) (contracts.Pol
 	peakB := baselineAt(peakT)
 	height := math.Max(0, peakY-peakB)
 	status := "detected"
-	
+
 	// 5. 检峰条件判断 (阈值过滤)
 	if height < p.Threshold {
 		status = "not_detected"

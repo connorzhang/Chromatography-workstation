@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package sila2.detector;
+package sila2.custom.detectorservice.v1;
 
 option go_package = "chromatography-workstation/edge/internal/sila2/pb;pb";
 

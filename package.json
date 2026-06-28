@@ -1,0 +1,8 @@
+{
+  "name": "chromatography-workstation",
+  "version": "0.3.42",
+  "dependencies": {
+    "node-ssh": "^13.2.1",
+    "ws": "^8.21.0"
+  }
+}
