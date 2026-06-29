@@ -49,6 +49,81 @@ export function initTCD() {
     let tcdPollInterval = null;
     let tcdDataPoints = []; // sliding window
 
+    // Zoom and Pan states
+    let zoomState = null; // { minIdx, maxIdx, minY, maxY }
+    let isDragging = false;
+    let dragStartX = 0;
+    let dragStartY = 0;
+    let dragCurrentX = 0;
+    let dragCurrentY = 0;
+
+    const canvas = document.getElementById('tcd-canvas');
+    if (canvas) {
+        canvas.addEventListener('mousedown', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            dragStartX = e.clientX - rect.left;
+            dragStartY = e.clientY - rect.top;
+            isDragging = true;
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (isDragging) {
+                const rect = canvas.getBoundingClientRect();
+                dragCurrentX = e.clientX - rect.left;
+                dragCurrentY = e.clientY - rect.top;
+                // Avoid drawing the box here directly to prevent flickering, let requestAnimationFrame handle it
+            }
+        });
+
+        canvas.addEventListener('mouseup', (e) => {
+            if (isDragging) {
+                isDragging = false;
+                const rect = canvas.getBoundingClientRect();
+                dragCurrentX = e.clientX - rect.left;
+                dragCurrentY = e.clientY - rect.top;
+
+                if (Math.abs(dragCurrentX - dragStartX) > 10 && tcdDataPoints.length > 0) {
+                    // Apply zoom
+                    let min = Infinity, max = -Infinity;
+                    for(let v of tcdDataPoints) {
+                        if(v < min) min = v;
+                        if(v > max) max = v;
+                    }
+                    min = Math.min(min, 0);
+                    max = Math.max(max, 0);
+                    if(min === max) { min -= 10; max += 10; }
+                    const spanY = max - min;
+                    min -= spanY * 0.2;
+                    max += spanY * 0.2;
+
+                    let px1 = Math.min(dragStartX, dragCurrentX);
+                    let px2 = Math.max(dragStartX, dragCurrentX);
+                    let py1 = Math.min(dragStartY, dragCurrentY);
+                    let py2 = Math.max(dragStartY, dragCurrentY);
+
+                    // Map pixels to data indices and values
+                    const len = tcdDataPoints.length - 1 || 1;
+                    const zMinIdx = Math.floor((px1 / canvas.width) * len);
+                    const zMaxIdx = Math.ceil((px2 / canvas.width) * len);
+
+                    let zMaxY = max - (py1 / canvas.height) * (max - min);
+                    let zMinY = max - (py2 / canvas.height) * (max - min);
+
+                    zoomState = {
+                        minIdx: Math.max(0, zMinIdx),
+                        maxIdx: Math.min(tcdDataPoints.length - 1, zMaxIdx),
+                        minY: zMinY,
+                        maxY: zMaxY
+                    };
+                }
+            }
+        });
+
+        canvas.addEventListener('dblclick', () => {
+            zoomState = null;
+        });
+    }
+
     // 自动开始轮询状态
     tcdPollInterval = setInterval(pollTCDState, 500);
 
@@ -143,66 +218,134 @@ export function initTCD() {
         if(!canvas) return;
         const rect = canvas.parentElement.getBoundingClientRect();
         if (rect.width === 0 || rect.height === 0) return;
-        
+
         if (canvas.width !== rect.width || canvas.height !== rect.height) {
             canvas.width = rect.width;
             canvas.height = rect.height;
         }
-        
+
         const ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        
+
         if(tcdDataPoints.length === 0) return;
 
         let min = Infinity, max = -Infinity;
-        for(let v of tcdDataPoints) {
-            if(v < min) min = v;
-            if(v > max) max = v;
+        let startIdx = 0, endIdx = tcdDataPoints.length - 1;
+
+        if (zoomState) {
+            startIdx = zoomState.minIdx;
+            endIdx = zoomState.maxIdx;
+            min = zoomState.minY;
+            max = zoomState.maxY;
+            
+            // Adjust bounds if data shifted significantly
+            if (endIdx >= tcdDataPoints.length) {
+                const shift = endIdx - (tcdDataPoints.length - 1);
+                startIdx = Math.max(0, startIdx - shift);
+                endIdx = tcdDataPoints.length - 1;
+            }
+        } else {
+            for(let v of tcdDataPoints) {
+                if(v < min) min = v;
+                if(v > max) max = v;
+            }
+            min = Math.min(min, 0);
+            max = Math.max(max, 0);
+            if(min === max) { min -= 10; max += 10; }
+            const span = max - min;
+            min -= span * 0.2;
+            max += span * 0.2;
         }
-        
-        // 保证0刻度在范围内
-        min = Math.min(min, 0);
-        max = Math.max(max, 0);
 
-        if(min === max) { min -= 10; max += 10; }
+        // --- Draw Y-axis grid and ticks ---
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '10px monospace';
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'middle';
         
-        // 上下保留20%余地
-        const span = max - min;
-        min -= span * 0.2;
-        max += span * 0.2;
-
-        // Draw horizontal grid
         ctx.strokeStyle = '#1e293b';
         ctx.lineWidth = 1;
         ctx.beginPath();
-        for(let i=1; i<10; i++) {
+        for(let i=1; i<=10; i++) {
             const y = (i/10) * canvas.height;
-            ctx.moveTo(0, y);
+            const val = max - (i/10) * (max - min);
+            
+            ctx.moveTo(40, y);
             ctx.lineTo(canvas.width, y);
+            ctx.fillText(val.toFixed(1) + ' mV', 35, y);
+        }
+        ctx.stroke();
+
+        // --- Draw X-axis grid and ticks ---
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.beginPath();
+        for(let i=1; i<=10; i++) {
+            const x = 40 + (i/10) * (canvas.width - 40);
+            const idx = startIdx + (i/10) * (endIdx - startIdx);
+            const timeSec = idx * 0.5; // assuming 0.5s per point
+            
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, canvas.height - 20);
+            ctx.fillText(timeSec.toFixed(0) + 's', x, canvas.height - 15);
         }
         ctx.stroke();
 
         // Draw 0 baseline
-        const zeroY = canvas.height - ((0 - min) / (max - min)) * canvas.height;
-        ctx.strokeStyle = '#64748b'; // 稍微亮一点的基线颜色
-        ctx.setLineDash([5, 5]);
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.moveTo(0, zeroY);
-        ctx.lineTo(canvas.width, zeroY);
-        ctx.stroke();
-        ctx.setLineDash([]); // 恢复实线
+        const zeroY = canvas.height - 20 - ((0 - min) / (max - min)) * (canvas.height - 20);
+        if (zeroY >= 0 && zeroY <= canvas.height - 20) {
+            ctx.strokeStyle = '#64748b'; 
+            ctx.setLineDash([5, 5]);
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(40, zeroY);
+            ctx.lineTo(canvas.width, zeroY);
+            ctx.stroke();
+            ctx.setLineDash([]); 
+        }
 
         // Draw data curve
-        ctx.strokeStyle = '#38bdf8'; // 天蓝色曲线
+        ctx.strokeStyle = '#38bdf8'; 
         ctx.lineWidth = 2;
         ctx.beginPath();
-        for(let i=0; i<tcdDataPoints.length; i++) {
-            const x = (i / (tcdDataPoints.length - 1 || 1)) * canvas.width;
-            const y = canvas.height - ((tcdDataPoints[i] - min) / (max - min)) * canvas.height;
-            if(i === 0) ctx.moveTo(x, y);
+        const plotW = canvas.width - 40;
+        const plotH = canvas.height - 20;
+        for(let i = startIdx; i <= endIdx; i++) {
+            const x = 40 + ((i - startIdx) / (endIdx - startIdx || 1)) * plotW;
+            const y = plotH - ((tcdDataPoints[i] - min) / (max - min)) * plotH;
+            if(i === startIdx) ctx.moveTo(x, y);
             else ctx.lineTo(x, y);
         }
         ctx.stroke();
+
+        // Draw drag box
+        if (isDragging) {
+            ctx.fillStyle = 'rgba(56, 189, 248, 0.2)';
+            ctx.strokeStyle = '#38bdf8';
+            ctx.lineWidth = 1;
+            const w = dragCurrentX - dragStartX;
+            const h = dragCurrentY - dragStartY;
+            ctx.fillRect(dragStartX, dragStartY, w, h);
+            ctx.strokeRect(dragStartX, dragStartY, w, h);
+            
+            // Show calculation
+            ctx.fillStyle = '#fff';
+            ctx.textAlign = 'left';
+            const dx = Math.abs(dragCurrentX - dragStartX);
+            const dy = Math.abs(dragCurrentY - dragStartY);
+            const valSpan = max - min;
+            const timeSpan = (endIdx - startIdx) * 0.5;
+            const dVal = (dy / plotH) * valSpan;
+            const dTime = (dx / plotW) * timeSpan;
+            
+            ctx.fillText(`ΔX: ${dTime.toFixed(1)}s, ΔY: ${dVal.toFixed(2)}mV`, Math.max(45, Math.min(dragStartX, dragCurrentX)), Math.max(15, Math.min(dragStartY, dragCurrentY) - 5));
+        }
+        
+        // Indicate zoom state
+        if (zoomState) {
+            ctx.fillStyle = '#facc15';
+            ctx.textAlign = 'right';
+            ctx.fillText('🔍 已放大 (双击还原)', canvas.width - 10, 20);
+        }
     }
 }

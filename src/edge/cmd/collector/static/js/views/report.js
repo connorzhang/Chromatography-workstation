@@ -15,13 +15,13 @@ export function initReport() {
             
             <div class="control-group" style="flex: 1; margin: 0; overflow-y: auto;">
                 <table id="report-table">
-                    <thead>
+                    <thead id="thead-report">
                         <tr>
-                            <th>时间</th><th>设备 ID</th><th>Trace ID</th><th>总烃</th><th>甲烷</th><th>非甲烷总烃</th>
+                            <th>时间</th><th>设备 ID</th><th>Trace ID</th><th>组分数据</th>
                         </tr>
                     </thead>
                     <tbody id="tbody-report">
-                        <tr><td colspan="6" style="text-align:center; color:#94a3b8">点击查询加载数据</td></tr>
+                        <tr><td colspan="4" style="text-align:center; color:#94a3b8">点击查询 加载数据</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -59,36 +59,59 @@ export function initReport() {
                 const data = await res.json();
                 
                 const tbody = document.getElementById('tbody-report');
+                const thead = document.getElementById('thead-report');
                 if(!data || data.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center">暂无数据</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center">暂无数据</td></tr>';
                     return;
                 }
+
+                // Collect all unique component names
+                const compSet = new Set();
+                data.forEach(row => {
+                    const resObj = (row.result && row.result.result) ? row.result.result : (row.result || row);
+                    if(resObj.pollutants) resObj.pollutants.forEach(p => compSet.add(p.code || p.name));
+                    if(resObj.groups) resObj.groups.forEach(g => compSet.add(g.code || g.name));
+                });
                 
+                const compArray = Array.from(compSet);
+                if (compArray.length > 0) {
+                    let headHtml = '<tr><th>时间</th><th>设备 ID</th><th>Trace ID</th>';
+                    compArray.forEach(c => { headHtml += `<th>${c}</th>`; });
+                    headHtml += '</tr>';
+                    thead.innerHTML = headHtml;
+                }
+
                 tbody.innerHTML = '';
                 data.forEach(row => {
-                    let thc = 0, ch4 = 0, nmhc = 0;
                     const resObj = (row.result && row.result.result) ? row.result.result : (row.result || row);
+                    const valMap = {};
                     
                     if(resObj.pollutants) {
                         resObj.pollutants.forEach(p => {
-                            if(p.code === 'THC') thc = p.amount;
-                            if(p.code === 'CH4') ch4 = p.amount;
+                            valMap[p.code || p.name] = p.amount;
                         });
                     }
                     if(resObj.groups) {
                         resObj.groups.forEach(g => {
-                            if(g.code === 'NMHC') nmhc = g.amount;
+                            valMap[g.code || g.name] = g.amount;
                         });
                     }
 
-                    tbody.innerHTML += `<tr>
+                    let trHtml = `<tr>
                         <td>${new Date(row.created_at).toLocaleString()}</td>
                         <td>${row.device_id}</td>
-                        <td>${row.trace_id.substring(0, 8)}...</td>
-                        <td>${thc.toFixed(2)}</td>
-                        <td>${ch4.toFixed(2)}</td>
-                        <td>${nmhc.toFixed(2)}</td>
-                    </tr>`;
+                        <td>${row.trace_id.substring(0, 8)}...</td>`;
+                    
+                    if (compArray.length > 0) {
+                        compArray.forEach(c => {
+                            const v = valMap[c] !== undefined ? valMap[c] : 0;
+                            trHtml += `<td>${v.toFixed(2)}</td>`;
+                        });
+                    } else {
+                        trHtml += `<td>(无分析组分)</td>`;
+                    }
+                    trHtml += `</tr>`;
+                    tbody.innerHTML += trHtml;
                 });
             } catch(e) {
                 console.error(e);
