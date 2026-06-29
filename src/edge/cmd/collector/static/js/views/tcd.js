@@ -56,6 +56,7 @@ export function initTCD() {
     let dragStartY = 0;
     let dragCurrentX = 0;
     let dragCurrentY = 0;
+    let plotLayout = { padLeft: 80, padRight: 30, padTop: 30, padBottom: 30 };
 
     const canvas = document.getElementById('tcd-canvas');
     if (canvas) {
@@ -63,7 +64,13 @@ export function initTCD() {
             const rect = canvas.getBoundingClientRect();
             dragStartX = e.clientX - rect.left;
             dragStartY = e.clientY - rect.top;
-            isDragging = true;
+            
+            if (dragStartX >= plotLayout.padLeft && dragStartX <= canvas.width - plotLayout.padRight &&
+                dragStartY >= plotLayout.padTop && dragStartY <= canvas.height - plotLayout.padBottom) {
+                isDragging = true;
+                dragCurrentX = dragStartX;
+                dragCurrentY = dragStartY;
+            }
         });
 
         canvas.addEventListener('mousemove', (e) => {
@@ -71,7 +78,7 @@ export function initTCD() {
                 const rect = canvas.getBoundingClientRect();
                 dragCurrentX = e.clientX - rect.left;
                 dragCurrentY = e.clientY - rect.top;
-                // Avoid drawing the box here directly to prevent flickering, let requestAnimationFrame handle it
+                // requestAnimationFrame will handle drawing
             }
         });
 
@@ -82,42 +89,50 @@ export function initTCD() {
                 dragCurrentX = e.clientX - rect.left;
                 dragCurrentY = e.clientY - rect.top;
 
-                if (Math.abs(dragCurrentX - dragStartX) > 10 && tcdDataPoints.length > 0) {
-                    // Apply zoom
-                    let min = Infinity, max = -Infinity;
-                    for(let v of tcdDataPoints) {
-                        if(v < min) min = v;
-                        if(v > max) max = v;
+                if (Math.abs(dragCurrentX - dragStartX) > 10 && Math.abs(dragCurrentY - dragStartY) > 10 && tcdDataPoints.length > 0) {
+                    let currentMinIdx = 0, currentMaxIdx = tcdDataPoints.length - 1;
+                    let currentMinY = Infinity, currentMaxY = -Infinity;
+
+                    if (zoomState) {
+                        currentMinIdx = zoomState.minIdx;
+                        currentMaxIdx = zoomState.maxIdx;
+                        currentMinY = zoomState.minY;
+                        currentMaxY = zoomState.maxY;
+                    } else {
+                        for(let v of tcdDataPoints) {
+                            if(v < currentMinY) currentMinY = v;
+                            if(v > currentMaxY) currentMaxY = v;
+                        }
+                        currentMinY = Math.min(currentMinY, 0);
+                        currentMaxY = Math.max(currentMaxY, 0);
+                        if(currentMinY === currentMaxY) { currentMinY -= 10; currentMaxY += 10; }
+                        const spanY = currentMaxY - currentMinY;
+                        currentMinY -= spanY * 0.2;
+                        currentMaxY += spanY * 0.2;
                     }
-                    min = Math.min(min, 0);
-                    max = Math.max(max, 0);
-                    if(min === max) { min -= 10; max += 10; }
-                    const spanY = max - min;
-                    min -= spanY * 0.2;
-                    max += spanY * 0.2;
 
-                    let px1 = Math.max(80, Math.min(dragStartX, dragCurrentX));
-                    let px2 = Math.min(canvas.width - 30, Math.max(dragStartX, dragCurrentX));
-                    let py1 = Math.max(20, Math.min(dragStartY, dragCurrentY));
-                    let py2 = Math.min(canvas.height - 30, Math.max(dragStartY, dragCurrentY));
+                    let px1 = Math.max(plotLayout.padLeft, Math.min(dragStartX, dragCurrentX));
+                    let px2 = Math.min(canvas.width - plotLayout.padRight, Math.max(dragStartX, dragCurrentX));
+                    let py1 = Math.max(plotLayout.padTop, Math.min(dragStartY, dragCurrentY));
+                    let py2 = Math.min(canvas.height - plotLayout.padBottom, Math.max(dragStartY, dragCurrentY));
 
-                    const plotW = canvas.width - 80 - 30;
-                    const plotH = canvas.height - 20 - 30;
+                    const plotW = canvas.width - plotLayout.padLeft - plotLayout.padRight;
+                    const plotH = canvas.height - plotLayout.padTop - plotLayout.padBottom;
 
-                    // Map pixels to data indices and values
-                    const len = tcdDataPoints.length - 1 || 1;
-                    const zMinIdx = Math.floor(((px1 - 80) / plotW) * len);
-                    const zMaxIdx = Math.ceil(((px2 - 80) / plotW) * len);
+                    if (plotW > 0 && plotH > 0) {
+                        const newMinIdx = currentMinIdx + ((px1 - plotLayout.padLeft) / plotW) * (currentMaxIdx - currentMinIdx);
+                        const newMaxIdx = currentMinIdx + ((px2 - plotLayout.padLeft) / plotW) * (currentMaxIdx - currentMinIdx);
+                        
+                        const newMaxY = currentMaxY - ((py1 - plotLayout.padTop) / plotH) * (currentMaxY - currentMinY);
+                        const newMinY = currentMaxY - ((py2 - plotLayout.padTop) / plotH) * (currentMaxY - currentMinY);
 
-                    let zMaxY = max - ((py1 - 20) / plotH) * (max - min);
-                    let zMinY = max - ((py2 - 20) / plotH) * (max - min);
-
-                    zoomState = {
-                        minIdx: Math.max(0, zMinIdx),
-                        maxIdx: Math.min(tcdDataPoints.length - 1, zMaxIdx),
-                        minY: zMinY,
-                        maxY: zMaxY
-                    };
+                        zoomState = {
+                            minIdx: Math.max(0, Math.floor(newMinIdx)),
+                            maxIdx: Math.min(tcdDataPoints.length - 1, Math.ceil(newMaxIdx)),
+                            minY: newMinY,
+                            maxY: newMaxY
+                        };
+                    }
                 }
             }
         });
@@ -187,7 +202,17 @@ export function initTCD() {
                 }
                 // Keep 2 minutes of data: 120s / 0.5s = 240 polls * 20 points = 4800 points
                 if(tcdDataPoints.length > 4800) {
-                    tcdDataPoints = tcdDataPoints.slice(tcdDataPoints.length - 4800);
+                    const overLimit = tcdDataPoints.length - 4800;
+                    tcdDataPoints = tcdDataPoints.slice(overLimit);
+                    if (zoomState) {
+                        zoomState.minIdx -= overLimit;
+                        zoomState.maxIdx -= overLimit;
+                        if (zoomState.maxIdx < 0) {
+                            zoomState = null;
+                        } else {
+                            if (zoomState.minIdx < 0) zoomState.minIdx = 0;
+                        }
+                    }
                 }
                 
                 // Calculate Baseline Noise & Drift
@@ -240,13 +265,6 @@ export function initTCD() {
             endIdx = zoomState.maxIdx;
             min = zoomState.minY;
             max = zoomState.maxY;
-            
-            // Adjust bounds if data shifted significantly
-            if (endIdx >= tcdDataPoints.length) {
-                const shift = endIdx - (tcdDataPoints.length - 1);
-                startIdx = Math.max(0, startIdx - shift);
-                endIdx = tcdDataPoints.length - 1;
-            }
         } else {
             for(let v of tcdDataPoints) {
                 if(v < min) min = v;
@@ -260,10 +278,15 @@ export function initTCD() {
             max += span * 0.2;
         }
 
-        const padLeft = 80;
-        const padRight = 30;
-        const padBottom = 30;
-        const padTop = 20;
+        ctx.font = '12px monospace';
+        const wMax = ctx.measureText(max.toFixed(1)).width;
+        const wMin = ctx.measureText(min.toFixed(1)).width;
+        plotLayout.padLeft = Math.max(wMax, wMin) + 20;
+
+        const padLeft = plotLayout.padLeft;
+        const padRight = plotLayout.padRight;
+        const padBottom = plotLayout.padBottom;
+        const padTop = plotLayout.padTop;
 
         const plotW = canvas.width - padLeft - padRight;
         const plotH = canvas.height - padTop - padBottom;
@@ -272,7 +295,6 @@ export function initTCD() {
 
         // --- Draw Y-axis grid and ticks ---
         ctx.fillStyle = '#94a3b8';
-        ctx.font = '12px monospace';
         ctx.textAlign = 'right';
         ctx.textBaseline = 'middle';
         
@@ -285,9 +307,14 @@ export function initTCD() {
             
             ctx.moveTo(padLeft, y);
             ctx.lineTo(canvas.width - padRight, y);
-            ctx.fillText(val.toFixed(1) + ' mV', padLeft - 10, y);
+            ctx.fillText(val.toFixed(1), padLeft - 10, y);
         }
         ctx.stroke();
+
+        // Draw "mV" unit label
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText('mV', 10, padTop - 5);
 
         // --- Draw X-axis grid and ticks ---
         ctx.textAlign = 'center';

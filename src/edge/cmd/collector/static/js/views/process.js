@@ -278,6 +278,11 @@ export function initProcess() {
             }
         });
 
+        canvas.addEventListener('dblclick', () => {
+            zoomDomain = null;
+            drawStaticWaveform(canvas, ctx, currentRunData, zoomDomain, null, pendingClickX);
+        });
+
         canvas.addEventListener('mousemove', (e) => {
             if (isDragging && interactionMode === 'zoom') {
                 const rect = canvas.getBoundingClientRect();
