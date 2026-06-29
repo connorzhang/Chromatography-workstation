@@ -85,7 +85,7 @@ func (s *SiLAServiceServerImpl) Get_ServerDescription(ctx context.Context, req *
 
 func (s *SiLAServiceServerImpl) Get_ServerVersion(ctx context.Context, req *pb.Get_ServerVersion_Parameters) (*pb.Get_ServerVersion_Responses, error) {
 	return &pb.Get_ServerVersion_Responses{
-		ServerVersion: &pb.String{Value: "0.3.92"},
+		ServerVersion: &pb.String{Value: "0.3.97"},
 	}, nil
 }
 

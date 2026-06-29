@@ -7,8 +7,10 @@
 .env
 .local-secrets/
 src/edge/.run/
-src/edge/collector
-src/edge/collector.exe
+/bin/collector
+/bin/collector.exe
+/src/edge/collector.exe
+/src/edge/collector-linux-arm64
 src/edge/dist/
 
 # User-specific files
@@ -382,42 +384,45 @@ docs/keys/
 /jdk-17.0.10/
 /node-v20.11.1-win-x64/
 /sila_universal_client-v0.7.0/
-*.zip
-*.jar
-*.AppImage
-
-# Ignore build artifacts and temp scripts
+# Build artifacts and temp scripts
 **/*.exe
-src/salvo-backend/target/
-src/ui/apps/workstation/dist/
+**/*.dll
+**/*.so
+**/*.dylib
 temp_cfg.json
 temp_settings*.js
 temp_docs_repo*/
 temp_scripts/
-src/edge/simulator_tcd_linux
-start.go
-**/.run/
 temp_deploy/
-src/edge/collector-linux-arm64
-src/edge/collector
+*.b64
+*.xor
+*.zip
+*.jar
+*.AppImage
+
+# Runtime directories and privacy
+.env
+.env.*
+**/.run/
+*.sqlite
+*.db
+settings_history.txt
+temp.txt
+
+# Additional bulk ignores from previous state
 data/
+src/data/
 deploy/
 deploy_linux/
+deploy_runner/
 src/salvo-backend/
 src/ui/
-
-deploy_runner/
+src/edge/internal/sila2/certs/
+src/edge/simulator_tcd_linux
+start.go
 docs/assets/*.pdf
 docs/assets/*.doc
 docs/assets/*.xlsx
 docs/assets/log_upload.txt
 docs/assets/vs2022.txt
-*.pdf
-*.doc
-*.xlsx
-src/edge/internal/sila2/certs/
-
-*.sqlite
-*.db
-
-collector
+src/开发文档/
