@@ -32,7 +32,7 @@ import (
 //go:embed static/*
 var staticFS embed.FS
 
-const AppVersion = "v0.3.109"
+const AppVersion = "v0.3.110"
 
 var startedAt = time.Now().UTC()
 
@@ -585,7 +585,7 @@ func main() {
 	tcpPort := 25001
 	tcpPort8000 := 8000
 	httpPort := 8080
-	allowControl := envBool("EDGE_ALLOW_CONTROL", false)
+	allowControl := true // 强制放开控制权限
 
 	hub := realtime.NewHub()
 	states := &sync.Map{}

@@ -96,18 +96,21 @@ export function initTCD() {
                     min -= spanY * 0.2;
                     max += spanY * 0.2;
 
-                    let px1 = Math.min(dragStartX, dragCurrentX);
-                    let px2 = Math.max(dragStartX, dragCurrentX);
-                    let py1 = Math.min(dragStartY, dragCurrentY);
-                    let py2 = Math.max(dragStartY, dragCurrentY);
+                    let px1 = Math.max(80, Math.min(dragStartX, dragCurrentX));
+                    let px2 = Math.min(canvas.width - 30, Math.max(dragStartX, dragCurrentX));
+                    let py1 = Math.max(20, Math.min(dragStartY, dragCurrentY));
+                    let py2 = Math.min(canvas.height - 30, Math.max(dragStartY, dragCurrentY));
+
+                    const plotW = canvas.width - 80 - 30;
+                    const plotH = canvas.height - 20 - 30;
 
                     // Map pixels to data indices and values
                     const len = tcdDataPoints.length - 1 || 1;
-                    const zMinIdx = Math.floor((px1 / canvas.width) * len);
-                    const zMaxIdx = Math.ceil((px2 / canvas.width) * len);
+                    const zMinIdx = Math.floor(((px1 - 80) / plotW) * len);
+                    const zMaxIdx = Math.ceil(((px2 - 80) / plotW) * len);
 
-                    let zMaxY = max - (py1 / canvas.height) * (max - min);
-                    let zMinY = max - (py2 / canvas.height) * (max - min);
+                    let zMaxY = max - ((py1 - 20) / plotH) * (max - min);
+                    let zMinY = max - ((py2 - 20) / plotH) * (max - min);
 
                     zoomState = {
                         minIdx: Math.max(0, zMinIdx),
@@ -257,22 +260,32 @@ export function initTCD() {
             max += span * 0.2;
         }
 
+        const padLeft = 80;
+        const padRight = 30;
+        const padBottom = 30;
+        const padTop = 20;
+
+        const plotW = canvas.width - padLeft - padRight;
+        const plotH = canvas.height - padTop - padBottom;
+
+        if (plotW <= 0 || plotH <= 0) return;
+
         // --- Draw Y-axis grid and ticks ---
         ctx.fillStyle = '#94a3b8';
-        ctx.font = '12px monospace'; // 增大字体，提高可读性
+        ctx.font = '12px monospace';
         ctx.textAlign = 'right';
         ctx.textBaseline = 'middle';
         
         ctx.strokeStyle = '#1e293b';
         ctx.lineWidth = 1;
         ctx.beginPath();
-        for(let i=1; i<=10; i++) {
-            const y = (i/10) * canvas.height;
+        for(let i=0; i<=10; i++) {
+            const y = padTop + (i/10) * plotH;
             const val = max - (i/10) * (max - min);
             
-            ctx.moveTo(50, y); // 增加左侧留白给大字体
-            ctx.lineTo(canvas.width, y);
-            ctx.fillText(val.toFixed(1) + ' mV', 45, y); // 增加留白
+            ctx.moveTo(padLeft, y);
+            ctx.lineTo(canvas.width - padRight, y);
+            ctx.fillText(val.toFixed(1) + ' mV', padLeft - 10, y);
         }
         ctx.stroke();
 
@@ -280,26 +293,26 @@ export function initTCD() {
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
         ctx.beginPath();
-        for(let i=1; i<=10; i++) {
-            const x = 50 + (i/10) * (canvas.width - 50); // 配合左侧留白
+        for(let i=0; i<=10; i++) {
+            const x = padLeft + (i/10) * plotW;
             const idx = startIdx + (i/10) * (endIdx - startIdx);
             const timeSec = idx * 0.5; // assuming 0.5s per point
             
-            ctx.moveTo(x, 0);
-            ctx.lineTo(x, canvas.height - 20);
-            ctx.fillText(timeSec.toFixed(0) + 's', x, canvas.height - 15);
+            ctx.moveTo(x, padTop);
+            ctx.lineTo(x, canvas.height - padBottom);
+            ctx.fillText(timeSec.toFixed(0) + 's', x, canvas.height - padBottom + 10);
         }
         ctx.stroke();
 
         // Draw 0 baseline
-        const zeroY = canvas.height - 20 - ((0 - min) / (max - min)) * (canvas.height - 20);
-        if (zeroY >= 0 && zeroY <= canvas.height - 20) {
+        const zeroY = padTop + plotH - ((0 - min) / (max - min)) * plotH;
+        if (zeroY >= padTop && zeroY <= padTop + plotH) {
             ctx.strokeStyle = '#64748b'; 
             ctx.setLineDash([5, 5]);
             ctx.lineWidth = 1.5;
             ctx.beginPath();
-            ctx.moveTo(50, zeroY); // 配合左侧留白
-            ctx.lineTo(canvas.width, zeroY);
+            ctx.moveTo(padLeft, zeroY);
+            ctx.lineTo(canvas.width - padRight, zeroY);
             ctx.stroke();
             ctx.setLineDash([]); 
         }
@@ -308,11 +321,14 @@ export function initTCD() {
         ctx.strokeStyle = '#38bdf8'; 
         ctx.lineWidth = 2;
         ctx.beginPath();
-        const plotW = canvas.width - 50; // 配合左侧留白
-        const plotH = canvas.height - 20;
         for(let i = startIdx; i <= endIdx; i++) {
-            const x = 50 + ((i - startIdx) / (endIdx - startIdx || 1)) * plotW;
-            const y = plotH - ((tcdDataPoints[i] - min) / (max - min)) * plotH;
+            const x = padLeft + ((i - startIdx) / (endIdx - startIdx || 1)) * plotW;
+            const y = padTop + plotH - ((tcdDataPoints[i] - min) / (max - min)) * plotH;
+            
+            // Clip line to plot area visually
+            if(y < padTop) y = padTop;
+            if(y > padTop + plotH) y = padTop + plotH;
+
             if(i === startIdx) ctx.moveTo(x, y);
             else ctx.lineTo(x, y);
         }
@@ -323,22 +339,29 @@ export function initTCD() {
             ctx.fillStyle = 'rgba(56, 189, 248, 0.2)';
             ctx.strokeStyle = '#38bdf8';
             ctx.lineWidth = 1;
-            const w = dragCurrentX - dragStartX;
-            const h = dragCurrentY - dragStartY;
-            ctx.fillRect(dragStartX, dragStartY, w, h);
-            ctx.strokeRect(dragStartX, dragStartY, w, h);
+            
+            // Constrain drag box to plot area
+            let dx1 = Math.max(padLeft, Math.min(canvas.width - padRight, dragStartX));
+            let dx2 = Math.max(padLeft, Math.min(canvas.width - padRight, dragCurrentX));
+            let dy1 = Math.max(padTop, Math.min(canvas.height - padBottom, dragStartY));
+            let dy2 = Math.max(padTop, Math.min(canvas.height - padBottom, dragCurrentY));
+
+            const w = dx2 - dx1;
+            const h = dy2 - dy1;
+            ctx.fillRect(dx1, dy1, w, h);
+            ctx.strokeRect(dx1, dy1, w, h);
             
             // Show calculation
             ctx.fillStyle = '#fff';
             ctx.textAlign = 'left';
-            const dx = Math.abs(dragCurrentX - dragStartX);
-            const dy = Math.abs(dragCurrentY - dragStartY);
+            const dx = Math.abs(dx2 - dx1);
+            const dy = Math.abs(dy2 - dy1);
             const valSpan = max - min;
             const timeSpan = (endIdx - startIdx) * 0.5;
             const dVal = (dy / plotH) * valSpan;
             const dTime = (dx / plotW) * timeSpan;
             
-            ctx.fillText(`ΔX: ${dTime.toFixed(1)}s, ΔY: ${dVal.toFixed(2)}mV`, Math.max(45, Math.min(dragStartX, dragCurrentX)), Math.max(15, Math.min(dragStartY, dragCurrentY) - 5));
+            ctx.fillText(`ΔX: ${dTime.toFixed(1)}s, ΔY: ${dVal.toFixed(2)}mV`, Math.max(padLeft + 5, Math.min(dx1, dx2)), Math.max(padTop + 15, Math.min(dy1, dy2) - 5));
         }
         
         // Indicate zoom state
