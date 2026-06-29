@@ -52,7 +52,12 @@ export function initReport() {
                 const devices = await devRes.json();
                 let deviceIdQuery = '';
                 if (devices && devices.length > 0) {
-                    deviceIdQuery = `deviceId=${encodeURIComponent(devices[0].deviceId)}&`;
+                    let devId = devices[0].deviceId;
+                    const gcDev = devices.find(d => String(d.deviceId).startsWith('GC-MODULAR'));
+                    if (gcDev) devId = gcDev.deviceId;
+                    deviceIdQuery = `deviceId=${encodeURIComponent(devId)}&`;
+                } else {
+                    deviceIdQuery = `deviceId=GC-MODULAR&`;
                 }
 
                 const res = await fetch(`/api/history/results?${deviceIdQuery}from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&limit=100`);
@@ -125,7 +130,12 @@ export function initReport() {
                 const devices = await devRes.json();
                 let deviceIdQuery = '';
                 if (devices && devices.length > 0) {
-                    deviceIdQuery = `deviceId=${encodeURIComponent(devices[0].deviceId)}&`;
+                    let devId = devices[0].deviceId;
+                    const gcDev = devices.find(d => String(d.deviceId).startsWith('GC-MODULAR'));
+                    if (gcDev) devId = gcDev.deviceId;
+                    deviceIdQuery = `deviceId=${encodeURIComponent(devId)}&`;
+                } else {
+                    deviceIdQuery = `deviceId=GC-MODULAR&`;
                 }
                 
                 const from = new Date(document.getElementById('report-from').value).toISOString();

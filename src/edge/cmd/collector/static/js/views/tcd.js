@@ -15,7 +15,7 @@ export function initTCD() {
             <div style="display: flex; gap: 15px; align-items: center; margin-top: 15px; flex-wrap: wrap; padding-top: 15px; border-top: 1px dashed #334155;">
                 <div style="display: flex; align-items: center; gap: 8px;">
                     <label style="color: #94a3b8;">桥流 (0-127):</label>
-                    <input type="number" id="tcd-set-bridge-val" value="80" class="input" style="width: 80px; margin-right: 0;">
+                    <input type="number" id="tcd-set-bridge-val" value="12" class="input" style="width: 80px; margin-right: 0;">
                 </div>
                 <button class="btn" id="btn-tcd-set-bridge">设置桥流</button>
                 <button class="btn btn-danger" id="btn-tcd-zeroing">设备调零</button>

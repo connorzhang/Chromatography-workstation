@@ -364,7 +364,12 @@ export function initProcess() {
                 const devices = await devRes.json();
                 let deviceIdQuery = '';
                 if (devices && devices.length > 0) {
-                    deviceIdQuery = `deviceId=${encodeURIComponent(devices[0].deviceId)}&`;
+                    let devId = devices[0].deviceId;
+                    const gcDev = devices.find(d => String(d.deviceId).startsWith('GC-MODULAR'));
+                    if (gcDev) devId = gcDev.deviceId;
+                    deviceIdQuery = `deviceId=${encodeURIComponent(devId)}&`;
+                } else {
+                    deviceIdQuery = `deviceId=GC-MODULAR&`;
                 }
 
                 // Get the latest history result without time boundary (let backend find the absolute latest)

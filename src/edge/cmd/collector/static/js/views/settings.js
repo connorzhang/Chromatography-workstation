@@ -608,6 +608,8 @@
             if(devices && devices.length > 0) {
                 const connectedDev = devices.find(d => d.connected);
                 deviceId = connectedDev ? connectedDev.deviceId : devices[0].deviceId;
+                const gcDev = devices.find(d => String(d.deviceId).startsWith('GC-MODULAR'));
+                if (gcDev) deviceId = gcDev.deviceId;
             }
 
             // Load UI Settings (Time settings)
