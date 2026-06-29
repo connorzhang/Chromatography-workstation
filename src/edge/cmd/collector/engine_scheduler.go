@@ -31,7 +31,7 @@ func schedulerTick(hub *realtime.Hub, states *sync.Map, method v1.Method) {
 			return true
 		}
 		acqDur := time.Duration(acqMin*60.0*1000.0) * time.Millisecond
-		
+
 		for ch := 0; ch < 8; ch++ {
 			st.mu.Lock()
 			s := st.sessions[ch]
@@ -42,7 +42,7 @@ func schedulerTick(hub *realtime.Hub, states *sync.Map, method v1.Method) {
 			started := s.startedAt
 			snapshotDone := s.snapshotDone
 			st.mu.Unlock()
-			
+
 			timeSinceStart := time.Since(started)
 
 			// 0. 外部事件时间程序调度 (Cmd 10 / Cmd 101 / 多位阀)
@@ -52,9 +52,6 @@ func schedulerTick(hub *realtime.Hub, states *sync.Map, method v1.Method) {
 			// 1. Check if we need to stop acquisition / generate results
 			if !snapshotDone && timeSinceStart >= acqDur {
 				// AcqMin reached: perform snapshot and result calculation
-				// We no longer send STOP (245) or START (22) from the local scheduler 
-				// if we are in Loop mode. The hardware's Cycle Interval will handle the auto-cycle!
-				// We finalize locally to save the result. The hardware will send Cmd 150 when the next cycle begins.
 				finalizeSession(hub, st, deviceID, ch, method)
 				if !ui.Loop {
 					// Send Stop command to hardware ONLY if not looping
@@ -66,6 +63,24 @@ func schedulerTick(hub *realtime.Hub, states *sync.Map, method v1.Method) {
 			// because the hardware mainboard handles the CycleInterval itself.
 			// When the hardware starts the next cycle, it will send Cmd 150 (Start Ack),
 			// which will trigger resetSession() in main.go.
+
+			// HOWEVER, if we are in Modular Driver mode, there is NO MAINBOARD!
+			// We MUST handle the loop/cycle interval locally.
+			if pstore != nil && pstore.LoadSysConfig().DriverMode == "modular" && ui.Loop {
+				hw, _ := pstore.LoadHardwareConfig(deviceID)
+				cycleInterval := hw.CycleInterval
+				if cycleInterval <= 0 {
+					cycleInterval = acqMin // Fallback to acqMin if not set
+				}
+				if cycleInterval > 0 {
+					cycleDur := time.Duration(cycleInterval*60.0*1000.0) * time.Millisecond
+					if timeSinceStart >= cycleDur {
+						LogInfof("Modular mode auto-cycle triggered: timeSinceStart=%v >= cycleDur=%v", timeSinceStart, cycleDur)
+						// Start next cycle automatically!
+						resetSession(st, ch)
+					}
+				}
+			}
 		}
 		return true
 	})
@@ -101,4 +116,3 @@ func getUIForDevice(deviceID string) uiState {
 	}
 	return defaultUIState(deviceID)
 }
-

@@ -19,9 +19,16 @@ export function initTCD() {
                 </div>
                 <button class="btn" id="btn-tcd-set-bridge">设置桥流</button>
                 <button class="btn btn-danger" id="btn-tcd-zeroing">设备调零</button>
-                <div style="margin-left: auto; display: flex; align-items: center; gap: 8px;">
-                    <span style="color: #94a3b8;">当前桥流:</span>
-                    <span id="tcd-current-bridge" style="font-weight: bold; color: var(--text);">--</span>
+                <div style="margin-left: auto; display: flex; align-items: center; gap: 15px; background: rgba(0,0,0,0.2); padding: 5px 15px; border-radius: 6px; border: 1px solid #334155;">
+                    <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 2px;">
+                        <div style="font-size: 12px; color: #94a3b8;" title="最近2分钟内的最大值减去最小值 (浮动差)">2分钟基线噪声(Noise): <span id="tcd-stat-noise" style="color: #facc15; font-weight: bold;">--</span></div>
+                        <div style="font-size: 12px; color: #94a3b8;" title="均值与浮动差的比值">基线漂移度(Mean/Noise): <span id="tcd-stat-drift" style="color: #38bdf8; font-weight: bold;">--</span></div>
+                    </div>
+                    <div style="height: 30px; width: 1px; background: #334155; margin: 0 5px;"></div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="color: #94a3b8;">当前桥流:</span>
+                        <span id="tcd-current-bridge" style="font-weight: bold; color: var(--text); font-size: 16px;">--</span>
+                    </div>
                 </div>
             </div>
 
@@ -100,9 +107,32 @@ export function initTCD() {
                 for(let i=0; i<20; i++) {
                     tcdDataPoints.push(data.values[i]);
                 }
-                if(tcdDataPoints.length > 800) {
-                    tcdDataPoints = tcdDataPoints.slice(tcdDataPoints.length - 800);
+                // Keep 2 minutes of data: 120s / 0.5s = 240 polls * 20 points = 4800 points
+                if(tcdDataPoints.length > 4800) {
+                    tcdDataPoints = tcdDataPoints.slice(tcdDataPoints.length - 4800);
                 }
+                
+                // Calculate Baseline Noise & Drift
+                if (tcdDataPoints.length > 0) {
+                    let minVal = Infinity, maxVal = -Infinity;
+                    let sum = 0;
+                    for (let v of tcdDataPoints) {
+                        if (v < minVal) minVal = v;
+                        if (v > maxVal) maxVal = v;
+                        sum += v;
+                    }
+                    const noise = maxVal - minVal;
+                    const mean = sum / tcdDataPoints.length;
+                    
+                    document.getElementById('tcd-stat-noise').innerText = noise.toFixed(2);
+                    if (noise === 0) {
+                        document.getElementById('tcd-stat-drift').innerText = '0.00';
+                    } else {
+                        const driftRatio = mean / noise;
+                        document.getElementById('tcd-stat-drift').innerText = driftRatio.toFixed(2);
+                    }
+                }
+
                 requestAnimationFrame(drawTCDCanvas);
             }
         } catch (e) {}

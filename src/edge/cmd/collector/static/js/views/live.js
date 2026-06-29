@@ -187,7 +187,7 @@ function setupCanvas() {
         try {
             const devRes = await fetch('/api/v1/devices');
             const devices = await devRes.json();
-            const deviceId = (devices && devices.length > 0) ? devices[0].deviceId : "DEV001";
+            const deviceId = (devices && devices.length > 0) ? devices[0].deviceId : "GC-MODULAR";
 
             uiSettings.deviceId = deviceId;
 
@@ -215,7 +215,7 @@ function setupCanvas() {
             try {
                 const devRes = await fetch('/api/v1/devices');
                 const devices = await devRes.json();
-                uiSettings.deviceId = (devices && devices.length > 0) ? devices[0].deviceId : "DEV001";
+                uiSettings.deviceId = (devices && devices.length > 0) ? devices[0].deviceId : "GC-MODULAR";
                 await fetch('/api/v1/ui', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},

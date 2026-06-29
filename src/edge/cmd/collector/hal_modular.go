@@ -98,17 +98,40 @@ func (d *ModularDriver) SetEPC(payload []byte) error {
 // -- AnalysisDriver Implementation --
 
 func (d *ModularDriver) StartAnalysis(channel byte) error {
-	log.Println("[ModularDriver] StartAnalysis: Not yet implemented for modular hardware")
+	log.Println("[ModularDriver] StartAnalysis: Triggering local start for modular hardware")
+	if channel == 0xFF {
+		for ch := 0; ch < 8; ch++ {
+			resetSession(d.st, ch)
+		}
+	} else {
+		resetSession(d.st, int(channel))
+	}
 	return nil
 }
 
 func (d *ModularDriver) StopAnalysis() error {
-	log.Println("[ModularDriver] StopAnalysis: Not yet implemented for modular hardware")
+	log.Println("[ModularDriver] StopAnalysis: Triggering local stop for modular hardware")
+	for ch := 0; ch < 8; ch++ {
+		d.st.mu.Lock()
+		if d.st.sessions != nil && d.st.sessions[ch] != nil {
+			d.st.sessions[ch].active = false
+		}
+		d.st.mu.Unlock()
+	}
 	return nil
 }
 
 func (d *ModularDriver) RequestStop(channelMask byte) error {
-	log.Println("[ModularDriver] RequestStop: Not yet implemented for modular hardware")
+	log.Println("[ModularDriver] RequestStop: Triggering local stop for modular hardware")
+	for ch := 0; ch < 8; ch++ {
+		if (channelMask & (1 << ch)) != 0 {
+			d.st.mu.Lock()
+			if d.st.sessions != nil && d.st.sessions[ch] != nil {
+				d.st.sessions[ch].active = false
+			}
+			d.st.mu.Unlock()
+		}
+	}
 	return nil
 }
 

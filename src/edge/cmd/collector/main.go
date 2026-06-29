@@ -32,7 +32,7 @@ import (
 //go:embed static/*
 var staticFS embed.FS
 
-const AppVersion = "v0.3.97"
+const AppVersion = "v0.3.98"
 
 var startedAt = time.Now().UTC()
 
@@ -622,10 +622,13 @@ func main() {
 		}
 
 		// 启动后端自动连接设备协程
-		startAutoConnect()
+		startAutoConnect(states, hub)
 
 		// 启动 MQTT 客户端
 		sysCfg := ps.LoadSysConfig()
+		if sysCfg.DriverMode == "modular" {
+			getState(states, "GC-MODULAR") // Force inject GC-MODULAR for modular mode
+		}
 		if sysCfg.MqttEnabled {
 			if sysCfg.MqttClientID == "" {
 				sysCfg.MqttClientID = getDeviceNo(uiLastDevice)
@@ -806,8 +809,15 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			if input.DriverMode != "" {
 				cfg.DriverMode = input.DriverMode
 			}
+			cfg.ModularTCDPort = input.ModularTCDPort
+			cfg.ModularTempPort = input.ModularTempPort
+			cfg.ModularTempSlaveID = input.ModularTempSlaveID
 
 			pstore.SaveSysConfig(cfg)
+
+			if cfg.DriverMode == "modular" {
+				getState(states, "GC-MODULAR") // Force inject GC-MODULAR for modular mode
+			}
 
 			// 重启 MQTT (简单处理，只重新实例化，真正的断开旧连接可以暂时忽略或者在 telemetry 里做)
 			if mqttClient != nil {
@@ -1121,6 +1131,11 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 		} else if in.Control == "set" {
 			hw, _ := pstore.LoadHardwareConfig(deviceID)
 
+			if pstore != nil && pstore.LoadSysConfig().DriverMode == "modular" {
+				writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+				return
+			}
+
 			// FloatToBCD for interval
 			val := hw.CycleInterval
 			if val > 1000.0 {
@@ -1273,8 +1288,26 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			return
 		}
 
+		var inBody []byte
+		if b, err := io.ReadAll(r.Body); err == nil {
+			inBody = b
+		}
+
+		// Support {"control": "query"} from frontend
+		var ctrlReq struct {
+			Control string `json:"control"`
+		}
+		if err := json.Unmarshal(inBody, &ctrlReq); err == nil && ctrlReq.Control == "query" {
+			if err := driver.QueryEvents(); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "query sent"})
+			return
+		}
+
 		var in []models.EventRow
-		if json.NewDecoder(r.Body).Decode(&in) != nil {
+		if json.Unmarshal(inBody, &in) != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
 			return
 		}
@@ -1581,7 +1614,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 
 	mux.HandleFunc("/api/v1/sys/drivers", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"drivers": []string{"legacy", "modular"},
+			"drivers": []string{"Legacy (FID/PID)", "Modular (TCD)"},
 		})
 	})
 
@@ -1905,7 +1938,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 		out := make([]dev, 0)
 		states.Range(func(key, value any) bool {
 			id := key.(string)
-			// In modular mode, DEV001 is the local edge device, don't skip it.
+			// In modular mode, GC-MODULAR is the local edge device, don't skip it.
 			cfg := pstore.LoadSysConfig()
 			if cfg.DriverMode != "modular" && strings.HasPrefix(id, "DEV") {
 				return true
@@ -1917,6 +1950,9 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 				cc[strconv.Itoa(int(k))] = v
 			}
 			connected := st.conn != nil
+			if cfg.DriverMode == "modular" && id == "GC-MODULAR" {
+				connected = true // Virtual edge device is always considered connected
+			}
 			lastSeen := st.lastSeen
 			lastCmd := st.lastCmd
 			last143 := st.last143
@@ -1964,7 +2000,8 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			writeJSON(w, http.StatusNotFound, map[string]any{"error": "device not found"})
 			return
 		}
-		if strings.HasPrefix(deviceID, "DEV") {
+		cfg := pstore.LoadSysConfig()
+		if cfg.DriverMode != "modular" && strings.HasPrefix(deviceID, "DEV") {
 			writeJSON(w, http.StatusNotFound, map[string]any{"error": "device not found"})
 			return
 		}
@@ -2105,7 +2142,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 	})
 	host := strings.TrimSpace(os.Getenv("EDGE_HTTP_BIND"))
 	if host == "" {
-		host = "127.0.0.1"
+		host = "0.0.0.0"
 	}
 	addr := host + ":" + strconv.Itoa(port)
 	LogInfof("collector http listening on %s", addr)
@@ -2479,6 +2516,9 @@ func resetSession(st *deviceState, ch int) {
 }
 
 func appendSessionSamplesLocked(st *deviceState, ch int, dtS float64, t0 float64, vals []float64) (string, bool) {
+	if st.sessions == nil {
+		st.sessions = make(map[int]*runSession)
+	}
 	s, ok := st.sessions[ch]
 	if !ok || s == nil {
 		s = newRunSession(false) // 默认不处于分析状态，除非主动收到开始分析指令
@@ -2804,7 +2844,7 @@ func getState(states *sync.Map, deviceID string) *deviceState {
 	if ok {
 		return v.(*deviceState)
 	}
-	st := &deviceState{Twin: models.NewDigitalTwin(deviceID), lastTS: map[int]float64{}, lastResultByCh: map[int]lastResult{}}
+	st := &deviceState{Twin: models.NewDigitalTwin(deviceID), lastTS: map[int]float64{}, lastResultByCh: map[int]lastResult{}, sessions: map[int]*runSession{}}
 	states.Store(deviceID, st)
 	return st
 }

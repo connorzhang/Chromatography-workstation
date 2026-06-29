@@ -599,7 +599,7 @@
     let uiSettings = {};
     let hwSettings = {};
     let uploadSettings = {};
-    let deviceId = "DEV001";
+    let deviceId = "GC-MODULAR";
 
     setTimeout(async () => {
         try {

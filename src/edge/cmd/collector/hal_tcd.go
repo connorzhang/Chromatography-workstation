@@ -23,12 +23,13 @@ type TCDState struct {
 }
 
 type TCDController struct {
-	port     serial.Port
 	portName string
+	port     serial.Port
 	state    TCDState
 	stateMu  sync.RWMutex
 	stopChan chan struct{}
 	wg       sync.WaitGroup
+	OnData   func([]float64)
 }
 
 func NewTCDController(portName string) *TCDController {
@@ -159,6 +160,14 @@ func (c *TCDController) parseFrame(frame []byte) {
 		c.state.Values[i] = sign * float64(absValue)
 	}
 	c.state.LastUpdate = time.Now()
+	pts := make([]float64, 20)
+	copy(pts, c.state.Values[:])
+	cb := c.OnData
+
+	if cb != nil {
+		// execute callback in a goroutine to avoid blocking
+		go cb(pts)
+	}
 }
 
 func (c *TCDController) SendCommand(cmd []byte) error {
