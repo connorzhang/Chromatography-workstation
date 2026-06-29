@@ -32,7 +32,7 @@ import (
 //go:embed static/*
 var staticFS embed.FS
 
-const AppVersion = "v0.3.107"
+const AppVersion = "v0.3.109"
 
 var startedAt = time.Now().UTC()
 
@@ -2620,7 +2620,9 @@ func finalizeSession(hub *realtime.Hub, st *deviceState, deviceID string, ch int
 			runBytes, _ := json.Marshal(map[string]any{"trace_id": trace.TraceID, "dtS": trace.DtS, "samples": trace.Values, "pollutants": res.Pollutants})
 			pstore.SaveResultToDB(deviceID, trace.TraceID, e.At.UTC(), activeMethod.MethodID, string(resBytes), runBytes)
 		}
-		if thc, ch4, nmhc, ok := extractNMHC(res); ok {
+		// 这里取消仅当 thc 和 ch4 同时存在的限制，允许任何结果保存到 nmhcStore
+		// 以保证 TCD 这种不包含 THC/CH4 的分析记录也能显示在图表和报表上
+		if thc, ch4, nmhc, _ := extractNMHC(res); true {
 			nmhcStore.Add(nmhcRecord{
 				TimeRFC3339: e.At.UTC().Format(time.RFC3339),
 				DeviceID:    deviceID,
@@ -2715,7 +2717,9 @@ func publishSessionResultSnapshot(hub *realtime.Hub, st *deviceState, deviceID s
 			runBytes, _ := json.Marshal(map[string]any{"trace_id": trace.TraceID, "dtS": trace.DtS, "samples": trace.Values, "pollutants": res.Pollutants})
 			pstore.SaveResultToDB(deviceID, trace.TraceID, e.At.UTC(), activeMethod.MethodID, string(resBytes), runBytes)
 		}
-		if thc, ch4, nmhc, ok := extractNMHC(res); ok {
+		// 这里取消仅当 thc 和 ch4 同时存在的限制，允许任何结果保存到 nmhcStore
+		// 以保证 TCD 这种不包含 THC/CH4 的分析记录也能显示在图表和报表上
+		if thc, ch4, nmhc, _ := extractNMHC(res); true {
 			nmhcStore.Add(nmhcRecord{
 				TimeRFC3339: e.At.UTC().Format(time.RFC3339),
 				DeviceID:    deviceID,

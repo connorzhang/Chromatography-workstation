@@ -259,7 +259,7 @@ export function initTCD() {
 
         // --- Draw Y-axis grid and ticks ---
         ctx.fillStyle = '#94a3b8';
-        ctx.font = '10px monospace';
+        ctx.font = '12px monospace'; // 增大字体，提高可读性
         ctx.textAlign = 'right';
         ctx.textBaseline = 'middle';
         
@@ -270,9 +270,9 @@ export function initTCD() {
             const y = (i/10) * canvas.height;
             const val = max - (i/10) * (max - min);
             
-            ctx.moveTo(40, y);
+            ctx.moveTo(50, y); // 增加左侧留白给大字体
             ctx.lineTo(canvas.width, y);
-            ctx.fillText(val.toFixed(1) + ' mV', 35, y);
+            ctx.fillText(val.toFixed(1) + ' mV', 45, y); // 增加留白
         }
         ctx.stroke();
 
@@ -281,7 +281,7 @@ export function initTCD() {
         ctx.textBaseline = 'top';
         ctx.beginPath();
         for(let i=1; i<=10; i++) {
-            const x = 40 + (i/10) * (canvas.width - 40);
+            const x = 50 + (i/10) * (canvas.width - 50); // 配合左侧留白
             const idx = startIdx + (i/10) * (endIdx - startIdx);
             const timeSec = idx * 0.5; // assuming 0.5s per point
             
@@ -298,7 +298,7 @@ export function initTCD() {
             ctx.setLineDash([5, 5]);
             ctx.lineWidth = 1.5;
             ctx.beginPath();
-            ctx.moveTo(40, zeroY);
+            ctx.moveTo(50, zeroY); // 配合左侧留白
             ctx.lineTo(canvas.width, zeroY);
             ctx.stroke();
             ctx.setLineDash([]); 
@@ -308,10 +308,10 @@ export function initTCD() {
         ctx.strokeStyle = '#38bdf8'; 
         ctx.lineWidth = 2;
         ctx.beginPath();
-        const plotW = canvas.width - 40;
+        const plotW = canvas.width - 50; // 配合左侧留白
         const plotH = canvas.height - 20;
         for(let i = startIdx; i <= endIdx; i++) {
-            const x = 40 + ((i - startIdx) / (endIdx - startIdx || 1)) * plotW;
+            const x = 50 + ((i - startIdx) / (endIdx - startIdx || 1)) * plotW;
             const y = plotH - ((tcdDataPoints[i] - min) / (max - min)) * plotH;
             if(i === startIdx) ctx.moveTo(x, y);
             else ctx.lineTo(x, y);
