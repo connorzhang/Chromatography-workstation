@@ -1,4 +1,4 @@
-export function initSettings() {
+﻿export function initSettings() {
     const container = document.getElementById('view-settings');
     container.innerHTML = `
         <div class="settings-container">
@@ -603,7 +603,7 @@ export function initSettings() {
 
     setTimeout(async () => {
         try {
-            const devRes = await fetch('/api/sila2/v1/SystemDiscoveryService/Devices');
+            const devRes = await fetch('/api/v1/devices');
             const devices = await devRes.json();
             if(devices && devices.length > 0) {
                 const connectedDev = devices.find(d => d.connected);
@@ -617,7 +617,7 @@ export function initSettings() {
               }
 
               // Load Hardware Settings
-              const hwRes = await fetch('/api/sila2/v1/HardwareService/Config?deviceId=' + encodeURIComponent(deviceId));
+              const hwRes = await fetch('/api/v1/hardware?deviceId=' + encodeURIComponent(deviceId));
               if (hwRes.ok) {
                   hwSettings = await hwRes.json();
                   
@@ -706,7 +706,7 @@ export function initSettings() {
             }
 
             // Load Upload Config
-            const upRes = await fetch('/api/sila2/v1/DataExportService/Config?deviceId=' + encodeURIComponent(deviceId));
+            const upRes = await fetch('/api/v1/uploadconfig?deviceId=' + encodeURIComponent(deviceId));
             if (upRes.ok) {
                 uploadSettings = await upRes.json();
                 
@@ -956,7 +956,7 @@ export function initSettings() {
         // Events Query
         document.getElementById('btn-query-events').addEventListener('click', async () => {
             try {
-                const res = await fetch('/api/sila2/v1/ValveControllerService/SwitchValve?deviceId=' + encodeURIComponent(deviceId), {
+                const res = await fetch('/api/control/events?deviceId=' + encodeURIComponent(deviceId), {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({control: 'query'})
@@ -969,7 +969,7 @@ export function initSettings() {
                 
                 // 等待 1 秒后重新拉取硬件配置并渲染
                 setTimeout(async () => {
-                    const hwRes = await fetch('/api/sila2/v1/HardwareService/Config?deviceId=' + encodeURIComponent(deviceId));
+                    const hwRes = await fetch('/api/v1/hardware?deviceId=' + encodeURIComponent(deviceId));
                     if (hwRes.ok) {
                         hwSettings = await hwRes.json();
                         if (hwSettings.events && hwSettings.events.length > 0) {
@@ -1044,13 +1044,13 @@ export function initSettings() {
             hwSettings.events = events;
 
             try {
-                await fetch('/api/sila2/v1/HardwareService/Config?deviceId=' + encodeURIComponent(deviceId), {
+                await fetch('/api/v1/hardware?deviceId=' + encodeURIComponent(deviceId), {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(hwSettings)
                 });
                 
-                const res = await fetch('/api/sila2/v1/ValveControllerService/SwitchValve?deviceId=' + encodeURIComponent(deviceId), {
+                const res = await fetch('/api/control/events?deviceId=' + encodeURIComponent(deviceId), {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(events)
@@ -1078,14 +1078,14 @@ export function initSettings() {
 
             try {
                 // Save to hardware config endpoint
-                await fetch('/api/sila2/v1/HardwareService/Config?deviceId=' + encodeURIComponent(deviceId), {
+                await fetch('/api/v1/hardware?deviceId=' + encodeURIComponent(deviceId), {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(hwSettings)
                 });
                 
                 // Issue control command (assuming backend maps these appropriately)
-                const res = await fetch('/api/sila2/v1/PneumaticControllerService/SetTargetPressure?deviceId=' + encodeURIComponent(deviceId), {
+                const res = await fetch('/api/control/epc?deviceId=' + encodeURIComponent(deviceId), {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ targets: { [zone]: val } })
@@ -1104,7 +1104,7 @@ export function initSettings() {
             btnQueryIgnite.addEventListener('click', async () => {
                 window.showToast('正在向设备下发点火参数查询指令...');
                 try {
-                    await fetch('/api/sila2/v1/FlameIonizationDetectorService/Ignite_config?deviceId=' + encodeURIComponent(deviceId), {
+                    await fetch('/api/control/ignite_config?deviceId=' + encodeURIComponent(deviceId), {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({control: 'query'})
@@ -1112,7 +1112,7 @@ export function initSettings() {
                     
                     await new Promise(r => setTimeout(r, 500));
                     
-                    const hwRes = await fetch('/api/sila2/v1/HardwareService/Config?deviceId=' + encodeURIComponent(deviceId));
+                    const hwRes = await fetch('/api/v1/hardware?deviceId=' + encodeURIComponent(deviceId));
                     if (hwRes.ok) {
                         hwSettings = await hwRes.json();
                         if (hwSettings.igniteThreshold1 !== undefined) document.getElementById('set-ignite-th1').value = hwSettings.igniteThreshold1;
@@ -1134,13 +1134,13 @@ export function initSettings() {
                 hwSettings.igniteThreshold2 = parseFloat(document.getElementById('set-ignite-th2').value) || 0;
                 hwSettings.igniteDuration = parseFloat(document.getElementById('set-ignite-dur').value) || 0;
                 try {
-                    const res = await fetch('/api/sila2/v1/HardwareService/Config?deviceId=' + encodeURIComponent(deviceId), {
+                    const res = await fetch('/api/v1/hardware?deviceId=' + encodeURIComponent(deviceId), {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify(hwSettings)
                     });
                     
-                    const ctrlRes = await fetch('/api/sila2/v1/FlameIonizationDetectorService/Ignite_config?deviceId=' + encodeURIComponent(deviceId), {
+                    const ctrlRes = await fetch('/api/control/ignite_config?deviceId=' + encodeURIComponent(deviceId), {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({control: 'set'})
@@ -1187,13 +1187,13 @@ export function initSettings() {
             if (enDet3) hwSettings.temp_enables['Det3'] = enDet3.checked;
 
             try {
-                await fetch('/api/sila2/v1/HardwareService/Config?deviceId=' + encodeURIComponent(deviceId), {
+                await fetch('/api/v1/hardware?deviceId=' + encodeURIComponent(deviceId), {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(hwSettings)
                 });
                 
-                const res = await fetch('/api/sila2/v1/TemperatureControllerService/SetTargetTemperature?deviceId=' + encodeURIComponent(deviceId), {
+                const res = await fetch('/api/control/temp?deviceId=' + encodeURIComponent(deviceId), {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ 
@@ -1215,7 +1215,7 @@ export function initSettings() {
             window.showToast('正在向设备下发查询指令...');
             try {
                 // 1. 下发 Cmd 0
-                await fetch('/api/sila2/v1/TemperatureControllerService/SetTargetTemperature?deviceId=' + encodeURIComponent(deviceId), {
+                await fetch('/api/control/temp?deviceId=' + encodeURIComponent(deviceId), {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({control: 'query'})
@@ -1225,7 +1225,7 @@ export function initSettings() {
                 await new Promise(r => setTimeout(r, 500));
                 
                 // 3. 拉取最新的缓存
-                const hwRes = await fetch('/api/sila2/v1/HardwareService/Config?deviceId=' + encodeURIComponent(deviceId));
+                const hwRes = await fetch('/api/v1/hardware?deviceId=' + encodeURIComponent(deviceId));
                 if (hwRes.ok) {
                     hwSettings = await hwRes.json();
                     if (hwSettings.temperatures) {
@@ -1272,7 +1272,7 @@ export function initSettings() {
             const isStarting = e.target.innerText === '开始控温';
             const action = isStarting ? 'start' : 'stop';
             try {
-                const res = await fetch('/api/sila2/v1/TemperatureControllerService/SetTargetTemperature?deviceId=' + encodeURIComponent(deviceId), {
+                const res = await fetch('/api/control/temp?deviceId=' + encodeURIComponent(deviceId), {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({control: action})
@@ -1294,7 +1294,7 @@ export function initSettings() {
             btnQueryTime.addEventListener('click', async () => {
                 window.showToast('正在获取工作站循环参数...');
                 try {
-                    await fetch('/api/sila2/v1/ChromatographyService/SetCycle?deviceId=' + encodeURIComponent(deviceId), {
+                    await fetch('/api/control/cycle?deviceId=' + encodeURIComponent(deviceId), {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({control: 'query'})
@@ -1302,7 +1302,7 @@ export function initSettings() {
                     
                     await new Promise(r => setTimeout(r, 500));
 
-                    const uiRes = await fetch('/api/sila2/v1/HardwareService/Config?deviceId=' + encodeURIComponent(deviceId));
+                    const uiRes = await fetch('/api/v1/hardware?deviceId=' + encodeURIComponent(deviceId));
                     if (uiRes.ok) {
                         hwSettings = await uiRes.json();
                         if (hwSettings.cycleInterval !== undefined) document.getElementById('set-time-cycle').value = hwSettings.cycleInterval;
@@ -1321,13 +1321,13 @@ export function initSettings() {
             hwSettings.cycleCount = parseInt(document.getElementById('set-time-cycle-max').value) || 9999999;
             
             try {
-                await fetch('/api/sila2/v1/HardwareService/Config?deviceId=' + encodeURIComponent(deviceId), {
+                await fetch('/api/v1/hardware?deviceId=' + encodeURIComponent(deviceId), {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(hwSettings)
                 });
 
-                const res = await fetch('/api/sila2/v1/ChromatographyService/SetCycle?deviceId=' + encodeURIComponent(deviceId), {
+                const res = await fetch('/api/control/cycle?deviceId=' + encodeURIComponent(deviceId), {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({control: 'set'})
@@ -1366,7 +1366,7 @@ export function initSettings() {
             uploadSettings.desorbTime = parseFloat(document.getElementById('set-desorb-time').value)||0;
 
             try {
-                const res = await fetch('/api/sila2/v1/DataExportService/Config?deviceId=' + encodeURIComponent(deviceId), {
+                const res = await fetch('/api/v1/uploadconfig?deviceId=' + encodeURIComponent(deviceId), {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(uploadSettings)
@@ -1383,6 +1383,20 @@ export function initSettings() {
         const loginDiv = document.getElementById('sysconfig-login');
         const formDiv = document.getElementById('sysconfig-form');
         let currentAuthPass = "";
+
+        window.showLicenseModal = async () => {
+            try {
+                const res = await fetch('/api/license/status');
+                if (res.ok) {
+                    const data = await res.json();
+                    window.showToast(`授权状态: ${data.valid ? '有效' : '无效'} | 版本: ${data.tier} | 到期: ${data.exp}`);
+                } else {
+                    window.showToast('无法获取授权信息', true);
+                }
+            } catch (e) {
+                window.showToast('无法获取授权信息(网络异常)', true);
+            }
+        };
 
         document.getElementById('btn-show-license').addEventListener('click', () => {
             if (window.showLicenseModal) {
@@ -1408,7 +1422,7 @@ export function initSettings() {
             
             // 动态拉取驱动列表
             try {
-                const drvRes = await fetch('/api/sila2/v1/DriverRegistryService/Drivers');
+                const drvRes = await fetch('/api/v1/sys/drivers');
                 if (drvRes.ok) {
                     const drvData = await drvRes.json();
                     const sel = document.getElementById('sys-driver-mode');
@@ -1431,7 +1445,7 @@ export function initSettings() {
             }
 
             try {
-                const res = await fetch('/api/sila2/v1/SystemConfigService/Config?auth=' + encodeURIComponent(pass));
+                const res = await fetch('/api/sysconfig?auth=' + encodeURIComponent(pass));
                 if (res.ok) {
                     const cfg = await res.json();
                     currentAuthPass = pass;
@@ -1483,7 +1497,7 @@ export function initSettings() {
                     document.getElementById('modbus-upload-log').checked = cfg.modbus_upload_log !== false;
 
                     // Check MQTT status
-                    fetch('/api/sila2/v1/SystemConfigService/Config/mqtt_test').then(r => r.json()).then(st => {
+                    fetch('/api/sysconfig/mqtt_test').then(r => r.json()).then(st => {
                         const ind = document.getElementById('mqtt-status-indicator');
                         if (st.connected) {
                             ind.textContent = '状态: 已连接';
@@ -1510,7 +1524,7 @@ export function initSettings() {
             btn.textContent = '测试中...';
             try {
                 const deviceNo = document.getElementById('daq-device-no').value || document.getElementById('sys-mqtt-clientid').value || 'test_device';
-                const res = await fetch('/api/sila2/v1/SystemConfigService/Config/mqtt_test', { 
+                const res = await fetch('/api/sysconfig/mqtt_test', { 
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ deviceId: deviceNo })
@@ -1541,7 +1555,7 @@ export function initSettings() {
             uploadSettings.enableUpload = document.getElementById('daq-enable').checked;
 
             try {
-                await fetch('/api/sila2/v1/DataExportService/Config?deviceId=' + encodeURIComponent(deviceId), {
+                await fetch('/api/v1/uploadconfig?deviceId=' + encodeURIComponent(deviceId), {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(uploadSettings)
@@ -1575,7 +1589,7 @@ export function initSettings() {
                 modular_epc_port: document.getElementById('sys-modular-epc-port').value
             };
             try {
-                const res = await fetch('/api/sila2/v1/SystemConfigService/Config', {
+                const res = await fetch('/api/sysconfig', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(payload)

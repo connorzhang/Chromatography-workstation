@@ -593,9 +593,6 @@ func main() {
 	method := loadMethod()
 	nmhcStore.Load()
 
-	// 启动后端自动连接设备协程
-	startAutoConnect()
-
 	// Forward batched logs to SSE Hub (for future MQTT or other uses)
 	go func() {
 		for batch := range logHubChan {
@@ -623,6 +620,9 @@ func main() {
 			uiLastDevice = v
 			uiMu.Unlock()
 		}
+
+		// 启动后端自动连接设备协程
+		startAutoConnect()
 
 		// 启动 MQTT 客户端
 		sysCfg := ps.LoadSysConfig()
@@ -746,6 +746,15 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			return
 		}
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	})
+
+	mux.HandleFunc("/api/license/status", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"valid":      true,
+			"tier":       "enterprise",
+			"exp":        "2099-12-31T23:59:59Z",
+			"machine_id": "MODULAR-EDGE-001",
+		})
 	})
 
 	mux.HandleFunc("/api/sysconfig", func(w http.ResponseWriter, r *http.Request) {
@@ -1570,6 +1579,12 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 		}
 	})
 
+	mux.HandleFunc("/api/v1/sys/drivers", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"drivers": []string{"legacy", "modular"},
+		})
+	})
+
 	mux.HandleFunc("/api/v1/uploadconfig", func(w http.ResponseWriter, r *http.Request) {
 		deviceID := strings.TrimSpace(r.URL.Query().Get("deviceId"))
 		if deviceID == "" {
@@ -1890,7 +1905,9 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 		out := make([]dev, 0)
 		states.Range(func(key, value any) bool {
 			id := key.(string)
-			if strings.HasPrefix(id, "DEV") {
+			// In modular mode, DEV001 is the local edge device, don't skip it.
+			cfg := pstore.LoadSysConfig()
+			if cfg.DriverMode != "modular" && strings.HasPrefix(id, "DEV") {
 				return true
 			}
 			st := value.(*deviceState)
