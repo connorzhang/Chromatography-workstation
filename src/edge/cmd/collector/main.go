@@ -32,7 +32,7 @@ import (
 //go:embed static/*
 var staticFS embed.FS
 
-const AppVersion = "v0.3.105"
+const AppVersion = "v0.3.106"
 
 var startedAt = time.Now().UTC()
 
@@ -2145,17 +2145,15 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write([]byte(htmlStr))
 	})
-	host := strings.TrimSpace(os.Getenv("EDGE_HTTP_BIND"))
-	if host == "" {
-		host = "0.0.0.0"
-	}
+	host := "0.0.0.0"
 	addr := host + ":" + strconv.Itoa(port)
 	LogInfof("collector http listening on %s", addr)
 	return http.ListenAndServe(addr, mux)
 }
 
 func serveTCP(port int, hub *realtime.Hub, states *sync.Map, cfg chromsend143.Config, method v1.Method) error {
-	ln, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", port))
+	host := "0.0.0.0"
+	ln, err := net.Listen("tcp", fmt.Sprintf("%s:%d", host, port))
 	if err != nil {
 		return fmt.Errorf("tcp listen %d failed: %w", port, err)
 	}
@@ -3440,10 +3438,20 @@ var indexHTML = `<!doctype html>
     }
 
     const loopStorageKey = 'chrom.loop';
+    const cycleMinStorageKey = 'chrom.cycleMin';
+    const cycleMaxStorageKey = 'chrom.cycleMax';
     try {
       const v = localStorage.getItem(loopStorageKey);
       if(v !== null && v !== undefined && loopEl) {
         loopEl.checked = (v === '1' || v === 'true');
+      }
+      if(cycleminEl) {
+        const cMin = localStorage.getItem(cycleMinStorageKey);
+        if(cMin !== null) cycleminEl.value = cMin;
+      }
+      if(cyclemaxEl) {
+        const cMax = localStorage.getItem(cycleMaxStorageKey);
+        if(cMax !== null) cyclemaxEl.value = cMax;
       }
     } catch {}
     if(loopEl){
@@ -3452,6 +3460,18 @@ var indexHTML = `<!doctype html>
         saveUiToBackend(selectedDevice());
       };
       loopEl.addEventListener('change', saveLoop);
+    }
+    if(cycleminEl){
+      cycleminEl.addEventListener('change', () => {
+        try { localStorage.setItem(cycleMinStorageKey, cycleminEl.value); } catch {}
+        saveUiToBackend(selectedDevice());
+      });
+    }
+    if(cyclemaxEl){
+      cyclemaxEl.addEventListener('change', () => {
+        try { localStorage.setItem(cycleMaxStorageKey, cyclemaxEl.value); } catch {}
+        saveUiToBackend(selectedDevice());
+      });
     }
     
     const homeStatusEl = document.getElementById('home-status');
@@ -4607,14 +4627,10 @@ var indexHTML = `<!doctype html>
     const cyclemaxEl = document.getElementById('cyclemax');
 
     if(cycleminEl){
-      cycleminEl.addEventListener('change', () => {
-        saveUiToBackend(selectedDevice());
-      });
+      // Handled above in localStorage init
     }
     if(cyclemaxEl){
-      cyclemaxEl.addEventListener('change', () => {
-        saveUiToBackend(selectedDevice());
-      });
+      // Handled above in localStorage init
     }
 
     let backendLastDeviceId = '';
