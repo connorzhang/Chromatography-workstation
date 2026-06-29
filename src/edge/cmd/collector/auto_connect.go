@@ -43,7 +43,10 @@ func startAutoConnect(states *sync.Map, hub *realtime.Hub) {
 
 			// --- Handle Modbus Temp Auto-Connect ---
 			modbusTempCtrlMu.Lock()
-			if globalModbusTempCtrl == nil {
+			if globalModbusTempCtrl == nil || globalModbusTempCtrl.port != modbusPort || globalModbusTempCtrl.address != modbusSlaveID {
+				if globalModbusTempCtrl != nil {
+					globalModbusTempCtrl.Close()
+				}
 				globalModbusTempCtrl = NewModbusTempController(modbusPort, modbusSlaveID)
 			}
 			mCtrl := globalModbusTempCtrl
@@ -102,7 +105,10 @@ func startAutoConnect(states *sync.Map, hub *realtime.Hub) {
 
 			// --- Handle TCD Auto-Connect ---
 			tcdCtrlMu.Lock()
-			if globalTCDCtrl == nil {
+			if globalTCDCtrl == nil || globalTCDCtrl.portName != tcdPort {
+				if globalTCDCtrl != nil {
+					globalTCDCtrl.Close()
+				}
 				globalTCDCtrl = NewTCDController(tcdPort)
 			}
 			tCtrl := globalTCDCtrl
