@@ -22,7 +22,7 @@ export function initTCD() {
                 <div style="margin-left: auto; display: flex; align-items: center; gap: 15px; background: rgba(0,0,0,0.2); padding: 5px 15px; border-radius: 6px; border: 1px solid #334155;">
                     <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 2px;">
                         <div style="font-size: 12px; color: #94a3b8;" title="最近2分钟内的最大值减去最小值 (浮动差)">2分钟基线噪声(Noise): <span id="tcd-stat-noise" style="color: #facc15; font-weight: bold;">--</span></div>
-                        <div style="font-size: 12px; color: #94a3b8;" title="均值与浮动差的比值">基线漂移度(Mean/Noise): <span id="tcd-stat-drift" style="color: #38bdf8; font-weight: bold;">--</span></div>
+                        <div style="font-size: 12px; color: #94a3b8;" title="浮动差与基线均值的比值 (百分比)">基线漂移度(Noise/Mean): <span id="tcd-stat-drift" style="color: #38bdf8; font-weight: bold;">--</span></div>
                     </div>
                     <div style="height: 30px; width: 1px; background: #334155; margin: 0 5px;"></div>
                     <div style="display: flex; align-items: center; gap: 8px;">
@@ -125,11 +125,11 @@ export function initTCD() {
                     const mean = sum / tcdDataPoints.length;
                     
                     document.getElementById('tcd-stat-noise').innerText = noise.toFixed(2);
-                    if (noise === 0) {
-                        document.getElementById('tcd-stat-drift').innerText = '0.00';
+                    if (mean === 0) {
+                        document.getElementById('tcd-stat-drift').innerText = '0.0000';
                     } else {
-                        const driftRatio = mean / noise;
-                        document.getElementById('tcd-stat-drift').innerText = driftRatio.toFixed(2);
+                        const driftRatio = noise / Math.abs(mean);
+                        document.getElementById('tcd-stat-drift').innerText = driftRatio.toFixed(4);
                     }
                 }
 

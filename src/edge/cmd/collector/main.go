@@ -32,7 +32,7 @@ import (
 //go:embed static/*
 var staticFS embed.FS
 
-const AppVersion = "v0.3.98"
+const AppVersion = "v0.3.104"
 
 var startedAt = time.Now().UTC()
 
@@ -903,12 +903,17 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			return
 		}
 
-		// 2. TODO: 鏍规嵁 RunID 浠庡巻鍙叉暟鎹簱涓煡鍑哄搴旂殑鍒嗘瀽缁撴灉 (鍚勭粍鍒嗛潰绉?
-		// 鏆備笖鐢ㄤ吉浠ｇ爜妯℃嫙鏌ュ埌鐨勫搷搴斿€硷紝鍚庣画鎵撻€?SQLite 鍚庤ˉ鍏?
-		mockResponses := map[string]float64{
-			"THC":  12345.6,
-			"CH4":  2345.6,
-			"NMHC": 10000.0,
+		// 2. 浠?nmhcStore 鑾峰彇鏈€鏂板垎鏋愮粨鏋?
+		mockResponses := map[string]float64{}
+		recent := nmhcStore.Query("", nil, nil, 1)
+		if len(recent) > 0 {
+			mockResponses["THC"] = recent[0].THC
+			mockResponses["CH4"] = recent[0].CH4
+			mockResponses["NMHC"] = recent[0].NMHC
+		} else {
+			mockResponses["THC"] = 0
+			mockResponses["CH4"] = 0
+			mockResponses["NMHC"] = 0
 		}
 
 		// 3. 灏嗗搴旂粍鍒嗙殑鍝嶅簲鍊煎瓨鍏?Method 鐨?Level 涓?
