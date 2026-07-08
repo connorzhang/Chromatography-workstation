@@ -415,8 +415,6 @@ src/data/
 deploy/
 deploy_linux/
 deploy_runner/
-src/salvo-backend/
-src/ui/
 src/edge/internal/sila2/certs/
 src/edge/simulator_tcd_linux
 start.go
@@ -426,3 +424,8 @@ docs/assets/*.xlsx
 docs/assets/log_upload.txt
 docs/assets/vs2022.txt
 src/开发文档/
+
+# Rust / Node build artifacts (keep source, ignore outputs)
+src/salvo-backend/**/target/
+src/ui/**/dist/
+src/ui/**/node_modules/

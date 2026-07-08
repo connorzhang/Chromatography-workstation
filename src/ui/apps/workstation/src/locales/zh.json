@@ -1,0 +1,79 @@
+{
+  "nav": {
+    "method_run": "方法与运行控制",
+    "data_analysis": "数据分析",
+    "sequence": "序列",
+    "calibration": "校准与定量",
+    "batch_review": "批处理审核",
+    "report_layout": "报告排版",
+    "audit_trail": "审计追踪",
+    "user_mgmt": "用户权限管理",
+    "config": "系统配置"
+  },
+  "method_run": {
+    "title": "方法与运行控制",
+    "system_status": "系统状态：{{status}}",
+    "start_run": "开始运行",
+    "stop_run": "停止运行",
+    "hardware_monitor": "硬件监控",
+    "pump": "泵 (四元)",
+    "oven": "柱温箱 (TCC)",
+    "detector_tcd": "检测器 (TCD)",
+    "tcd_bridge_current": "桥流：",
+    "tcd_temp": "TCD 温度：",
+    "tcd_polarity": "极性：",
+    "detector_fid": "检测器 (FID)",
+    "fid_flame": "火焰状态：",
+    "fid_temp": "FID 温度：",
+    "online_signal": "在线信号 (实时)",
+    "status": {
+      "idle": "空闲",
+      "stopped": "已停止",
+      "connecting": "连接中...",
+      "disconnected": "已断开"
+    }
+  },
+  "data_analysis": {
+    "title": "数据分析",
+    "re_integrate": "重新积分",
+    "calculating": "计算中...",
+    "click_to_load": "点击“重新积分”加载色谱图",
+    "time_s": "时间 (s)",
+    "response_mau": "响应 (µV)",
+    "peak": "峰 {{num}}",
+    "integration_events": "积分事件",
+    "initial_area_reject": "初始面积剔除",
+    "initial_peak_width": "初始峰宽",
+    "tangent_skim_mode": "切线撇去模式",
+    "integration_results": "积分结果",
+    "peak_num": "峰号",
+    "ret_time": "保留时间",
+    "type": "类型",
+    "width": "峰宽",
+    "area": "面积",
+    "height": "峰高",
+    "area_percent": "面积占比",
+    "no_peaks": "未检测到色谱峰"
+  },
+  "sequence": {
+    "title": "序列参数",
+    "line": "行号",
+    "location": "瓶位",
+    "sample_name": "样品名称",
+    "method_name": "方法名称",
+    "inj_vol": "进样体积 (µL)",
+    "sample_type": "样品类型",
+    "run_sequence": "运行序列"
+  },
+  "config": {
+    "title": "系统配置编辑器",
+    "desc": "经典安捷伦理念：在主工作站加载前，离线定义仪器硬件配置。",
+    "instrument_1": "仪器 1：GC 系统",
+    "ip_address": "IP 地址 / 主机名：",
+    "config_modules": "配置模块",
+    "save_config": "保存配置"
+  },
+  "placeholder": {
+    "coming_soon": "该高级功能模块正在开发中..."
+  }
+}

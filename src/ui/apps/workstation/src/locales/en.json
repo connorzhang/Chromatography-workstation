@@ -1,0 +1,79 @@
+{
+  "nav": {
+    "method_run": "Method and Run Control",
+    "data_analysis": "Data Analysis",
+    "sequence": "Sequence",
+    "calibration": "Calibration",
+    "batch_review": "Batch Review",
+    "report_layout": "Report Layout",
+    "audit_trail": "Audit Trail",
+    "user_mgmt": "User Management",
+    "config": "System Configuration"
+  },
+  "method_run": {
+    "title": "Method and Run Control",
+    "system_status": "System Status: {{status}}",
+    "start_run": "Start Run",
+    "stop_run": "Stop Run",
+    "hardware_monitor": "Hardware Monitor",
+    "pump": "PUMP (Quaternary)",
+    "oven": "OVEN (TCC)",
+    "detector_tcd": "DETECTOR (TCD)",
+    "tcd_bridge_current": "Bridge Current: ",
+    "tcd_temp": "TCD Temp: ",
+    "tcd_polarity": "Polarity: ",
+    "detector_fid": "DETECTOR (FID)",
+    "fid_flame": "Flame: ",
+    "fid_temp": "FID Temp: ",
+    "online_signal": "Online Signal (Real-time)",
+    "status": {
+      "idle": "Idle",
+      "stopped": "Stopped",
+      "connecting": "Connecting...",
+      "disconnected": "Disconnected"
+    }
+  },
+  "data_analysis": {
+    "title": "Data Analysis",
+    "re_integrate": "Re-integrate",
+    "calculating": "Calculating...",
+    "click_to_load": "Click Re-integrate to load chromatogram",
+    "time_s": "Time (s)",
+    "response_mau": "Response (µV)",
+    "peak": "Peak {{num}}",
+    "integration_events": "Integration Events",
+    "initial_area_reject": "Initial Area Reject",
+    "initial_peak_width": "Initial Peak Width",
+    "tangent_skim_mode": "Tangent Skim Mode",
+    "integration_results": "Integration Results",
+    "peak_num": "Peak #",
+    "ret_time": "RetTime",
+    "type": "Type",
+    "width": "Width",
+    "area": "Area",
+    "height": "Height",
+    "area_percent": "Area %",
+    "no_peaks": "No peaks detected"
+  },
+  "sequence": {
+    "title": "Sequence Parameters",
+    "line": "Line",
+    "location": "Location",
+    "sample_name": "Sample Name",
+    "method_name": "Method Name",
+    "inj_vol": "Inj/Vol",
+    "sample_type": "Sample Type",
+    "run_sequence": "Run Sequence"
+  },
+  "config": {
+    "title": "Configuration Editor",
+    "desc": "Classic Agilent concept: Define instruments offline before the main station loads.",
+    "instrument_1": "Instrument 1: GC System",
+    "ip_address": "IP Address / Hostname: ",
+    "config_modules": "Configure Modules",
+    "save_config": "Save Configuration"
+  },
+  "placeholder": {
+    "coming_soon": "This advanced module is under development..."
+  }
+}

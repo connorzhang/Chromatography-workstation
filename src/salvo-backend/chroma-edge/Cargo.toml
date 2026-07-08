@@ -1,0 +1,17 @@
+[package]
+name = "chroma-edge"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+chroma-core = { version = "0.1.0", path = "../chroma-core" }
+lazy_static = "1.5.0"
+salvo = { version = "0.93.0", features = ["cors", "websocket", "oapi", "serve-static"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+tokio = { workspace = true, features = ["full"] }
+uuid = { version = "1.12", features = ["v4"] }
+chrono = "0.4"
+serialport = "4.9.0"
+rust-embed = "8.11.0"
+mime_guess = "2.0.5"
