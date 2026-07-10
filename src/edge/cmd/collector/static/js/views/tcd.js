@@ -79,8 +79,8 @@ export function initTCD() {
     let tcdPollInterval = null;
     let tcdDataPoints = []; // sliding window
 
-    // 最大存储点数：4分钟数据，0.5秒一个点 = 480
-    const maxPoints = 480;
+    // 最大存储点数：4分钟数据，每秒40个点 = 9600
+    const maxPoints = 9600;
 
     // Savitzky-Golay 滤波系数（窗口5，2阶多项式）
     const SG_COEFFS = [-0.08571429, 0.34285714, 0.48571429, 0.34285714, -0.08571429];
@@ -280,9 +280,9 @@ export function initTCD() {
             startIdx = zoomState.minIdx;
             endIdx = zoomState.maxIdx;
         } else {
-            // 根据 fullScreenSec 计算可见点数 N = fullScreenSec / 0.5
+            // 根据 fullScreenSec 计算可见点数 N = fullScreenSec * 40 (每秒40个点)
             const fsSec = parseFloat(fullScreenSecInput.value);
-            const N = Math.max(1, Math.floor((isNaN(fsSec) ? 120 : fsSec) / 0.5));
+            const N = Math.max(1, Math.floor((isNaN(fsSec) ? 120 : fsSec) * 40));
             endIdx = total - 1;
             startIdx = Math.max(0, endIdx - N + 1);
         }
@@ -422,9 +422,9 @@ export function initTCD() {
                 }
                 document.getElementById('tcd-values-list').innerHTML = html;
 
-                // 只取 CH1 作为主曲线数据（与谱图界面一致的连续画法）
-                tcdDataPoints.push(data.values[0]);
-                // 最大存储 maxPoints = 480（4分钟数据，0.5秒一个点）
+                // 将20个原始数据点按顺序一次性全部推入（40Hz 采样率）
+                tcdDataPoints.push(...data.values);
+                // 最大存储 maxPoints = 9600（4分钟数据）
                 if(tcdDataPoints.length > maxPoints) {
                     const overLimit = tcdDataPoints.length - maxPoints;
                     tcdDataPoints = tcdDataPoints.slice(overLimit);
@@ -535,7 +535,7 @@ export function initTCD() {
         for(let i=0; i<=10; i++) {
             const x = padLeft + (i/10) * plotW;
             const idx = startIdx + (i/10) * (endIdx - startIdx);
-            const timeSec = idx * 0.5; // 每个点代表0.5秒
+            const timeSec = idx / 40; // 每个点代表 1/40 秒 (0.025s)
             
             ctx.moveTo(x, padTop);
             ctx.lineTo(x, canvas.height - padBottom);
@@ -610,7 +610,7 @@ export function initTCD() {
             const dx = Math.abs(dx2 - dx1);
             const dy = Math.abs(dy2 - dy1);
             const valSpan = max - min;
-            const timeSpan = (endIdx - startIdx) * 0.5;
+            const timeSpan = (endIdx - startIdx) / 40;
             const dVal = (dy / plotH) * valSpan;
             const dTime = (dx / plotW) * timeSpan;
             
