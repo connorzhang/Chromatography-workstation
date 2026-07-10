@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"sync"
 	"time"
@@ -40,7 +41,18 @@ func NewTCDController(portName string) *TCDController {
 }
 
 func (c *TCDController) Connect() error {
-	mode := &serial.Mode{
+        if c.portName == "sim" || c.portName == "mock" {
+                c.stateMu.Lock()
+                c.state.Connected = true
+                c.state.LastUpdate = time.Now()
+                c.stateMu.Unlock()
+
+                c.wg.Add(1)
+                go c.mockLoop()
+                return nil
+        }
+
+        mode := &serial.Mode{
 		BaudRate: 38400,
 		DataBits: 8,
 		Parity:   serial.NoParity,
@@ -72,6 +84,9 @@ func (c *TCDController) Close() {
 		c.port.Close()
 		c.wg.Wait()
 		c.port = nil
+	} else if c.portName == "sim" || c.portName == "mock" {
+		close(c.stopChan)
+		c.wg.Wait()
 	}
 	c.stateMu.Lock()
 	c.state.Connected = false
@@ -134,6 +149,52 @@ func (c *TCDController) readLoop() {
 	}
 }
 
+func (c *TCDController) mockLoop() {
+	defer c.wg.Done()
+
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	var t float64 = 0.0
+	dt := 0.025 // 25ms per point (40Hz)
+
+	for {
+		select {
+		case <-c.stopChan:
+			return
+		case <-ticker.C:
+			c.stateMu.Lock()
+			for i := 0; i < 20; i++ {
+				// Simulate a smooth continuous wave
+				base := 10.0 + math.Sin(t*0.1)*2.0
+
+				// Simulate a peak every 10 seconds, centered at cycle=5.0
+				cycle := math.Mod(t, 10.0)
+				peak := 0.0
+				if math.Abs(cycle-5.0) < 1.0 {
+					peak = 50.0 * math.Exp(-math.Pow(cycle-5.0, 2)/0.05)
+				}
+
+				// Simulate high frequency noise
+				noise := math.Sin(t*123.4) * 0.1
+
+				c.state.Values[i] = base + peak + noise
+				t += dt
+			}
+			c.state.LastUpdate = time.Now()
+
+			pts := make([]float64, 20)
+			copy(pts, c.state.Values[:])
+			cb := c.OnData
+			c.stateMu.Unlock()
+
+			if cb != nil {
+				go cb(pts)
+			}
+		}
+	}
+}
+
 func (c *TCDController) parseFrame(frame []byte) {
 	c.stateMu.Lock()
 	defer c.stateMu.Unlock()
@@ -182,6 +243,9 @@ func (c *TCDController) parseFrame(frame []byte) {
 }
 
 func (c *TCDController) SendCommand(cmd []byte) error {
+	if c.portName == "sim" || c.portName == "mock" {
+		return nil // ignore commands in simulation mode
+	}
 	if c.port == nil {
 		return fmt.Errorf("port not connected")
 	}
