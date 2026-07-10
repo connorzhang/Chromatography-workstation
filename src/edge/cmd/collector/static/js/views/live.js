@@ -1,75 +1,75 @@
-export function initLiveChromatogram() {
+﻿export function initLiveChromatogram() {
     const container = document.getElementById('view-live');
     container.innerHTML = `
         <div style="display: flex; height: calc(100vh - 80px); gap: 1rem;">
             <div style="flex: 1; min-width: 0; background: var(--panel); border-radius: 8px; border: 1px solid #334155; position: relative; display: flex; flex-direction: column;">
-                <!-- 第一行：进样类型、控制按钮、点火图标 -->
+                <!-- 绗竴琛岋細杩涙牱绫诲瀷銆佹帶鍒舵寜閽€佺偣鐏浘鏍?-->
                 <div style="padding: 6px 10px; border-bottom: 1px solid #334155; display: flex; gap: 10px; align-items: center; justify-content: space-between;">
                     <div style="display: flex; gap: 10px; align-items: center;">
-                        <span style="color: #94a3b8;">进样类型:</span>
-                        <label><input type="radio" name="injType" value="normal" checked> 正常</label>
-                        <label><input type="radio" name="injType" value="zero"> 零气</label>
-                        <label><input type="radio" name="injType" value="span"> 标气</label>
+                        <span style="color: #94a3b8;">杩涙牱绫诲瀷:</span>
+                        <label><input type="radio" name="injType" value="normal" checked> 姝ｅ父</label>
+                        <label><input type="radio" name="injType" value="zero"> 闆舵皵</label>
+                        <label><input type="radio" name="injType" value="span"> 鏍囨皵</label>
                         
                         <div style="margin-left: 20px; display: flex; gap: 10px;">
-                            <button class="btn" onclick="window.sendCmd('startAll')">▶ 开始分析</button>
-                            <button class="btn btn-danger" onclick="window.sendCmd('stopAll')">⏹ 停止分析</button>
+                            <button class="btn" onclick="window.sendCmd('startAll')">鈻?寮€濮嬪垎鏋?/button>
+                            <button class="btn btn-danger" onclick="window.sendCmd('stopAll')">鈴?鍋滄鍒嗘瀽</button>
                         </div>
                     </div>
                     
-                    <!-- 点火图标 -->
-                    <div id="live-ignite-icon" style="font-size: 28px; cursor: pointer; color: #64748b; transition: color 0.3s;" title="点击发送点火指令">
-                        🔥
+                    <!-- 鐐圭伀鍥炬爣 -->
+                    <div id="live-ignite-icon" style="font-size: 28px; cursor: pointer; color: #64748b; transition: color 0.3s;" title="鐐瑰嚮鍙戦€佺偣鐏寚浠?>
+                        馃敟
                     </div>
                 </div>
 
-                <!-- 第二行：图表配置项 -->
+                <!-- 绗簩琛岋細鍥捐〃閰嶇疆椤?-->
                 <div style="padding: 6px 10px; border-bottom: 1px solid #334155; display: flex; gap: 15px; align-items: center; background: rgba(0,0,0,0.2);">
                     <div style="display: flex; align-items: center; gap: 5px;">
-                        <span style="color: #94a3b8;">下限:</span>
+                        <span style="color: #94a3b8;">涓嬮檺:</span>
                         <input type="number" id="live-y-low" class="input" value="0" style="width: 60px; padding: 2px 5px;">
                     </div>
                     <div style="display: flex; align-items: center; gap: 5px;">
-                        <span style="color: #94a3b8;">上限:</span>
+                        <span style="color: #94a3b8;">涓婇檺:</span>
                         <input type="number" id="live-y-high" class="input" value="40" style="width: 60px; padding: 2px 5px;">
                     </div>
                     <div style="display: flex; align-items: center; gap: 5px;">
-                        <span style="color: #94a3b8;">采集时间:</span>
+                        <span style="color: #94a3b8;">閲囬泦鏃堕棿:</span>
                         <input type="number" id="live-acq-min" class="input" value="2" step="0.1" style="width: 60px; padding: 2px 5px;">
                     </div>
                     <div style="display: flex; align-items: center; gap: 5px;">
-                        <span style="color: #94a3b8;">满屏时间:</span>
+                        <span style="color: #94a3b8;">婊″睆鏃堕棿:</span>
                         <input type="number" id="live-full-min" class="input" value="2" style="width: 60px; padding: 2px 5px;">
                     </div>
-                    <button class="btn" id="btn-apply-live-settings" style="padding: 2px 10px; font-size: 12px;">应用</button>
+                    <button class="btn" id="btn-apply-live-settings" style="padding: 2px 10px; font-size: 12px;">搴旂敤</button>
                 </div>
 
-                <!-- 第三行：实时状态与自适应配置 -->
+                <!-- 绗笁琛岋細瀹炴椂鐘舵€佷笌鑷€傚簲閰嶇疆 -->
                 <div style="padding: 5px 10px; border-bottom: 1px solid #334155; display: flex; gap: 15px; align-items: center; font-size: 13px; background: rgba(0,0,0,0.1);">
-                    <span style="color: #94a3b8;">通道1:</span>
+                    <span style="color: #94a3b8;">閫氶亾1:</span>
                     <span id="live-current-time" style="font-family: monospace; font-weight: bold;">0.000</span> <span style="color: #94a3b8;">min</span>
                     <span id="live-current-signal" style="font-family: monospace; font-weight: bold; margin-left: 10px;">0.000</span> <span style="color: #94a3b8;">pA</span>
                     
-                    <span style="color: #94a3b8; margin-left: 10px;">信号1:</span>
+                    <span style="color: #94a3b8; margin-left: 10px;">淇″彿1:</span>
                     <label style="display: flex; align-items: center; gap: 5px; color: #10b981; cursor: pointer;">
-                        <input type="checkbox" id="live-auto-y"> 峰高自适应
+                        <input type="checkbox" id="live-auto-y"> 宄伴珮鑷€傚簲
                     </label>
                 </div>
 
-                <!-- 图表区 -->
+                <!-- 鍥捐〃鍖?-->
                 <div style="flex: 1; position: relative; min-height: 0;">
                     <canvas id="chromatogram-canvas" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></canvas>
                 </div>
             </div>
             <div style="flex: 0 0 350px; display: flex; flex-direction: column; gap: 0.5rem; min-height: 0;">
                 <div class="control-group" style="flex: 1; margin: 0; padding: 0.8rem; overflow-y: auto;">
-                    <h3 style="margin-top:0; margin-bottom:0.5rem;">实时结果</h3>
+                    <h3 style="margin-top:0; margin-bottom:0.5rem;">瀹炴椂缁撴灉</h3>
                     <table id="live-results-table" style="margin-top: 0;">
                         <thead>
-                            <tr><th>名称</th><th style="text-align:right">含量(mg/m³)</th></tr>
+                            <tr><th>鍚嶇О</th><th style="text-align:right">鍚噺(mg/m鲁)</th></tr>
                         </thead>
                         <tbody>
-                            <tr><td colspan="2" style="text-align:center; color:#94a3b8">等待分析...</td></tr>
+                            <tr><td colspan="2" style="text-align:center; color:#94a3b8">绛夊緟鍒嗘瀽...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -77,28 +77,28 @@ export function initLiveChromatogram() {
                     <div class="control-group" style="flex: 1; margin: 0; padding: 0.6rem; overflow-y: auto;">
                         <table id="live-pressure-table" style="font-size: 13px; margin-top: 0; width: 100%;">
                             <thead>
-                                <tr><th>名称</th><th style="text-align:right">实测(psi)</th></tr>
+                                <tr><th>鍚嶇О</th><th style="text-align:right">瀹炴祴(psi)</th></tr>
                             </thead>
                             <tbody>
-                                <tr><td>载气1</td><td id="val-carrier1" style="text-align:right">0.00</td></tr>
-                                <tr><td>载气3</td><td id="val-carrier3" style="text-align:right">0.00</td></tr>
-                                <tr><td>样气</td><td id="val-sample" style="text-align:right">0.00</td></tr>
-                                <tr><td>载气2</td><td id="val-carrier2" style="text-align:right">0.00</td></tr>
-                                <tr><td>氢气1</td><td id="val-h2-1" style="text-align:right">0.00</td></tr>
-                                <tr><td>空气1</td><td id="val-air-1" style="text-align:right">0.00</td></tr>
+                                <tr><td>杞芥皵1</td><td id="val-carrier1" style="text-align:right">0.00</td></tr>
+                                <tr><td>杞芥皵3</td><td id="val-carrier3" style="text-align:right">0.00</td></tr>
+                                <tr><td>鏍锋皵</td><td id="val-sample" style="text-align:right">0.00</td></tr>
+                                <tr><td>杞芥皵2</td><td id="val-carrier2" style="text-align:right">0.00</td></tr>
+                                <tr><td>姘㈡皵1</td><td id="val-h2-1" style="text-align:right">0.00</td></tr>
+                                <tr><td>绌烘皵1</td><td id="val-air-1" style="text-align:right">0.00</td></tr>
                             </tbody>
                         </table>
                     </div>
                     <div class="control-group" style="flex: 1; margin: 0; padding: 0.6rem; overflow-y: auto;">
                         <table id="live-temp-table" style="font-size: 13px; margin-top: 0; width: 100%;">
                             <thead>
-                                <tr><th>名称</th><th style="text-align:right">实测(℃)</th></tr>
+                                <tr><th>鍚嶇О</th><th style="text-align:right">瀹炴祴(鈩?</th></tr>
                             </thead>
                             <tbody>
-                                <tr><td>柱箱</td><td id="val-col" style="text-align:right">0.0</td></tr>
-                                <tr><td>阀温</td><td id="val-valve" style="text-align:right">0.0</td></tr>
-                                <tr><td>检测1</td><td id="val-det1" style="text-align:right">0.0</td></tr>
-                                <tr><td>进样1</td><td id="val-inj1" style="text-align:right">0.0</td></tr>
+                                <tr><td>鏌辩</td><td id="val-col" style="text-align:right">0.0</td></tr>
+                                <tr><td>闃€娓?/td><td id="val-valve" style="text-align:right">0.0</td></tr>
+                                <tr><td>妫€娴?</td><td id="val-det1" style="text-align:right">0.0</td></tr>
+                                <tr><td>杩涙牱1</td><td id="val-inj1" style="text-align:right">0.0</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -151,7 +151,7 @@ function setupCanvas() {
                     .then(r => r.json())
                     .then(ui => {
                         if (ui) {
-                            uiSettings = ui; // 保存完整的 ui 对象，防止 POST 覆盖丢失字段
+                            uiSettings = ui; // 淇濆瓨瀹屾暣鐨?ui 瀵硅薄锛岄槻姝?POST 瑕嗙洊涓㈠け瀛楁
                             if (ui.yLow !== undefined) uiSettings.yLow = ui.yLow;
                             if (ui.yHigh !== undefined) uiSettings.yHigh = ui.yHigh;
                             if (ui.acqMin !== undefined) uiSettings.acqMin = ui.acqMin;
@@ -208,13 +208,13 @@ function setupCanvas() {
                 body: JSON.stringify(uiSettings)
             });
             if(res.ok) {
-                window.showToast('图表配置已应用!');
+                window.showToast('鍥捐〃閰嶇疆宸插簲鐢?');
                 draw();
             } else {
-                window.showToast('应用失败', true);
+                window.showToast('搴旂敤澶辫触', true);
             }
         } catch(e) {
-            window.showToast('异常: ' + e.message, true);
+            window.showToast('寮傚父: ' + e.message, true);
         }
     });
 
@@ -256,15 +256,15 @@ function setupCanvas() {
                     body: JSON.stringify({ action: 'start', detector: 'FID1' })
                 });
                 if(res.ok) {
-                    window.showToast('FID 点火指令已发送');
+                    window.showToast('FID 鐐圭伀鎸囦护宸插彂閫?);
                     isIgnited = true;
                     igniteIcon.style.color = '#ef4444'; // Red color when ignited
-                    igniteIcon.title = "已点火";
+                    igniteIcon.title = "宸茬偣鐏?;
                 } else {
-                    window.showToast('点火指令发送失败', true);
+                    window.showToast('鐐圭伀鎸囦护鍙戦€佸け璐?, true);
                 }
             } catch(e) {
-                window.showToast('点火异常: ' + e.message, true);
+                window.showToast('鐐圭伀寮傚父: ' + e.message, true);
             }
         });
     }
@@ -289,13 +289,13 @@ function setupCanvas() {
         let xBegMin = 0;
         let xEndMin = uiSettings.fullMin || 2; 
         
-        // 覆盖自动延长的逻辑，以 UI 配置的满屏时间为准
+        // 瑕嗙洊鑷姩寤堕暱鐨勯€昏緫锛屼互 UI 閰嶇疆鐨勬弧灞忔椂闂翠负鍑?
         if (dataPoints.length > 0) {
             const maxT = dataPoints[dataPoints.length - 1][0];
             if (maxT / 60 > xEndMin) {
-                // 如果实际数据超过了满屏时间，自动往右滚动或者自动扩展。
-                // 传统色谱通常会固定 xEndMin，超出的部分被裁剪，或者自动增加满屏时间。
-                // 这里我们暂且允许它自动向后拓展，保证能看到波形。
+                // 濡傛灉瀹為檯鏁版嵁瓒呰繃浜嗘弧灞忔椂闂达紝鑷姩寰€鍙虫粴鍔ㄦ垨鑰呰嚜鍔ㄦ墿灞曘€?
+                // 浼犵粺鑹茶氨閫氬父浼氬浐瀹?xEndMin锛岃秴鍑虹殑閮ㄥ垎琚鍓紝鎴栬€呰嚜鍔ㄥ鍔犳弧灞忔椂闂淬€?
+                // 杩欓噷鎴戜滑鏆備笖鍏佽瀹冭嚜鍔ㄥ悜鍚庢嫇灞曪紝淇濊瘉鑳界湅鍒版尝褰€?
                 xEndMin = Math.ceil(maxT / 60);
             }
         }
@@ -304,7 +304,7 @@ function setupCanvas() {
         let yBeg = uiSettings.yLow;
         let yEnd = uiSettings.yHigh;
 
-        // 峰高自适应逻辑
+        // 宄伴珮鑷€傚簲閫昏緫
         const autoYEl = document.getElementById('live-auto-y');
         if (autoYEl && autoYEl.checked && dataPoints.length > 0) {
             let yMin = Infinity;
@@ -317,20 +317,20 @@ function setupCanvas() {
             if (yMin === Infinity) { yMin = 0; yMax = 1; }
 
             let span = yMax - yMin;
-            // 提高最小量程阈值，避免纯基线微小漂移被当作峰而触发留白放大
+            // 鎻愰珮鏈€灏忛噺绋嬮槇鍊硷紝閬垮厤绾熀绾垮井灏忔紓绉昏褰撲綔宄拌€岃Е鍙戠暀鐧芥斁澶?
             const minSpan = 10.0; 
             if (span < minSpan) {
                 span = minSpan;
             }
             
-            // 下面留5%，上面留60%，所以实际波形（或 minSpan）占据中间的 35%
+            // 涓嬮潰鐣?%锛屼笂闈㈢暀60%锛屾墍浠ュ疄闄呮尝褰紙鎴?minSpan锛夊崰鎹腑闂寸殑 35%
             const V = span / 0.35;
             yBeg = yMin - 0.05 * V;
-            // 始终基于 yMin 和 span 计算 yEnd，确保在 span 被锁定时，yEnd 不会随着 yMax 的微小增加而往下压波形
+            // 濮嬬粓鍩轰簬 yMin 鍜?span 璁＄畻 yEnd锛岀‘淇濆湪 span 琚攣瀹氭椂锛寉End 涓嶄細闅忕潃 yMax 鐨勫井灏忓鍔犺€屽線涓嬪帇娉㈠舰
             yEnd = yMin + 0.95 * V;
         }
 
-        if (yEnd <= yBeg) yEnd = yBeg + 1; // 防止无效区间
+        if (yEnd <= yBeg) yEnd = yBeg + 1; // 闃叉鏃犳晥鍖洪棿
         
         lastMin = yBeg;
         lastMax = yEnd;
@@ -384,7 +384,7 @@ function setupCanvas() {
             const sx = padL + ((x - xBegMin) / xSpanMin) * w;
             ctx.fillText((Math.round(x * 1000) / 1000).toString(), sx, padT + h + 8);
         }
-        ctx.fillText('时间 (min)', padL + w / 2, padT + h + 24);
+        ctx.fillText('鏃堕棿 (min)', padL + w / 2, padT + h + 24);
         
         ctx.textAlign = 'right';
         ctx.textBaseline = 'middle';
@@ -397,7 +397,7 @@ function setupCanvas() {
         ctx.translate(16, padT + h / 2);
         ctx.rotate(-Math.PI / 2);
         ctx.textAlign = 'center';
-        ctx.fillText('信号 (pA)', 0, 0);
+        ctx.fillText('淇″彿 (pA)', 0, 0);
         ctx.restore();
         
         // Draw Curve
@@ -429,7 +429,7 @@ function setupCanvas() {
             ctx.font = '14px system-ui';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillText('等待色谱仪下发波形数据 (设备可能正在升温或就绪中)...', padL + w / 2, padT + h / 2);
+            ctx.fillText('绛夊緟鑹茶氨浠笅鍙戞尝褰㈡暟鎹?(璁惧鍙兘姝ｅ湪鍗囨俯鎴栧氨缁腑)...', padL + w / 2, padT + h / 2);
         }
 
         // Draw peak labels
@@ -488,7 +488,8 @@ function setupCanvas() {
     }
     
     // Resize handler using ResizeObserver (handles tab switching properly)
-    const resizeObserver = new ResizeObserver(entries => {
+    if (window.liveResizeObserver) window.liveResizeObserver.disconnect();
+    window.liveResizeObserver = new ResizeObserver(entries => {
         for (let entry of entries) {
             if (entry.contentRect.width > 0 && entry.contentRect.height > 0) {
                 canvas.width = entry.contentRect.width;
@@ -497,10 +498,12 @@ function setupCanvas() {
             }
         }
     });
-    resizeObserver.observe(canvas.parentElement);
+    window.liveResizeObserver.observe(canvas.parentElement);
 
     // WebSocket/SSE integration
-    const evtSource = new EventSource('/events');
+    if (window.liveEvtSource) window.liveEvtSource.close();
+    window.liveEvtSource = new EventSource('/events');
+    const evtSource = window.liveEvtSource;
     evtSource.onmessage = function(event) {
         try {
             const parsed = JSON.parse(event.data);
@@ -519,8 +522,8 @@ function setupCanvas() {
                         if (sess && sess.values && sess.dtS) {
                             const dtS = sess.dtS;
                             const restored = [];
-                            // 这里要考虑到如果后端存的不是全量数组而是一部分，我们需要加上正确的偏移
-                            // 但是 /api/v1/session/active 接口返回的 values 就是从 0 开始的整个周期的快照
+                            // 杩欓噷瑕佽€冭檻鍒板鏋滃悗绔瓨鐨勪笉鏄叏閲忔暟缁勮€屾槸涓€閮ㄥ垎锛屾垜浠渶瑕佸姞涓婃纭殑鍋忕Щ
+                            // 浣嗘槸 /api/v1/session/active 鎺ュ彛杩斿洖鐨?values 灏辨槸浠?0 寮€濮嬬殑鏁翠釜鍛ㄦ湡鐨勫揩鐓?
                             for (let i = 0; i < sess.values.length; i++) {
                                 restored.push([i * dtS, sess.values[i]]);
                             }
@@ -531,7 +534,7 @@ function setupCanvas() {
                             }
                             dataPoints = Array.from(uniqueMap.values()).sort((a, b) => a[0] - b[0]);
                             
-                            // 恢复上一组的实时结果
+                            // 鎭㈠涓婁竴缁勭殑瀹炴椂缁撴灉
                             if (sess.result) {
                                 latestPollutants = sess.result.pollutants;
                                 updateLiveResultsTable(sess.result);
@@ -597,7 +600,7 @@ function setupCanvas() {
                     if (elInj1) elInj1.innerText = (parsed.tempInj1 || 0).toFixed(1);
                     if (elCol) elCol.innerText = (parsed.tempCol || 0).toFixed(1);
                     if (elDet1) elDet1.innerText = (parsed.tempDet1 || 0).toFixed(1);
-                    if (elValve) elValve.innerText = (parsed.tempInj2 || 0).toFixed(1); // 阀温暂借用 tempInj2
+                    if (elValve) elValve.innerText = (parsed.tempInj2 || 0).toFixed(1); // 闃€娓╂殏鍊熺敤 tempInj2
                 }
                 if (parsed.epc && parsed.epc.length > 0) {
                     const elC1 = document.getElementById('val-carrier1');
@@ -634,9 +637,10 @@ function setupCanvas() {
                             html += `<tr><td style="font-weight:bold">${g.code || g.name}</td><td style="font-weight:bold;color:var(--accent); text-align:right;">${g.amount ? g.amount.toFixed(2) : '0.00'}</td></tr>`;
                         });
                     }
-            tbody.innerHTML = html || '<tr><td colspan="2" style="text-align:center; color:#94a3b8">暂无组分数据</td></tr>';
+            tbody.innerHTML = html || '<tr><td colspan="2" style="text-align:center; color:#94a3b8">鏆傛棤缁勫垎鏁版嵁</td></tr>';
         }
     }
     
     draw();
 }
+
