@@ -1,42 +1,42 @@
-﻿export function initTCD() {
+export function initTCD() {
     const container = document.getElementById('view-tcd');
     if (!container) return;
 
     container.innerHTML = `
         <div class="card" style="margin-bottom: 20px; text-align: left;">
-            <h3 style="margin-top: 0; border-bottom: 1px solid #334155; padding-bottom: 10px; color: var(--text);">TCD 鏀惧ぇ鍣ㄦ祴璇?/h3>
+            <h3 style="margin-top: 0; border-bottom: 1px solid #334155; padding-bottom: 10px; color: var(--text);">TCD 放大器测试</h3>
             <div style="display: flex; gap: 15px; align-items: center; margin-top: 15px; flex-wrap: wrap;">
                 <div style="display: flex; align-items: center; gap: 8px;">
-                    <span style="color: #94a3b8;">鐘舵€?</span>
-                    <span id="tcd-status" style="font-weight: bold; color: #94a3b8;">鏈繛鎺?/span>
+                    <span style="color: #94a3b8;">状态:</span>
+                    <span id="tcd-status" style="font-weight: bold; color: #94a3b8;">未连接</span>
                 </div>
             </div>
 
             <div style="display: flex; gap: 15px; align-items: center; margin-top: 15px; flex-wrap: wrap; padding-top: 15px; border-top: 1px dashed #334155;">
                 <div style="display: flex; align-items: center; gap: 8px;">
-                    <label style="color: #94a3b8;">妗ユ祦 (0-127):</label>
+                    <label style="color: #94a3b8;">桥流 (0-127):</label>
                     <input type="number" id="tcd-set-bridge-val" value="12" class="input" style="width: 80px; margin-right: 0;">
                 </div>
-                <button class="btn" id="btn-tcd-set-bridge">璁剧疆妗ユ祦</button>
-                <button class="btn btn-danger" id="btn-tcd-zeroing">璁惧璋冮浂</button>
+                <button class="btn" id="btn-tcd-set-bridge">设置桥流</button>
+                <button class="btn btn-danger" id="btn-tcd-zeroing">设备调零</button>
                 <div style="display: flex; align-items: center; gap: 8px; margin-left: 15px; background: rgba(0,0,0,0.2); padding: 5px 12px; border-radius: 6px; border: 1px solid #334155;">
-                    <span style="color: #94a3b8; font-size: 12px;">鐢靛帇:</span>
+                    <span style="color: #94a3b8; font-size: 12px;">电压:</span>
                     <span id="tcd-voltage" style="color: #facc15; font-weight: bold; font-size: 13px; font-family: monospace;">-- V</span>
                     <span style="color: #475569;">|</span>
-                    <span style="color: #94a3b8; font-size: 12px;">闃诲€?</span>
-                    <span id="tcd-resistance" style="color: #38bdf8; font-weight: bold; font-size: 13px; font-family: monospace;">-- 惟</span>
+                    <span style="color: #94a3b8; font-size: 12px;">阻值:</span>
+                    <span id="tcd-resistance" style="color: #38bdf8; font-weight: bold; font-size: 13px; font-family: monospace;">-- Ω</span>
                     <span style="color: #475569;">|</span>
-                    <span style="color: #94a3b8; font-size: 12px;">娓╁害:</span>
-                    <span id="tcd-filament-temp" style="color: #ef4444; font-weight: bold; font-size: 13px; font-family: monospace;">-- 鈩?/span>
+                    <span style="color: #94a3b8; font-size: 12px;">温度:</span>
+                    <span id="tcd-filament-temp" style="color: #ef4444; font-weight: bold; font-size: 13px; font-family: monospace;">-- ℃</span>
                 </div>
                 <div style="margin-left: auto; display: flex; align-items: center; gap: 15px; background: rgba(0,0,0,0.2); padding: 5px 15px; border-radius: 6px; border: 1px solid #334155;">
                     <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 2px;">
-                        <div style="font-size: 12px; color: #94a3b8;" title="鏈€杩?鍒嗛挓鍐呯殑鏈€澶у€煎噺鍘绘渶灏忓€?(娴姩宸?">2鍒嗛挓鍩虹嚎鍣０(Noise): <span id="tcd-stat-noise" style="color: #facc15; font-weight: bold;">--</span></div>
-                        <div style="font-size: 12px; color: #94a3b8;" title="娴姩宸笌鍩虹嚎鍧囧€肩殑姣斿€?(鐧惧垎姣?">鍩虹嚎婕傜Щ搴?Noise/Mean): <span id="tcd-stat-drift" style="color: #38bdf8; font-weight: bold;">--</span></div>
+                        <div style="font-size: 12px; color: #94a3b8;" title="最近2分钟内的最大值减去最小值 (浮动差)">2分钟基线噪声(Noise): <span id="tcd-stat-noise" style="color: #facc15; font-weight: bold;">--</span></div>
+                        <div style="font-size: 12px; color: #94a3b8;" title="浮动差与基线均值的比值 (百分比)">基线漂移度(Noise/Mean): <span id="tcd-stat-drift" style="color: #38bdf8; font-weight: bold;">--</span></div>
                     </div>
                     <div style="height: 30px; width: 1px; background: #334155; margin: 0 5px;"></div>
                     <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="color: #94a3b8;">褰撳墠妗ユ祦:</span>
+                        <span style="color: #94a3b8;">当前桥流:</span>
                         <span id="tcd-current-bridge" style="font-weight: bold; color: var(--text); font-size: 16px;">--</span>
                     </div>
                 </div>
@@ -44,30 +44,30 @@
 
             <div style="display: flex; gap: 20px; margin-top: 20px; height: 350px;">
                 <div style="flex: 1; display: flex; flex-direction: column;">
-                    <div style="display: flex; gap: 10px; align-items: center; padding: 8px; background: rgba(0,0,0,0.15); border-radius: 4px; margin-bottom: 5px;">
+                    <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 8px; background: rgba(0,0,0,0.15); border-radius: 4px; margin-bottom: 5px;">
                         <label style="color: #94a3b8; font-size: 12px;">
-                            <input type="checkbox" id="tcd-auto-scale" checked> 鑷€傚簲
+                            <input type="checkbox" id="tcd-auto-scale" checked> 自适应
                         </label>
-                        <span style="color: #94a3b8; font-size: 12px;">Y涓婇檺:</span>
+                        <span style="color: #94a3b8; font-size: 12px;">Y上限:</span>
                         <input type="number" id="tcd-y-max" class="input" style="width: 70px; font-size: 12px;" step="0.01">
-                        <span style="color: #94a3b8; font-size: 12px;">Y涓嬮檺:</span>
+                        <span style="color: #94a3b8; font-size: 12px;">Y下限:</span>
                         <input type="number" id="tcd-y-min" class="input" style="width: 70px; font-size: 12px;" step="0.01">
-                        <span style="color: #94a3b8; font-size: 12px;">婊″睆(绉?:</span>
+                        <span style="color: #94a3b8; font-size: 12px;">满屏(秒):</span>
                         <input type="number" id="tcd-full-screen-sec" class="input" style="width: 60px; font-size: 12px;" value="120">
-                        <span style="color: #94a3b8; font-size: 12px;">鎷栨斁:</span>
+                        <span style="color: #94a3b8; font-size: 12px;">拖放:</span>
                         <select id="tcd-drag-mode" class="input" style="width: 60px; font-size: 12px;">
-                            <option value="y">浠匶杞?/option>
-                            <option value="xy">XY杞?/option>
-                            <option value="none">绂佺敤</option>
+                            <option value="y">仅Y轴</option>
+                            <option value="xy">XY轴</option>
+                            <option value="none">禁用</option>
                         </select>
-                        <span style="color: #64748b; font-size: 11px; margin-left: auto;">鍙屽嚮閲嶇疆 | 婊氳疆缂╂斁 | 鎷栨斁閫夊尯鏀惧ぇ</span>
+                        <span style="color: #64748b; font-size: 11px; margin-left: auto;">双击重置 | 滚轮缩放 | 拖放选区放大</span>
                     </div>
                     <div style="flex: 1; border: 1px solid #334155; border-radius: 6px; position: relative; background: #0f172a;">
                         <canvas id="tcd-canvas" style="position: absolute; top:0; left:0; width:100%; height:100%;"></canvas>
                     </div>
                 </div>
                 <div style="flex: 0 0 220px; border: 1px solid #334155; border-radius: 6px; background: #0f172a; padding: 10px; overflow-y: auto;">
-                    <h4 style="margin-top: 0; color: #94a3b8; font-size: 13px; text-align: center; border-bottom: 1px solid #334155; padding-bottom: 5px;">20缁勫疄鏃舵暟鎹?/h4>
+                    <h4 style="margin-top: 0; color: #94a3b8; font-size: 13px; text-align: center; border-bottom: 1px solid #334155; padding-bottom: 5px;">20组实时数据</h4>
                     <div id="tcd-values-list" style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; font-size: 12px; font-family: monospace;">
                         <!-- data goes here -->
                     </div>
@@ -76,17 +76,29 @@
         </div>
     `;
 
-
+    let tcdPollInterval = null;
     let tcdDataPoints = []; // sliding window
 
-    // 鏈€澶у瓨鍌ㄧ偣鏁帮細4鍒嗛挓鏁版嵁锛屾瘡绉?0涓偣 = 9600
+    // 节流绘图控制
+    let isDrawing = false;
+    function scheduleDraw() {
+        if (!isDrawing && document.getElementById('tcd-canvas')) {
+            isDrawing = true;
+            requestAnimationFrame(() => {
+                drawTCDCanvas();
+                isDrawing = false;
+            });
+        }
+    }
+
+    // 最大存储点数：4分钟数据，每秒40个点 = 9600
     const maxPoints = 9600;
 
-    // Savitzky-Golay 婊ゆ尝绯绘暟锛堢獥鍙?锛?闃跺椤瑰紡锛?
+    // Savitzky-Golay 滤波系数（窗口5，2阶多项式）
     const SG_COEFFS = [-0.08571429, 0.34285714, 0.48571429, 0.34285714, -0.08571429];
 
-    // 浜や簰鐘舵€?
-    let zoomState = null; // { minIdx, maxIdx, minY, maxY } 鐢ㄦ埛鎷栨斁閫夊尯鏀惧ぇ鍚庣殑鐘舵€?
+    // 交互状态
+    let zoomState = null; // { minIdx, maxIdx, minY, maxY } 用户拖放选区放大后的状态
     let isDragging = false;
     let dragStartX = 0;
     let dragStartY = 0;
@@ -96,17 +108,17 @@
 
     const canvas = document.getElementById('tcd-canvas');
 
-    // 鎺т欢寮曠敤
+    // 控件引用
     const autoScaleChk = document.getElementById('tcd-auto-scale');
     const yMaxInput = document.getElementById('tcd-y-max');
     const yMinInput = document.getElementById('tcd-y-min');
     const fullScreenSecInput = document.getElementById('tcd-full-screen-sec');
     const dragModeSelect = document.getElementById('tcd-drag-mode');
 
-    // 瀹炴椂杈撳叆鍝嶅簲锛氳緭鍏ュ彉鍖栫珛鍗抽噸缁?
+    // 实时输入响应：输入变化立即重绘
     function onControlChange() {
-        // 鎵嬪姩妯″紡涓嬶紝濡傛灉鐢ㄦ埛娓呯┖浜嗚緭鍏ワ紝涓嶉噸缁橈紙閬垮厤 NaN锛?
-        scheduleDraw();
+        // 手动模式下，如果用户清空了输入，不重绘（避免 NaN）
+        requestAnimationFrame(drawTCDCanvas);
     }
     autoScaleChk.addEventListener('change', onControlChange);
     yMaxInput.addEventListener('input', onControlChange);
@@ -135,7 +147,7 @@
                 const rect = canvas.getBoundingClientRect();
                 dragCurrentX = e.clientX - rect.left;
                 dragCurrentY = e.clientY - rect.top;
-                scheduleDraw();
+                requestAnimationFrame(drawTCDCanvas);
             }
         });
 
@@ -149,19 +161,19 @@
                 const dragMode = dragModeSelect.value;
                 if (dragMode === 'none') return;
 
-                // 鏍规嵁鎷栨斁妯″紡鍒ゆ柇鏄惁闇€瑕乆鏂瑰悜鍙樺寲
+                // 根据拖放模式判断是否需要X方向变化
                 const requireX = (dragMode === 'xy');
-                const requireY = true; // y 鍜?xy 閮介渶瑕乊鏂瑰悜
+                const requireY = true; // y 和 xy 都需要Y方向
 
                 const dxAbs = Math.abs(dragCurrentX - dragStartX);
                 const dyAbs = Math.abs(dragCurrentY - dragStartY);
 
-                // 鍒ゆ柇鏄惁鏋勬垚鏈夋晥閫夊尯
+                // 判断是否构成有效选区
                 const xValid = requireX ? dxAbs > 10 : true;
                 const yValid = requireY ? dyAbs > 10 : true;
                 if (!(xValid && yValid) || tcdDataPoints.length === 0) return;
 
-                // 鑾峰彇褰撳墠鍙鑼冨洿
+                // 获取当前可视范围
                 const view = computeView();
                 if (!view) return;
                 let currentMinIdx = view.startIdx;
@@ -185,7 +197,7 @@
                     newZoom.minIdx = Math.max(0, Math.floor(newMinIdx));
                     newZoom.maxIdx = Math.min(tcdDataPoints.length - 1, Math.ceil(newMaxIdx));
                 } else {
-                    // Y妯″紡锛歑杞翠繚鎸佸師鏍?
+                    // Y模式：X轴保持原样
                     newZoom.minIdx = Math.floor(currentMinIdx);
                     newZoom.maxIdx = Math.ceil(currentMaxIdx);
                 }
@@ -219,10 +231,10 @@
             const view = computeView();
             if (!view) return;
 
-            // 婊氳疆缂╂斁Y杞达紝浠ラ紶鏍嘫浣嶇疆涓轰腑蹇?
-            const deltaY = e.deltaY > 0 ? 1.1 : 0.9; // 鍚戜笂婊氭斁澶э紝鍚戜笅婊氱缉灏?
+            // 滚轮缩放Y轴，以鼠标Y位置为中心
+            const deltaY = e.deltaY > 0 ? 1.1 : 0.9; // 向上滚放大，向下滚缩小
             const plotH = canvas.height - plotLayout.padTop - plotLayout.padBottom;
-            // 榧犳爣浣嶇疆瀵瑰簲鐨刌鍊?
+            // 鼠标位置对应的Y值
             const mouseVal = view.maxY - ((my - plotLayout.padTop) / plotH) * (view.maxY - view.minY);
             const newSpan = (view.maxY - view.minY) * deltaY;
             const newMinY = mouseVal - (mouseVal - view.minY) * deltaY;
@@ -231,7 +243,7 @@
             let newMinIdx = view.startIdx;
             let newMaxIdx = view.endIdx;
 
-            // 濡傛灉鏄痻y妯″紡锛屼篃缂╂斁X杞?
+            // 如果是xy模式，也缩放X轴
             if (dragMode === 'xy') {
                 const plotW = canvas.width - plotLayout.padLeft - plotLayout.padRight;
                 const mouseIdx = view.startIdx + ((mx - plotLayout.padLeft) / plotW) * (view.endIdx - view.startIdx);
@@ -250,18 +262,18 @@
         }, { passive: false });
     }
 
-    // Savitzky-Golay 婊ゆ尝锛氬鏁扮粍搴旂敤绐楀彛5銆?闃跺椤瑰紡骞虫粦
-    // 杩斿洖涓庤緭鍏ョ瓑闀跨殑骞虫粦鍚庢暟缁勶紱杈圭紭鐐逛娇鐢ㄧ缉鍑忕獥鍙?
+    // Savitzky-Golay 滤波：对数组应用窗口5、2阶多项式平滑
+    // 返回与输入等长的平滑后数组；边缘点使用缩减窗口
     function savitzkyGolay(arr) {
         const n = arr.length;
         if (n < 5) {
-            // 鏁版嵁澶皯锛岀洿鎺ヨ繑鍥炲壇鏈?
+            // 数据太少，直接返回副本
             return arr.slice();
         }
         const out = new Array(n);
         for (let i = 0; i < n; i++) {
             if (i < 2 || i >= n - 2) {
-                // 杈圭紭鐐癸細浣跨敤缂╁噺绐楀彛锛堢洿鎺ュ鍒跺師鍊硷級
+                // 边缘点：使用缩减窗口（直接复制原值）
                 out[i] = arr[i];
             } else {
                 out[i] = SG_COEFFS[0] * arr[i-2] + SG_COEFFS[1] * arr[i-1] + SG_COEFFS[2] * arr[i] + SG_COEFFS[3] * arr[i+1] + SG_COEFFS[4] * arr[i+2];
@@ -270,7 +282,7 @@
         return out;
     }
 
-    // 璁＄畻褰撳墠鍙鑼冨洿锛堢储寮曡寖鍥村拰Y鑼冨洿锛?
+    // 计算当前可视范围（索引范围和Y范围）
     function computeView() {
         if (tcdDataPoints.length === 0) return null;
         const total = tcdDataPoints.length;
@@ -280,7 +292,7 @@
             startIdx = zoomState.minIdx;
             endIdx = zoomState.maxIdx;
         } else {
-            // 鏍规嵁 fullScreenSec 璁＄畻鍙鐐规暟 N = fullScreenSec * 40 (姣忕40涓偣)
+            // 根据 fullScreenSec 计算可见点数 N = fullScreenSec * 40 (每秒40个点)
             const fsSec = parseFloat(fullScreenSecInput.value);
             const N = Math.max(1, Math.floor((isNaN(fsSec) ? 120 : fsSec) * 40));
             endIdx = total - 1;
@@ -289,7 +301,7 @@
 
         let minY, maxY;
         if (autoScaleChk.checked) {
-            // 鑷€傚簲锛氫粠鍙鑼冨洿鍐呭師濮嬫暟鎹绠梞in/max
+            // 自适应：从可见范围内原始数据计算min/max
             minY = Infinity; maxY = -Infinity;
             for (let i = startIdx; i <= endIdx; i++) {
                 const v = tcdDataPoints[i];
@@ -304,7 +316,7 @@
             minY -= span * 0.1;
             maxY += span * 0.1;
         } else {
-            // 鎵嬪姩妯″紡
+            // 手动模式
             minY = parseFloat(yMinInput.value);
             maxY = parseFloat(yMaxInput.value);
             if (isNaN(minY)) minY = -100;
@@ -314,46 +326,47 @@
         return { startIdx, endIdx, minY, maxY };
     }
 
-    // 鑷姩寮€濮嬭疆璇㈢姸鎬?
-    tcdPollInterval = setInterval(pollTCDState, 500);
-
-    // 鐢靛帇/闃诲€?娓╁害杞 (1绉掍竴娆★紝涓嶵CD鏁版嵁杞鐙珛)
-    setInterval(pollVoltage, 1000);
+    // 自动开始轮询状态
+    if (window.tcdPollTimer) clearTimeout(window.tcdPollTimer);
+    if (window.voltPollTimer) clearTimeout(window.voltPollTimer);
 
     async function pollVoltage() {
+        if (!document.getElementById('tcd-voltage')) return; // DOM销毁时自动停止轮询
         try {
             const res = await fetch('/api/v1/voltage/state');
             if (res.ok) {
                 const data = await res.json();
                 if (!data.connected) {
                     document.getElementById('tcd-voltage').innerText = '-- V';
-                    document.getElementById('tcd-resistance').innerText = '-- k惟';
-                    document.getElementById('tcd-filament-temp').innerText = '-- 鈩?;
+                    document.getElementById('tcd-resistance').innerText = '-- kΩ';
+                    document.getElementById('tcd-filament-temp').innerText = '-- ℃';
                     return;
                 }
-                const voltage = data.voltage; // 娴偣鐢靛帇鍊?(V)
+                const voltage = data.voltage; // 浮点电压值 (V)
                 document.getElementById('tcd-voltage').innerText = voltage.toFixed(4) + ' V';
 
-                // 鑾峰彇褰撳墠妗ユ祦(mA)锛岀敤浜庤绠楃數闃?
+                // 获取当前桥流(mA)，用于计算电阻
                 const bridgeText = document.getElementById('tcd-current-bridge').innerText;
                 const bridgeCurrent = parseFloat(bridgeText);
                 if (bridgeCurrent > 0 && voltage > 0) {
-                    // R = V / I, 鐢靛帇V锛岀數娴乵A 鈫?鐢甸樆惟 = (V / mA) * 1000
-                    const resistance = (voltage / bridgeCurrent) * 1000; // 惟
-                    document.getElementById('tcd-resistance').innerText = resistance.toFixed(2) + ' 惟';
+                    // R = V / I, 电压V，电流mA → 电阻Ω = (V / mA) * 1000
+                    const resistance = (voltage / bridgeCurrent) * 1000; // Ω
+                    document.getElementById('tcd-resistance').innerText = resistance.toFixed(2) + ' Ω';
 
-                    // 娓╁害鍏紡: T = 2.5458 * R - 285.5878 (R鍗曚綅涓何?
+                    // 温度公式: T = 2.5458 * R - 285.5878 (R单位为Ω)
                     const temp = 2.5458 * resistance - 285.5878;
-                    document.getElementById('tcd-filament-temp').innerText = temp.toFixed(2) + ' 鈩?;
+                    document.getElementById('tcd-filament-temp').innerText = temp.toFixed(2) + ' ℃';
                 } else {
-                    document.getElementById('tcd-resistance').innerText = '-- 惟';
-                    document.getElementById('tcd-filament-temp').innerText = '-- 鈩?;
+                    document.getElementById('tcd-resistance').innerText = '-- Ω';
+                    document.getElementById('tcd-filament-temp').innerText = '-- ℃';
                 }
             }
         } catch (e) {}
+        window.voltPollTimer = setTimeout(pollVoltage, 1000);
     }
+    window.voltPollTimer = setTimeout(pollVoltage, 100);
 
-    // 鍔犺浇閰嶇疆鐨勬ˉ娴佸€?
+    // 加载配置的桥流值
     async function loadTCDBridgeConfig() {
         try {
             const deviceId = window.currentDeviceId || 'GC-MODULAR';
@@ -379,13 +392,13 @@
                 body: JSON.stringify({ value: val })
             });
             if (res.ok) {
-                window.showToast('璁剧疆妗ユ祦鎸囦护宸蹭笅鍙?);
+                window.showToast('设置桥流指令已下发');
             } else {
                 const data = await res.json();
-                window.showToast('璁剧疆澶辫触: ' + data.error, true);
+                window.showToast('设置失败: ' + data.error, true);
             }
         } catch (e) {
-            window.showToast('璇锋眰寮傚父', true);
+            window.showToast('请求异常', true);
         }
     });
 
@@ -393,10 +406,10 @@
         try {
             const res = await fetch('/api/v1/tcd/zeroing', { method: 'POST' });
             if (res.ok) {
-                window.showToast('璋冮浂鎸囦护宸蹭笅鍙?);
+                window.showToast('调零指令已下发');
             } else {
                 const data = await res.json();
-                window.showToast('璋冮浂澶辫触: ' + data.error, true);
+                window.showToast('调零失败: ' + data.error, true);
             }
         } catch (e) {}
     });
@@ -408,11 +421,11 @@
             if (res.ok) {
                 const data = await res.json();
                 if (!data.connected) {
-                    document.getElementById('tcd-status').innerText = '杩炴帴宸叉柇寮€';
+                    document.getElementById('tcd-status').innerText = '连接已断开';
                     document.getElementById('tcd-status').style.color = 'var(--danger)';
                     return;
                 }
-                document.getElementById('tcd-status').innerText = '宸茶繛鎺?(閫氫俊涓?';
+                document.getElementById('tcd-status').innerText = '已连接 (通信中)';
                 document.getElementById('tcd-status').style.color = 'var(--success)';
                 document.getElementById('tcd-current-bridge').innerText = data.bridge_current;
 
@@ -423,9 +436,9 @@
                 }
                 document.getElementById('tcd-values-list').innerHTML = html;
 
-                // 灏?0涓師濮嬫暟鎹偣鎸夐『搴忎竴娆℃€у叏閮ㄦ帹鍏ワ紙40Hz 閲囨牱鐜囷級
+                // 将20个原始数据点按顺序一次性全部推入（40Hz 采样率）
                 tcdDataPoints.push(...data.values);
-                // 鏈€澶у瓨鍌?maxPoints = 9600锛?鍒嗛挓鏁版嵁锛?
+                // 最大存储 maxPoints = 9600（4分钟数据）
                 if(tcdDataPoints.length > maxPoints) {
                     const overLimit = tcdDataPoints.length - maxPoints;
                     tcdDataPoints = tcdDataPoints.slice(overLimit);
@@ -440,7 +453,7 @@
                     }
                 }
                 
-                // Calculate Baseline Noise & Drift (鍩轰簬鍏ㄩ噺绐楀彛鏁版嵁)
+                // Calculate Baseline Noise & Drift (基于全量窗口数据)
                 if (tcdDataPoints.length > 0) {
                     let minVal = Infinity, maxVal = -Infinity;
                     let sum = 0;
@@ -464,7 +477,9 @@
                 scheduleDraw();
             }
         } catch (e) {}
+        window.tcdPollTimer = setTimeout(pollTCDState, 500);
     }
+    window.tcdPollTimer = setTimeout(pollTCDState, 100);
 
     function drawTCDCanvas() {
         const canvas = document.getElementById('tcd-canvas');
@@ -482,7 +497,7 @@
 
         if(tcdDataPoints.length === 0) return;
 
-        // 璁＄畻鍙鑼冨洿
+        // 计算可视范围
         const view = computeView();
         if (!view) return;
         let startIdx = view.startIdx;
@@ -505,7 +520,7 @@
 
         if (plotW <= 0 || plotH <= 0) return;
 
-        // --- 缁樺埗Y杞寸綉鏍煎拰鍒诲害锛?绛夊垎锛?---
+        // --- 绘制Y轴网格和刻度（6等分） ---
         ctx.fillStyle = '#94a3b8';
         ctx.textAlign = 'right';
         ctx.textBaseline = 'middle';
@@ -523,20 +538,20 @@
         }
         ctx.stroke();
 
-        // 缁樺埗 "mV" 鍗曚綅鏍囩
+        // 绘制 "mV" 单位标签
         ctx.textAlign = 'left';
         ctx.textBaseline = 'bottom';
         ctx.fillStyle = '#94a3b8';
         ctx.fillText('mV', 10, padTop - 5);
 
-        // --- 缁樺埗X杞寸綉鏍煎拰鏃堕棿鍒诲害 ---
+        // --- 绘制X轴网格和时间刻度 ---
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
         ctx.beginPath();
         for(let i=0; i<=10; i++) {
             const x = padLeft + (i/10) * plotW;
             const idx = startIdx + (i/10) * (endIdx - startIdx);
-            const timeSec = idx / 40; // 姣忎釜鐐逛唬琛?1/40 绉?(0.025s)
+            const timeSec = idx / 40; // 每个点代表 1/40 秒 (0.025s)
             
             ctx.moveTo(x, padTop);
             ctx.lineTo(x, canvas.height - padBottom);
@@ -544,7 +559,7 @@
         }
         ctx.stroke();
 
-        // 缁樺埗0鍩虹嚎
+        // 绘制0基线
         const zeroY = padTop + plotH - ((0 - min) / (max - min)) * plotH;
         if (zeroY >= padTop && zeroY <= padTop + plotH) {
             ctx.strokeStyle = '#64748b'; 
@@ -557,11 +572,11 @@
             ctx.setLineDash([]); 
         }
 
-        // --- 瀵瑰彲瑙佹暟鎹偣搴旂敤 Savitzky-Golay 婊ゆ尝 ---
+        // --- 对可见数据点应用 Savitzky-Golay 滤波 ---
         const visibleRaw = tcdDataPoints.slice(startIdx, endIdx + 1);
         const visibleSmoothed = savitzkyGolay(visibleRaw);
 
-        // 缁樺埗骞虫粦鍚庣殑鏇茬嚎
+        // 绘制平滑后的曲线
         ctx.strokeStyle = '#38bdf8'; 
         ctx.lineWidth = 2;
         ctx.lineJoin = 'round';
@@ -572,7 +587,7 @@
             const x = padLeft + (i / (visibleCount - 1 || 1)) * plotW;
             const val = visibleSmoothed[i];
             let y = padTop + plotH - ((val - min) / (max - min)) * plotH;
-            // 瑙嗚瑁佸壀鍒扮粯鍥惧尯
+            // 视觉裁剪到绘图区
             if(y < padTop) y = padTop;
             if(y > padTop + plotH) y = padTop + plotH;
 
@@ -581,7 +596,7 @@
         }
         ctx.stroke();
 
-        // 缁樺埗鎷栨斁閫夊尯妗?
+        // 绘制拖放选区框
         if (isDragging) {
             const dragMode = dragModeSelect.value;
             ctx.fillStyle = 'rgba(56, 189, 248, 0.2)';
@@ -593,9 +608,9 @@
             let dy1 = Math.max(padTop, Math.min(canvas.height - padBottom, dragStartY));
             let dy2 = Math.max(padTop, Math.min(canvas.height - padBottom, dragCurrentY));
 
-            // 鏍规嵁鎷栨斁妯″紡闄愬埗閫夊尯褰㈢姸
+            // 根据拖放模式限制选区形状
             if (dragMode === 'y') {
-                // 浠匶杞达細閫夊尯妯悜閾烘弧鏁翠釜缁樺浘鍖?
+                // 仅Y轴：选区横向铺满整个绘图区
                 dx1 = padLeft;
                 dx2 = canvas.width - padRight;
             }
@@ -605,7 +620,7 @@
             ctx.fillRect(dx1, dy1, w, h);
             ctx.strokeRect(dx1, dy1, w, h);
             
-            // 鏄剧ず閫夊尯鏁板€?
+            // 显示选区数值
             ctx.fillStyle = '#fff';
             ctx.textAlign = 'left';
             const dx = Math.abs(dx2 - dx1);
@@ -615,15 +630,15 @@
             const dVal = (dy / plotH) * valSpan;
             const dTime = (dx / plotW) * timeSpan;
             
-            ctx.fillText(`螖X: ${dTime.toFixed(1)}s, 螖Y: ${dVal.toFixed(2)}mV`, Math.max(padLeft + 5, Math.min(dx1, dx2)), Math.max(padTop + 15, Math.min(dy1, dy2) - 5));
+            ctx.fillText(`ΔX: ${dTime.toFixed(1)}s, ΔY: ${dVal.toFixed(2)}mV`, Math.max(padLeft + 5, Math.min(dx1, dx2)), Math.max(padTop + 15, Math.min(dy1, dy2) - 5));
         }
         
-        // 鏄剧ず宸叉斁澶х姸鎬?
+        // 显示已放大状态
         if (zoomState) {
             ctx.fillStyle = '#facc15';
             ctx.textAlign = 'right';
             ctx.textBaseline = 'top';
-            ctx.fillText('馃攳 宸叉斁澶?(鍙屽嚮杩樺師)', canvas.width - 10, 20);
+            ctx.fillText('🔍 已放大 (双击还原)', canvas.width - 10, 20);
         }
     }
 }
