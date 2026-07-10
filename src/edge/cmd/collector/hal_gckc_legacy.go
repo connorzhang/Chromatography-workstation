@@ -2,7 +2,9 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"math"
+	"strconv"
 )
 
 // LegacyGCKCDriver implements the InstrumentDriver interface for the original GCKC motherboard.
@@ -151,8 +153,90 @@ func buildEventPayload(m [4][8]float64) []byte {
 
 // -- EPCDriver Implementation --
 
-func (d *LegacyGCKCDriver) SetEPC(payload []byte) error {
+// 辅助方法：将数值转换为大端 uint16 字节
+func u16Bytes(v float64, scale float64) []byte {
+	iv := int(math.Round(v * scale))
+	if iv < 0 {
+		iv = 0
+	}
+	if iv > 65535 {
+		iv = 65535
+	}
+	return []byte{byte(iv >> 8), byte(iv & 0xFF)}
+}
+
+func (d *LegacyGCKCDriver) SetEPC(epcs map[string]float64) error {
+	// Cmd 34 (0x22): 气路压力流量设定
+	// 简单假设目前仅支持前 3 路 (载气, H2, Air)，每路占 8 字节
+	// 格式: 压力设定(2B), 流量设定(2B), 分流比(2B), 状态(1B), 气体类型(1B)
+	payload := make([]byte, 24)
+
+	cPsi := u16Bytes(epcs["Carrier1"], 100)
+	h2Psi := u16Bytes(epcs["H2"], 100)
+	airPsi := u16Bytes(epcs["Air"], 100)
+
+	copy(payload[0:2], cPsi)
+	copy(payload[8:10], h2Psi)
+	copy(payload[16:18], airPsi)
+
 	return sendCmd(d.st, d.deviceID, 34, payload)
+}
+
+// -- CycleDriver Implementation --
+
+func (d *LegacyGCKCDriver) QueryCycleParams() error {
+	return sendCmd(d.st, d.deviceID, 4, nil)
+}
+
+func (d *LegacyGCKCDriver) SetCycleParams(count int, intervalMin float64) error {
+	val := intervalMin
+	if val > 1000.0 {
+		val = 1000.0
+	}
+	text := fmt.Sprintf("%04.0f", val*10) // e.g. 2.0 -> 20 -> 0020
+	if len(text) > 4 {
+		text = text[len(text)-4:]
+	}
+
+	b0 := (text[0]-'0')<<4 + (text[1] - '0')
+	b1 := (text[2]-'0')<<4 + (text[3] - '0')
+
+	c1 := byte(count / 100)
+	c2 := byte(count % 100)
+	c1Hex, _ := strconv.ParseUint(fmt.Sprintf("%d", c1), 16, 8)
+	c2Hex, _ := strconv.ParseUint(fmt.Sprintf("%d", c2), 16, 8)
+
+	payload := []byte{
+		b0, b1,
+		byte(c1Hex), byte(c2Hex),
+		0, // injectSpendTime (not used)
+		0, // injectLightTime (not used)
+	}
+	return sendCmd(d.st, d.deviceID, 12, payload)
+}
+
+// -- IgniteDriver Implementation --
+
+func (d *LegacyGCKCDriver) QueryIgniteParams() error {
+	_ = sendCmd(d.st, d.deviceID, 250, nil) // Query ignite thresholds
+	_ = sendCmd(d.st, d.deviceID, 48, nil)  // Query ignite duration (Cmd 48)
+	return nil
+}
+
+func (d *LegacyGCKCDriver) SetIgniteParams(threshold1, threshold2 byte, durationByte byte) error {
+	_ = sendCmd(d.st, d.deviceID, 249, []byte{threshold1, threshold2})
+	return sendCmd(d.st, d.deviceID, 50, []byte{durationByte})
+}
+
+func (d *LegacyGCKCDriver) Ignite(detector string, start bool) error {
+	cmd := byte(20) // Default FID1
+	if detector == "FID2" {
+		cmd = byte(21)
+	}
+	if !start {
+		cmd += 1
+	}
+	return sendCmd(d.st, d.deviceID, cmd, nil)
 }
 
 // -- AnalysisDriver Implementation --
@@ -169,21 +253,24 @@ func (d *LegacyGCKCDriver) StopAnalysis() error {
 	return sendCmd(d.st, d.deviceID, 19, nil)
 }
 
+func (d *LegacyGCKCDriver) StopAnalysisChannel(channel byte) error {
+	return sendCmd(d.st, d.deviceID, 23, []byte{channel})
+}
+
 func (d *LegacyGCKCDriver) RequestStop(channelMask byte) error {
 	return sendCmd(d.st, d.deviceID, 245, []byte{channelMask})
 }
 
-func (d *LegacyGCKCDriver) Ignite(detector string, start bool) error {
-	cmd := byte(20) // Default FID1
-	if detector == "FID2" {
-		cmd = byte(21)
-	}
-	if !start {
-		cmd += 1
-	}
-	return sendCmd(d.st, d.deviceID, cmd, nil)
-}
-
 func (d *LegacyGCKCDriver) SendRawCmd(cmd byte, payload []byte) error {
 	return sendCmd(d.st, d.deviceID, cmd, payload)
+}
+
+func (d *LegacyGCKCDriver) Capabilities() Capabilities {
+	return Capabilities{
+		HasIgnition: true,
+		HasCycles:   true,
+		HasEPC:      true,
+		HasEvents:   true,
+		Detectors:   []string{"FID1", "FID2", "TCD"}, // 根据实际配置可能不同，默认暴露全部能力
+	}
 }

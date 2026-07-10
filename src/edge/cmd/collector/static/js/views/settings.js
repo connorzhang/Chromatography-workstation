@@ -1,4 +1,4 @@
-﻿export function initSettings() {
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿export function initSettings() {
     const container = document.getElementById('view-settings');
     container.innerHTML = `
         <div class="settings-container">
@@ -13,7 +13,7 @@
             </div>
             
             <div class="tab-content active" id="tab-inst1">
-                <div class="control-group">
+                <div class="control-group" id="settings-events-block">
                     <h3 style="margin-top:0;">外部事件</h3>
                     <table class="settings-table">
                         <thead>
@@ -26,7 +26,7 @@
                         <tbody>
                             <tr>
                                 <td>吸合1</td>
-                                <td><input type="number" id="ev-on-1" class="input-cell" value="0.01"></td>
+                                <td><input type="number" id="ev-on-1" class="input-cell" value="0"></td>
                                 <td><input type="number" id="ev-on-2" class="input-cell" value="0"></td>
                                 <td><input type="number" id="ev-on-3" class="input-cell" value="0"></td>
                                 <td><input type="number" id="ev-on-4" class="input-cell" value="0"></td>
@@ -37,7 +37,7 @@
                             </tr>
                             <tr>
                                 <td>释放1</td>
-                                <td><input type="number" id="ev-off-1" class="input-cell" value="0.8"></td>
+                                <td><input type="number" id="ev-off-1" class="input-cell" value="0"></td>
                                 <td><input type="number" id="ev-off-2" class="input-cell" value="0"></td>
                                 <td><input type="number" id="ev-off-3" class="input-cell" value="0"></td>
                                 <td><input type="number" id="ev-off-4" class="input-cell" value="0"></td>
@@ -54,7 +54,7 @@
                     </div>
                 </div>
 
-                <div class="control-group">
+                <div class="control-group" id="settings-epc-block">
                     <h3 style="margin-top:0;">气路控制</h3>
                     <table class="settings-table">
                         <thead>
@@ -66,41 +66,41 @@
                         <tbody>
                             <tr>
                                 <td>载气1(psi / sccm)</td>
-                                <td id="real-epc-carrier1">0.00 / 0.00</td>
-                                <td><input type="number" id="set-epc-carrier1" class="input-cell" value="13.00"></td>
+                                <td id="real-epc-carrier1">0.0000 / 0.0000</td>
+                                <td><input type="number" id="set-epc-carrier1" class="input-cell" value="0" step="0.0001"></td>
                                 <td><button class="btn" onclick="window.setEPC('Carrier1')">设定</button></td>
                                 
                                 <td>载气2(psi / sccm)</td>
-                                <td id="real-epc-carrier2">0.00 / 0.00</td>
-                                <td><input type="number" id="set-epc-carrier2" class="input-cell" value="0.00"></td>
+                                <td id="real-epc-carrier2">0.0000 / 0.0000</td>
+                                <td><input type="number" id="set-epc-carrier2" class="input-cell" value="0.0000" step="0.0001"></td>
                                 <td><button class="btn" onclick="window.setEPC('Carrier2')">设定</button></td>
                             </tr>
                             <tr>
                                 <td>氢气1(psi / sccm)</td>
-                                <td id="real-epc-h2-1">0.00 / 0.00</td>
-                                <td><input type="number" id="set-epc-h2-1" class="input-cell" value="60.00"></td>
+                                <td id="real-epc-h2-1">0.0000 / 0.0000</td>
+                                <td><input type="number" id="set-epc-h2-1" class="input-cell" value="0" step="0.0001"></td>
                                 <td><button class="btn" onclick="window.setEPC('H2_1')">设定</button></td>
                                 
                                 <td>氢气2(psi / sccm)</td>
-                                <td id="real-epc-h2-2">0.00 / 0.00</td>
-                                <td><input type="number" id="set-epc-h2-2" class="input-cell" value="0.00"></td>
+                                <td id="real-epc-h2-2">0.0000 / 0.0000</td>
+                                <td><input type="number" id="set-epc-h2-2" class="input-cell" value="0.0000" step="0.0001"></td>
                                 <td><button class="btn" onclick="window.setEPC('H2_2')">设定</button></td>
                             </tr>
                             <tr>
                                 <td>空气1(psi / sccm)</td>
-                                <td id="real-epc-air-1">0.00 / 0.00</td>
-                                <td><input type="number" id="set-epc-air-1" class="input-cell" value="200.00"></td>
+                                <td id="real-epc-air-1">0.0000 / 0.0000</td>
+                                <td><input type="number" id="set-epc-air-1" class="input-cell" value="0" step="0.0001"></td>
                                 <td><button class="btn" onclick="window.setEPC('Air1')">设定</button></td>
                                 
                                 <td>空气2(psi / sccm)</td>
-                                <td id="real-epc-air-2">0.00 / 0.00</td>
-                                <td><input type="number" id="set-epc-air-2" class="input-cell" value="0.00"></td>
+                                <td id="real-epc-air-2">0.0000 / 0.0000</td>
+                                <td><input type="number" id="set-epc-air-2" class="input-cell" value="0.0000" step="0.0001"></td>
                                 <td><button class="btn" onclick="window.setEPC('Air2')">设定</button></td>
                             </tr>
                             <tr>
                                 <td>辅助气(psi)</td>
-                                <td id="real-epc-aux">0.00</td>
-                                <td><input type="number" id="set-epc-aux" class="input-cell" value="0.00"></td>
+                                <td id="real-epc-aux">0.0000</td>
+                                <td><input type="number" id="set-epc-aux" class="input-cell" value="0.0000" step="0.0001"></td>
                                 <td><button class="btn" onclick="window.setEPC('Aux')">设定</button></td>
                                 <td colspan="4"></td>
                             </tr>
@@ -124,43 +124,43 @@
                     <td>进样1</td>
                     <td><input type="checkbox" id="en-temp-inj1" checked></td>
                     <td id="real-temp-inj1">0.0</td>
-                    <td><input type="number" id="set-temp-inj1" class="input-cell" value="100"></td>
-                    <td><input type="number" id="prot-temp-inj1" class="input-cell" value="400"></td>
+                    <td><input type="number" id="set-temp-inj1" class="input-cell" value="0"></td>
+                    <td><input type="number" id="prot-temp-inj1" class="input-cell" value="0"></td>
                 </tr>
                 <tr>
                     <td>柱箱</td>
                     <td><input type="checkbox" id="en-temp-col" checked></td>
                     <td id="real-temp-col">0.0</td>
-                    <td><input type="number" id="set-temp-col" class="input-cell" value="100"></td>
-                    <td><input type="number" id="prot-temp-col" class="input-cell" value="400"></td>
+                    <td><input type="number" id="set-temp-col" class="input-cell" value="0"></td>
+                    <td><input type="number" id="prot-temp-col" class="input-cell" value="0"></td>
                 </tr>
                 <tr>
                     <td>检测1</td>
                     <td><input type="checkbox" id="en-temp-det1" checked></td>
                     <td id="real-temp-det1">0.0</td>
-                    <td><input type="number" id="set-temp-det1" class="input-cell" value="220"></td>
-                    <td><input type="number" id="prot-temp-det1" class="input-cell" value="400"></td>
+                    <td><input type="number" id="set-temp-det1" class="input-cell" value="0"></td>
+                    <td><input type="number" id="prot-temp-det1" class="input-cell" value="0"></td>
                 </tr>
                 <tr>
                     <td>进样2</td>
                     <td><input type="checkbox" id="en-temp-inj2"></td>
                     <td id="real-temp-inj2">0.0</td>
-                    <td><input type="number" id="set-temp-inj2" class="input-cell" value="100"></td>
-                    <td><input type="number" id="prot-temp-inj2" class="input-cell" value="400"></td>
+                    <td><input type="number" id="set-temp-inj2" class="input-cell" value="0"></td>
+                    <td><input type="number" id="prot-temp-inj2" class="input-cell" value="0"></td>
                 </tr>
                 <tr>
                     <td>检测2</td>
                     <td><input type="checkbox" id="en-temp-det2"></td>
                     <td id="real-temp-det2">0.0</td>
                     <td><input type="number" id="set-temp-det2" class="input-cell" value="0"></td>
-                    <td><input type="number" id="prot-temp-det2" class="input-cell" value="400"></td>
+                    <td><input type="number" id="prot-temp-det2" class="input-cell" value="0"></td>
                 </tr>
                 <tr>
                     <td>检测3</td>
                     <td><input type="checkbox" id="en-temp-det3"></td>
                     <td id="real-temp-det3">0.0</td>
                     <td><input type="number" id="set-temp-det3" class="input-cell" value="0"></td>
-                    <td><input type="number" id="prot-temp-det3" class="input-cell" value="400"></td>
+                    <td><input type="number" id="prot-temp-det3" class="input-cell" value="0"></td>
                 </tr>
             </tbody>
         </table>
@@ -172,35 +172,40 @@
                     </div>
 
                     <div class="control-group" style="flex: 1;">
-                        <h3 style="margin-top:0;">点火与时间设定</h3>
-                        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
-                            <span style="width: 80px;">点火门限1</span>
-                            <input type="number" id="set-ignite-th1" class="input" value="1">
-                        </div>
-                        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
-                            <span style="width: 80px;">点火门限2</span>
-                            <input type="number" id="set-ignite-th2" class="input" value="1">
-                        </div>
-                        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
-                            <span style="width: 80px;">点火时长</span>
-                            <input type="number" id="set-ignite-dur" class="input" value="10">
-                        </div>
-                        <div style="display: flex; gap: 10px; margin-bottom: 20px;">
-                            <button class="btn" id="btn-query-ignite-config" style="flex: 1;">查询</button>
-                            <button class="btn" id="btn-apply-ignite-config" style="flex: 1;">设定</button>
+                        <div id="settings-ignite-block">
+                            <h3 style="margin-top:0;">点火设定</h3>
+                            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                                <span style="width: 80px;">点火门限1</span>
+                                <input type="number" id="set-ignite-th1" class="input" value="0">
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                                <span style="width: 80px;">点火门限2</span>
+                                <input type="number" id="set-ignite-th2" class="input" value="0">
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                                <span style="width: 80px;">点火时长</span>
+                                <input type="number" id="set-ignite-dur" class="input" value="0">
+                            </div>
+                            <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+                                <button class="btn" id="btn-query-ignite-config" style="flex: 1;">查询</button>
+                                <button class="btn" id="btn-apply-ignite-config" style="flex: 1;">设定</button>
+                            </div>
                         </div>
 
-                        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
-                            <span style="width: 90px;">循环次数(次):</span>
-                            <input type="number" id="set-time-cycle-max" class="input" value="9999999">
-                        </div>
-                        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
-                            <span style="width: 90px;">循环间隔(min):</span>
-                            <input type="number" id="set-time-cycle" class="input" step="0.1" value="2">
-                        </div>
-                        <div style="display: flex; gap: 10px; margin-bottom: 20px;">
-                            <button class="btn" id="btn-query-time" style="flex: 1;">查询</button>
-                            <button class="btn" id="btn-apply-time" style="flex: 1;">设定</button>
+                        <div id="settings-cycle-block">
+                            <h3 style="margin-top:0;">时间循环设定</h3>
+                            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                                <span style="width: 90px;">循环次数(次):</span>
+                                <input type="number" id="set-time-cycle-max" class="input" value="0">
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                                <span style="width: 90px;">循环间隔(min):</span>
+                                <input type="number" id="set-time-cycle" class="input" step="0.1" value="0">
+                            </div>
+                            <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+                                <button class="btn" id="btn-query-time" style="flex: 1;">查询</button>
+                                <button class="btn" id="btn-apply-time" style="flex: 1;">设定</button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -324,24 +329,24 @@
                                 <tr><th>通道</th><th>实时压力(psi)</th><th>实时流量(sccm)</th><th>设定压力(psi)</th></tr>
                             </thead>
                             <tbody>
-                                <tr><td>EPC 1</td><td id="vrf-rt-epc1-psi">0.00</td><td id="vrf-rt-epc1-sccm">0.00</td><td id="vrf-st-epc1-psi">0.00</td></tr>
-                                <tr><td>EPC 2</td><td id="vrf-rt-epc2-psi">0.00</td><td id="vrf-rt-epc2-sccm">0.00</td><td id="vrf-st-epc2-psi">0.00</td></tr>
-                                <tr><td>EPC 3</td><td id="vrf-rt-epc3-psi">0.00</td><td id="vrf-rt-epc3-sccm">0.00</td><td id="vrf-st-epc3-psi">0.00</td></tr>
-                                <tr><td>EPC 4</td><td id="vrf-rt-epc4-psi">0.00</td><td id="vrf-rt-epc4-sccm">0.00</td><td id="vrf-st-epc4-psi">0.00</td></tr>
-                                <tr><td>EPC 5</td><td id="vrf-rt-epc5-psi">0.00</td><td id="vrf-rt-epc5-sccm">0.00</td><td id="vrf-st-epc5-psi">0.00</td></tr>
-                                <tr><td>EPC 6</td><td id="vrf-rt-epc6-psi">0.00</td><td id="vrf-rt-epc6-sccm">0.00</td><td id="vrf-st-epc6-psi">0.00</td></tr>
-                                <tr><td>EPC 7</td><td id="vrf-rt-epc7-psi">0.00</td><td id="vrf-rt-epc7-sccm">0.00</td><td id="vrf-st-epc7-psi">0.00</td></tr>
-                                <tr><td>EPC 8</td><td id="vrf-rt-epc8-psi">0.00</td><td id="vrf-rt-epc8-sccm">0.00</td><td id="vrf-st-epc8-psi">0.00</td></tr>
-                                <tr><td>EPC 9</td><td id="vrf-rt-epc9-psi">0.00</td><td id="vrf-rt-epc9-sccm">0.00</td><td id="vrf-st-epc9-psi">0.00</td></tr>
-                                <tr><td>EPC 10</td><td id="vrf-rt-epc10-psi">0.00</td><td id="vrf-rt-epc10-sccm">0.00</td><td id="vrf-st-epc10-psi">0.00</td></tr>
-                                <tr><td>EPC 11</td><td id="vrf-rt-epc11-psi">0.00</td><td id="vrf-rt-epc11-sccm">0.00</td><td id="vrf-st-epc11-psi">0.00</td></tr>
-                                <tr><td>EPC 12</td><td id="vrf-rt-epc12-psi">0.00</td><td id="vrf-rt-epc12-sccm">0.00</td><td id="vrf-st-epc12-psi">0.00</td></tr>
-                                <tr><td>EPC 13</td><td id="vrf-rt-epc13-psi">0.00</td><td id="vrf-rt-epc13-sccm">0.00</td><td id="vrf-st-epc13-psi">0.00</td></tr>
-                                <tr><td>EPC 14</td><td id="vrf-rt-epc14-psi">0.00</td><td id="vrf-rt-epc14-sccm">0.00</td><td id="vrf-st-epc14-psi">0.00</td></tr>
-                                <tr><td>EPC 15</td><td id="vrf-rt-epc15-psi">0.00</td><td id="vrf-rt-epc15-sccm">0.00</td><td id="vrf-st-epc15-psi">0.00</td></tr>
-                                <tr><td>EPC 16</td><td id="vrf-rt-epc16-psi">0.00</td><td id="vrf-rt-epc16-sccm">0.00</td><td id="vrf-st-epc16-psi">0.00</td></tr>
-                                <tr><td>EPC 17</td><td id="vrf-rt-epc17-psi">0.00</td><td id="vrf-rt-epc17-sccm">0.00</td><td id="vrf-st-epc17-psi">0.00</td></tr>
-                                <tr><td>EPC 18</td><td id="vrf-rt-epc18-psi">0.00</td><td id="vrf-rt-epc18-sccm">0.00</td><td id="vrf-st-epc18-psi">0.00</td></tr>
+                                <tr><td>EPC 1</td><td id="vrf-rt-epc1-psi">0.0000</td><td id="vrf-rt-epc1-sccm">0.0000</td><td id="vrf-st-epc1-psi">0.0000</td></tr>
+                                <tr><td>EPC 2</td><td id="vrf-rt-epc2-psi">0.0000</td><td id="vrf-rt-epc2-sccm">0.0000</td><td id="vrf-st-epc2-psi">0.0000</td></tr>
+                                <tr><td>EPC 3</td><td id="vrf-rt-epc3-psi">0.0000</td><td id="vrf-rt-epc3-sccm">0.0000</td><td id="vrf-st-epc3-psi">0.0000</td></tr>
+                                <tr><td>EPC 4</td><td id="vrf-rt-epc4-psi">0.0000</td><td id="vrf-rt-epc4-sccm">0.0000</td><td id="vrf-st-epc4-psi">0.0000</td></tr>
+                                <tr><td>EPC 5</td><td id="vrf-rt-epc5-psi">0.0000</td><td id="vrf-rt-epc5-sccm">0.0000</td><td id="vrf-st-epc5-psi">0.0000</td></tr>
+                                <tr><td>EPC 6</td><td id="vrf-rt-epc6-psi">0.0000</td><td id="vrf-rt-epc6-sccm">0.0000</td><td id="vrf-st-epc6-psi">0.0000</td></tr>
+                                <tr><td>EPC 7</td><td id="vrf-rt-epc7-psi">0.0000</td><td id="vrf-rt-epc7-sccm">0.0000</td><td id="vrf-st-epc7-psi">0.0000</td></tr>
+                                <tr><td>EPC 8</td><td id="vrf-rt-epc8-psi">0.0000</td><td id="vrf-rt-epc8-sccm">0.0000</td><td id="vrf-st-epc8-psi">0.0000</td></tr>
+                                <tr><td>EPC 9</td><td id="vrf-rt-epc9-psi">0.0000</td><td id="vrf-rt-epc9-sccm">0.0000</td><td id="vrf-st-epc9-psi">0.0000</td></tr>
+                                <tr><td>EPC 10</td><td id="vrf-rt-epc10-psi">0.0000</td><td id="vrf-rt-epc10-sccm">0.0000</td><td id="vrf-st-epc10-psi">0.0000</td></tr>
+                                <tr><td>EPC 11</td><td id="vrf-rt-epc11-psi">0.0000</td><td id="vrf-rt-epc11-sccm">0.0000</td><td id="vrf-st-epc11-psi">0.0000</td></tr>
+                                <tr><td>EPC 12</td><td id="vrf-rt-epc12-psi">0.0000</td><td id="vrf-rt-epc12-sccm">0.0000</td><td id="vrf-st-epc12-psi">0.0000</td></tr>
+                                <tr><td>EPC 13</td><td id="vrf-rt-epc13-psi">0.0000</td><td id="vrf-rt-epc13-sccm">0.0000</td><td id="vrf-st-epc13-psi">0.0000</td></tr>
+                                <tr><td>EPC 14</td><td id="vrf-rt-epc14-psi">0.0000</td><td id="vrf-rt-epc14-sccm">0.0000</td><td id="vrf-st-epc14-psi">0.0000</td></tr>
+                                <tr><td>EPC 15</td><td id="vrf-rt-epc15-psi">0.0000</td><td id="vrf-rt-epc15-sccm">0.0000</td><td id="vrf-st-epc15-psi">0.0000</td></tr>
+                                <tr><td>EPC 16</td><td id="vrf-rt-epc16-psi">0.0000</td><td id="vrf-rt-epc16-sccm">0.0000</td><td id="vrf-st-epc16-psi">0.0000</td></tr>
+                                <tr><td>EPC 17</td><td id="vrf-rt-epc17-psi">0.0000</td><td id="vrf-rt-epc17-sccm">0.0000</td><td id="vrf-st-epc17-psi">0.0000</td></tr>
+                                <tr><td>EPC 18</td><td id="vrf-rt-epc18-psi">0.0000</td><td id="vrf-rt-epc18-sccm">0.0000</td><td id="vrf-st-epc18-psi">0.0000</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -386,6 +391,10 @@
                         <!-- 仅在 Modular 模式下显示硬件连接配置 -->
                         <div id="sys-modular-config" style="display: none; padding: 10px; background: rgba(0,0,0,0.2); border: 1px solid #334155; border-radius: 6px; margin-top: 10px;">
                             <h5 style="margin: 0 0 10px 0; color: #94a3b8;">Modular (散件) 硬件连接参数配置</h5>
+                            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 5px;">
+                                <label style="width: 130px; font-size: 13px;">边缘节点设备ID</label>
+                                <input type="text" id="sys-modular-device-id" class="input" style="flex: 1;" placeholder="默认: GC-MODULAR">
+                            </div>
                             <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 5px;">
                                 <label style="width: 130px; font-size: 13px;">TCD放大器 串口</label>
                                 <input type="text" id="sys-modular-tcd-port" class="input" style="flex: 1;" placeholder="例如: COM11">
@@ -610,6 +619,41 @@
                 deviceId = connectedDev ? connectedDev.deviceId : devices[0].deviceId;
                 const gcDev = devices.find(d => String(d.deviceId).startsWith('GC-MODULAR'));
                 if (gcDev) deviceId = gcDev.deviceId;
+                
+                const activeDev = devices.find(d => d.deviceId === deviceId);
+                if (activeDev && activeDev.capabilities) {
+                    if (activeDev.capabilities.has_ignition === false) {
+                        const igniteBlock = document.getElementById('settings-ignite-block');
+                        if (igniteBlock) igniteBlock.style.display = 'none';
+                    }
+                    if (activeDev.capabilities.has_cycles === false) {
+                        const cycleBlock = document.getElementById('settings-cycle-block');
+                        if (cycleBlock) cycleBlock.style.display = 'none';
+                    }
+                    if (activeDev.capabilities.has_epc === false) {
+                        const epcBlock = document.getElementById('settings-epc-block');
+                        if (epcBlock) epcBlock.style.display = 'none';
+                    }
+                    if (activeDev.capabilities.has_events === false) {
+                        const eventsBlock = document.getElementById('settings-events-block');
+                        if (eventsBlock) eventsBlock.style.display = 'none';
+                    } else if (activeDev.capabilities.has_events === true) {
+                        // Modular 模式只有 4 个事件通道（对应 IO CH5-8），隐藏事件 5-8
+                        const isModular = activeDev.deviceId && activeDev.deviceId.startsWith('GC-MODULAR');
+                        if (isModular) {
+                            // 隐藏事件5-8的表头和输入框
+                            for (let i = 5; i <= 8; i++) {
+                                const th = document.querySelectorAll(`#settings-events-block th:nth-child(${i + 1})`);
+                                th.forEach(e => e.style.display = 'none');
+                                const inputs = document.querySelectorAll(`#settings-events-block td:nth-child(${i + 1})`);
+                                inputs.forEach(e => e.style.display = 'none');
+                            }
+                            // 更新标题说明
+                            const h3 = eventsBlock.querySelector('h3');
+                            if (h3) h3.innerText = '外部事件 (CH5-8 开关量)';
+                        }
+                    }
+                }
             }
 
             // Load UI Settings (Time settings)
@@ -626,34 +670,42 @@
                   if (hwSettings.cycleInterval !== undefined) document.getElementById('set-time-cycle').value = hwSettings.cycleInterval;
                   if (hwSettings.cycleCount !== undefined) document.getElementById('set-time-cycle-max').value = hwSettings.cycleCount;
                 
-                // Populate Events
-                  if (hwSettings.events && hwSettings.events.length > 0) {
-                      // 还原时间程序到8路UI (吸合1 / 释放1)
-                      const channelOn = new Array(8).fill(null);
-                      const channelOff = new Array(8).fill(null);
-                      let prevMask = 0;
-                      
-                      for (const evt of hwSettings.events) {
-                          const mask = evt.event_mask;
-                          for (let b = 0; b < 8; b++) {
-                              const wasOn = (prevMask & (1 << b)) !== 0;
-                              const isOn = (mask & (1 << b)) !== 0;
-                              
-                              if (!wasOn && isOn && channelOn[b] === null) {
-                                  channelOn[b] = evt.time;
+                // Populate Events - 进入页面时读取已保存的配置，没有配置则全部清零
+                {
+                      // 先清零所有默认值
+                      for (let i = 1; i <= 8; i++) {
+                          const evOn = document.getElementById('ev-on-' + i);
+                          const evOff = document.getElementById('ev-off-' + i);
+                          if (evOn) evOn.value = 0;
+                          if (evOff) evOff.value = 0;
+                      }
+                      // 如果有已保存的事件配置，则回填
+                      if (hwSettings.events && Array.isArray(hwSettings.events) && hwSettings.events.length > 0) {
+                          console.log('[Settings] Loading events from backend:', JSON.stringify(hwSettings.events));
+                          const channelOn = new Array(8).fill(null);
+                          const channelOff = new Array(8).fill(null);
+                          let prevMask = 0;
+                          for (const evt of hwSettings.events) {
+                              const mask = evt.event_mask;
+                              for (let b = 0; b < 8; b++) {
+                                  const wasOn = (prevMask & (1 << b)) !== 0;
+                                  const isOn = (mask & (1 << b)) !== 0;
+                                  if (!wasOn && isOn && channelOn[b] === null) channelOn[b] = evt.time;
+                                  if (wasOn && !isOn && channelOff[b] === null) channelOff[b] = evt.time;
                               }
-                              if (wasOn && !isOn && channelOff[b] === null) {
-                                  channelOff[b] = evt.time;
-                              }
+                              prevMask = mask;
                           }
-                          prevMask = mask;
+                          for (let i = 0; i < 8; i++) {
+                              const evOn = document.getElementById('ev-on-' + (i + 1));
+                              const evOff = document.getElementById('ev-off-' + (i + 1));
+                              if (evOn && channelOn[i] !== null) evOn.value = channelOn[i];
+                              if (evOff && channelOff[i] !== null) evOff.value = channelOff[i];
+                          }
+                          console.log('[Settings] Events populated - ON:', channelOn, 'OFF:', channelOff);
+                      } else {
+                          console.log('[Settings] No saved events found, all zeros');
                       }
-                      
-                      for (let i = 0; i < 8; i++) {
-                          document.getElementById('ev-on-' + (i + 1)).value = channelOn[i] !== null ? channelOn[i] : 0;
-                          document.getElementById('ev-off-' + (i + 1)).value = channelOff[i] !== null ? channelOff[i] : 0;
-                      }
-                  }
+                }
 
                 // Populate EPCs
                 if (hwSettings.epcs) {
@@ -781,13 +833,13 @@
                         
                         if (parsed.carrierPsi !== undefined || parsed.epc) {
                             if (parsed.carrierPsi !== undefined) {
-                                document.getElementById('real-epc-carrier1').innerText = (parsed.carrierPsi || 0).toFixed(2) + " / " + (parsed.carrierSccm || 0).toFixed(1);
-                                document.getElementById('real-epc-h2-1').innerText = (parsed.h2Psi || 0).toFixed(2) + " / " + (parsed.h2Sccm || 0).toFixed(1);
-                                document.getElementById('real-epc-air-1').innerText = (parsed.airPsi || 0).toFixed(2) + " / " + (parsed.airSccm || 0).toFixed(1);
+                                document.getElementById('real-epc-carrier1').innerText = (parsed.carrierPsi || 0).toFixed(4) + " / " + (parsed.carrierSccm || 0).toFixed(4);
+                                document.getElementById('real-epc-h2-1').innerText = (parsed.h2Psi || 0).toFixed(4) + " / " + (parsed.h2Sccm || 0).toFixed(4);
+                                document.getElementById('real-epc-air-1').innerText = (parsed.airPsi || 0).toFixed(4) + " / " + (parsed.airSccm || 0).toFixed(4);
                             } else if (parsed.epc && parsed.epc.length >= 3) {
-                                document.getElementById('real-epc-carrier1').innerText = (parsed.epc[0].psi || 0).toFixed(2) + " / " + (parsed.epc[0].sccm || 0).toFixed(1);
-                                document.getElementById('real-epc-h2-1').innerText = (parsed.epc[1].psi || 0).toFixed(2) + " / " + (parsed.epc[1].sccm || 0).toFixed(1);
-                                document.getElementById('real-epc-air-1').innerText = (parsed.epc[2].psi || 0).toFixed(2) + " / " + (parsed.epc[2].sccm || 0).toFixed(1);
+                                document.getElementById('real-epc-carrier1').innerText = (parsed.epc[0].psi || 0).toFixed(4) + " / " + (parsed.epc[0].sccm || 0).toFixed(4);
+                                document.getElementById('real-epc-h2-1').innerText = (parsed.epc[1].psi || 0).toFixed(4) + " / " + (parsed.epc[1].sccm || 0).toFixed(4);
+                                document.getElementById('real-epc-air-1').innerText = (parsed.epc[2].psi || 0).toFixed(4) + " / " + (parsed.epc[2].sccm || 0).toFixed(4);
                             }
                         }
 
@@ -872,9 +924,9 @@
                                 const pEl = document.getElementById('vrf-rt-epc' + (i + 1) + '-psi');
                                 const sEl = document.getElementById('vrf-rt-epc' + (i + 1) + '-sccm');
                                 const iEl = document.getElementById('vrf-st-epc' + (i + 1) + '-psi');
-                                if (pEl) pEl.innerText = (parsed.epc[i].psi || 0).toFixed(2);
-                                if (sEl) sEl.innerText = (parsed.epc[i].sccm || 0).toFixed(1);
-                                if (iEl) iEl.innerText = (parsed.epc[i].inputPsi || 0).toFixed(2);
+                                if (pEl) pEl.innerText = (parsed.epc[i].psi || 0).toFixed(4);
+                                if (sEl) sEl.innerText = (parsed.epc[i].sccm || 0).toFixed(4);
+                                if (iEl) iEl.innerText = (parsed.epc[i].inputPsi || 0).toFixed(4);
                             }
                         }
                     } else if (parsed.type === 'logs') {
@@ -996,10 +1048,12 @@
                             }
                             
                             for (let i = 0; i < 8; i++) {
-                                document.getElementById('ev-on-' + (i + 1)).value = channelOn[i] !== null ? channelOn[i] : 0;
-                                document.getElementById('ev-off-' + (i + 1)).value = channelOff[i] !== null ? channelOff[i] : 0;
-                            }
-                            window.showToast('事件程序已刷新');
+                        const evOn = document.getElementById('ev-on-' + (i + 1));
+                        const evOff = document.getElementById('ev-off-' + (i + 1));
+                        if (evOn) evOn.value = channelOn[i] !== null ? channelOn[i] : 0;
+                        if (evOff) evOff.value = channelOff[i] !== null ? channelOff[i] : 0;
+                    }
+                    window.showToast('事件程序已刷新');
                         } else {
                             window.showToast('设备返回了空事件');
                         }
@@ -1013,7 +1067,9 @@
         // Events Apply
         document.getElementById('btn-apply-events').addEventListener('click', async () => {
             const transitions = [];
-            for (let i = 1; i <= 8; i++) {
+            // Modular 模式只有 4 个事件通道，Legacy 模式有 8 个
+            const eventCount = deviceId.startsWith('GC-MODULAR') ? 4 : 8;
+            for (let i = 1; i <= eventCount; i++) {
                 const onTime = parseFloat(document.getElementById('ev-on-' + i).value);
                 const offTime = parseFloat(document.getElementById('ev-off-' + i).value);
                 
@@ -1482,6 +1538,7 @@
    document.getElementById('sys-driver-mode').value = cfg.driver_mode || 'legacy';
                     document.getElementById('sys-admin-pass-new').value = '';
                     
+                    document.getElementById('sys-modular-device-id').value = cfg.modular_device_id || '';
                     document.getElementById('sys-modular-tcd-port').value = cfg.modular_tcd_port || '';
                     document.getElementById('sys-modular-temp-port').value = cfg.modular_temp_port || '';
                     document.getElementById('sys-modular-temp-slave-id').value = cfg.modular_temp_slave_id || 20;
@@ -1585,6 +1642,7 @@
                 modbus_server_port: parseInt(document.getElementById('modbus-server-port').value) || 1502,
                 modbus_server_address: document.getElementById('modbus-server-addr').value,
                 modbus_upload_log: document.getElementById('modbus-upload-log').checked,
+                modular_device_id: document.getElementById('sys-modular-device-id').value,
                 modular_tcd_port: document.getElementById('sys-modular-tcd-port').value,
                 modular_temp_port: document.getElementById('sys-modular-temp-port').value,
                 modular_temp_slave_id: parseInt(document.getElementById('sys-modular-temp-slave-id').value) || 20,

@@ -22,6 +22,7 @@ type ModbusTempController struct {
 	client  modbus.Client
 	handler modbus.ClientHandler
 	mu      sync.Mutex
+	portMu  *SharedPortLock // Mutex for sharing COM port across slaves
 	port    string
 	address byte
 }
@@ -41,6 +42,7 @@ type modbusClientHandler interface {
 
 func NewModbusTempController(port string, slaveID byte) *ModbusTempController {
 	var handler modbus.ClientHandler
+	var portMu *SharedPortLock
 	
 	// 如果带有端口号 (如 192.168.1.100:502)，则使用 TCP 客户端
 	if strings.Contains(port, ":") {
@@ -50,18 +52,14 @@ func NewModbusTempController(port string, slaveID byte) *ModbusTempController {
 		handler = tcpHandler
 	} else {
 		// 否则作为串口 RTU 处理 (如 /dev/ttyUSB0 或 COM3)
-		rtuHandler := modbus.NewRTUClientHandler(port)
-		rtuHandler.BaudRate = 9600
-		rtuHandler.DataBits = 8
-		rtuHandler.Parity = "N"
-		rtuHandler.StopBits = 1
-		rtuHandler.SlaveId = slaveID
-		rtuHandler.Timeout = 1 * time.Second
+		rtuHandler, mu := getSharedRTUHandler(port)
 		handler = rtuHandler
+		portMu = mu
 	}
 
 	return &ModbusTempController{
 		handler: handler,
+		portMu:  portMu,
 		port:    port,
 		address: slaveID,
 	}
@@ -102,14 +100,41 @@ func (m *ModbusTempController) Close() {
 	m.client = nil
 }
 
+func (m *ModbusTempController) lockPort() {
+	if m.portMu != nil {
+		m.portMu.Lock()
+		if rtu, ok := m.handler.(*modbus.RTUClientHandler); ok {
+			rtu.SlaveId = m.address
+		}
+	}
+}
+
+func (m *ModbusTempController) unlockPort() {
+	if m.portMu != nil {
+		m.portMu.Unlock()
+	}
+}
+
 func (m *ModbusTempController) ReadState() (TempModuleState, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	var state TempModuleState
 	if m.client == nil {
-		return state, fmt.Errorf("modbus client not initialized")
+		if h, ok := m.handler.(*modbus.RTUClientHandler); ok {
+			if err := h.Connect(); err != nil {
+				return state, fmt.Errorf("failed to connect: %v", err)
+			}
+		} else if h, ok := m.handler.(*modbus.TCPClientHandler); ok {
+			if err := h.Connect(); err != nil {
+				return state, fmt.Errorf("failed to connect: %v", err)
+			}
+		}
+		m.client = modbus.NewClient(m.handler)
 	}
+
+	m.lockPort()
+	defer m.unlockPort()
 
 	// Read Set Temps (Address 42, 8 registers)
 	setResults, err := m.client.ReadHoldingRegisters(42, 8)
@@ -167,6 +192,9 @@ func (m *ModbusTempController) SetTemperature(channel int, targetTemp int16) err
 		return fmt.Errorf("invalid channel %d", channel)
 	}
 
+	m.lockPort()
+	defer m.unlockPort()
+
 	address := uint16(42 + (channel - 1))
 	_, err := m.client.WriteSingleRegister(address, uint16(targetTemp))
 	return err
@@ -183,6 +211,9 @@ func (m *ModbusTempController) SetMode(channel int, mode int16) error {
 		return fmt.Errorf("invalid channel %d", channel)
 	}
 
+	m.lockPort()
+	defer m.unlockPort()
+
 	address := uint16(78 + (channel - 1))
 	_, err := m.client.WriteSingleRegister(address, uint16(mode))
 	return err
@@ -198,6 +229,9 @@ func (m *ModbusTempController) SetIO(channel int, state bool) error {
 	if channel < 1 || channel > 8 {
 		return fmt.Errorf("invalid channel %d", channel)
 	}
+
+	m.lockPort()
+	defer m.unlockPort()
 
 	// Address starts from 32 for channel 1.
 	// channel 5 -> address 36.

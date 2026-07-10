@@ -192,6 +192,12 @@ function setupCanvas() {
                 deviceId = devices[0].deviceId;
                 const gcDev = devices.find(d => String(d.deviceId).startsWith('GC-MODULAR'));
                 if (gcDev) deviceId = gcDev.deviceId;
+                
+                const activeDev = devices.find(d => d.deviceId === deviceId);
+                if (activeDev && activeDev.capabilities && activeDev.capabilities.has_ignition === false) {
+                    const igniteIcon = document.getElementById('live-ignite-icon');
+                    if (igniteIcon) igniteIcon.style.display = 'none';
+                }
             }
 
             uiSettings.deviceId = deviceId;
@@ -601,12 +607,12 @@ function setupCanvas() {
                     const elH2_1 = document.getElementById('val-h2-1');
                     const elAir_1 = document.getElementById('val-air-1');
                     
-                    if (elC1 && parsed.epc.length > 0) elC1.innerText = (parsed.epc[0].psi || 0).toFixed(2);
-                    if (elC3 && parsed.epc.length > 1) elC3.innerText = (parsed.epc[1].psi || 0).toFixed(2);
-                    if (elSample && parsed.epc.length > 2) elSample.innerText = (parsed.epc[2].psi || 0).toFixed(2);
-                    if (elC2 && parsed.epc.length > 3) elC2.innerText = (parsed.epc[3].psi || 0).toFixed(2);
-                    if (elH2_1 && parsed.epc.length > 9) elH2_1.innerText = (parsed.epc[9].psi || 0).toFixed(2);
-                    if (elAir_1 && parsed.epc.length > 10) elAir_1.innerText = (parsed.epc[10].psi || 0).toFixed(2);
+                    if (elC1 && parsed.epc.length > 0) elC1.innerText = (parsed.epc[0].psi || 0).toFixed(4);
+                    if (elC3 && parsed.epc.length > 1) elC3.innerText = (parsed.epc[1].psi || 0).toFixed(4);
+                    if (elSample && parsed.epc.length > 2) elSample.innerText = (parsed.epc[2].psi || 0).toFixed(4);
+                    if (elC2 && parsed.epc.length > 3) elC2.innerText = (parsed.epc[3].psi || 0).toFixed(4);
+                    if (elH2_1 && parsed.epc.length > 9) elH2_1.innerText = (parsed.epc[9].psi || 0).toFixed(4);
+                    if (elAir_1 && parsed.epc.length > 10) elAir_1.innerText = (parsed.epc[10].psi || 0).toFixed(4);
                 }
             }
         } catch (e) {

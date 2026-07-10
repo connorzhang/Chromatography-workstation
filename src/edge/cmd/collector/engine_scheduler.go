@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log"
 	"sync"
 	"time"
 
@@ -45,9 +46,59 @@ func schedulerTick(hub *realtime.Hub, states *sync.Map, method v1.Method) {
 
 			timeSinceStart := time.Since(started)
 
-			// 0. 外部事件时间程序调度 (Cmd 10 / Cmd 101 / 多位阀)
-			// TODO: 后续可以精确按秒级对比当前进样时间与事件配置表，进行继电器下发
-			// 目前仅占位
+			// 0. 外部事件时间程序调度 (Modular 模式下通过温控模块 IO CH5-8 下发开关量)
+			// 事件1-4 对应 IO CH5-8
+			if pstore != nil && pstore.LoadSysConfig().DriverMode == "modular" {
+				hw, _ := pstore.LoadHardwareConfig(deviceID)
+				if len(hw.Events) > 0 {
+					elapsedMin := timeSinceStart.Minutes()
+					// 计算当前应该的 event_mask 状态
+					currentMask := 0
+					for _, evt := range hw.Events {
+						if elapsedMin >= evt.Time {
+							currentMask = evt.EventMask
+						} else {
+							break
+						}
+					}
+					// 读取 lastEventMask 需要持锁
+					st.mu.Lock()
+					lastMask := s.lastEventMask
+					st.mu.Unlock()
+					// 与上次下发的 mask 对比，仅变化时下发
+					if lastMask != currentMask {
+						log.Printf("[Scheduler] ch=%d elapsedMin=%.3f lastMask=%d -> currentMask=%d events=%v", ch, elapsedMin, lastMask, currentMask, hw.Events)
+						for bit := 0; bit < 4; bit++ {
+							oldOn := (lastMask & (1 << bit)) != 0
+							newOn := (currentMask & (1 << bit)) != 0
+							if oldOn != newOn {
+								// 事件1-4 映射到 IO CH5-8
+								ioChannel := bit + 5
+								modbusTempCtrlMu.Lock()
+								ctrl := globalModbusTempCtrl
+								modbusTempCtrlMu.Unlock()
+								if ctrl != nil {
+									if err := ctrl.SetIO(ioChannel, newOn); err != nil {
+										log.Printf("[Scheduler] SetIO CH%d=%v failed: %v", ioChannel, newOn, err)
+									} else {
+										log.Printf("[Scheduler] Event CH%d (IO CH%d) -> %v at %.4f min", bit+1, ioChannel, newOn, elapsedMin)
+									}
+								} else {
+									log.Printf("[Scheduler] globalModbusTempCtrl is nil, cannot SetIO CH%d", ioChannel)
+								}
+							}
+						}
+						st.mu.Lock()
+						s.lastEventMask = currentMask
+						st.mu.Unlock()
+					}
+				}
+			} else {
+				log.Printf("[Scheduler] SKIP event dispatch: pstore=%v driverMode=%v", pstore != nil, func() string {
+					if pstore != nil { return pstore.LoadSysConfig().DriverMode }
+					return "nil"
+				}())
+			}
 
 			// 1. Check if we need to stop acquisition / generate results
 			if !snapshotDone && timeSinceStart >= acqDur {
@@ -76,6 +127,10 @@ func schedulerTick(hub *realtime.Hub, states *sync.Map, method v1.Method) {
 					cycleDur := time.Duration(cycleInterval*60.0*1000.0) * time.Millisecond
 					if timeSinceStart >= cycleDur {
 						LogInfof("Modular mode auto-cycle triggered: timeSinceStart=%v >= cycleDur=%v", timeSinceStart, cycleDur)
+						// 循环重置时，复位事件掩码，下一轮重新触发事件
+						st.mu.Lock()
+						s.lastEventMask = 0
+						st.mu.Unlock()
 						// Start next cycle automatically!
 						resetSession(st, ch)
 					}

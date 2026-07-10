@@ -79,20 +79,54 @@ func (d *ModularDriver) SetTempSetpoints(setpoints []float64, protects []float64
 // -- EventDriver Implementation --
 
 func (d *ModularDriver) QueryEvents() error {
-	log.Println("[ModularDriver] QueryEvents: Not yet implemented for modular hardware")
+	// Modular 模式下事件配置存储在本地 HardwareConfig，无需查询硬件
 	return nil
 }
 
 func (d *ModularDriver) SetEvents(matrix [8][8]float64) error {
-	log.Println("[ModularDriver] SetEvents: Not yet implemented for modular hardware")
+	// 将事件矩阵转换为 EventRow 列表并保存到 HardwareConfig
+	events := matrixToEvents(matrix)
+	hw, _ := pstore.LoadHardwareConfig(d.deviceID)
+	hw.Events = events
+	pstore.SaveHardwareConfig(d.deviceID, hw)
+	log.Printf("[ModularDriver] SetEvents: saved %d event rows to HardwareConfig", len(events))
 	return nil
 }
 
 // -- EPCDriver Implementation --
 
-func (d *ModularDriver) SetEPC(payload []byte) error {
+func (d *ModularDriver) SetEPC(epcs map[string]float64) error {
 	log.Println("[ModularDriver] SetEPC: Not yet implemented for modular hardware")
+	return ErrNotSupported
+}
+
+// -- CycleDriver Implementation --
+
+func (d *ModularDriver) QueryCycleParams() error {
+	log.Println("[ModularDriver] QueryCycleParams: Cycle handled locally, no hardware query needed")
 	return nil
+}
+
+func (d *ModularDriver) SetCycleParams(count int, intervalMin float64) error {
+	log.Printf("[ModularDriver] SetCycleParams: count=%d, interval=%.1f (handled by engine scheduler)", count, intervalMin)
+	return nil
+}
+
+// -- IgniteDriver Implementation --
+
+func (d *ModularDriver) QueryIgniteParams() error {
+	log.Println("[ModularDriver] QueryIgniteParams: Not yet implemented for modular hardware")
+	return ErrNotSupported
+}
+
+func (d *ModularDriver) SetIgniteParams(threshold1, threshold2 byte, durationByte byte) error {
+	log.Println("[ModularDriver] SetIgniteParams: Not yet implemented for modular hardware")
+	return ErrNotSupported
+}
+
+func (d *ModularDriver) Ignite(detector string, start bool) error {
+	log.Printf("[ModularDriver] Ignite: detector=%s, start=%v. Not yet implemented.", detector, start)
+	return ErrNotSupported
 }
 
 // -- AnalysisDriver Implementation --
@@ -121,6 +155,19 @@ func (d *ModularDriver) StopAnalysis() error {
 	return nil
 }
 
+func (d *ModularDriver) StopAnalysisChannel(channel byte) error {
+	log.Printf("[ModularDriver] StopAnalysisChannel: Triggering local stop for channel %d", channel)
+	ch := int(channel)
+	if ch >= 0 && ch < 8 {
+		d.st.mu.Lock()
+		if d.st.sessions != nil && d.st.sessions[ch] != nil {
+			d.st.sessions[ch].active = false
+		}
+		d.st.mu.Unlock()
+	}
+	return nil
+}
+
 func (d *ModularDriver) RequestStop(channelMask byte) error {
 	log.Println("[ModularDriver] RequestStop: Triggering local stop for modular hardware")
 	for ch := 0; ch < 8; ch++ {
@@ -135,11 +182,16 @@ func (d *ModularDriver) RequestStop(channelMask byte) error {
 	return nil
 }
 
-func (d *ModularDriver) Ignite(detector string, start bool) error {
-	log.Printf("[ModularDriver] Ignite: detector=%s, start=%v. Not yet implemented.", detector, start)
-	return nil
-}
-
 func (d *ModularDriver) SendRawCmd(cmd byte, payload []byte) error {
 	return errors.New("ModularDriver does not support SendRawCmd (legacy binary protocol)")
+}
+
+func (d *ModularDriver) Capabilities() Capabilities {
+	return Capabilities{
+		HasIgnition: false,
+		HasCycles:   true, // TCD 也可以支持前端下发循环次数和间隔
+		HasEPC:      true,
+		HasEvents:   true, // 通过温控模块 IO CH5-8 实现开关量事件控制
+		Detectors:   []string{"TCD1"},
+	}
 }

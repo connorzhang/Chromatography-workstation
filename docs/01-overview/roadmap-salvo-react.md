@@ -1,8 +1,5 @@
 # 色谱工作站重构开发路线图 (Development Roadmap)
 
-> 🏷️ 当前版本: v0.3.42 | ⏱️ 最后同步: 2026-06-26 20:05:40 | 🔗 构建 Commit: 80ddc26
-
-
 基于 Salvo + React 的“一云多端”架构，分为五个核心开发阶段推进：
 
 ## Phase 1: 核心引擎库搭建 (Rust Core Foundation)

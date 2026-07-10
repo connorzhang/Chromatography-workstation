@@ -1,8 +1,5 @@
 # 旧版工作站（WinForms）色谱采集与出数链路梳理（供重构参考）
 
-> 🏷️ 当前版本: v0.3.42 | ⏱️ 最后同步: 2026-06-26 20:05:40 | 🔗 构建 Commit: 80ddc26
-
-
 本文基于仓库现有 WinForms 代码（`IBrainChrom2018`）梳理：
 - 主板（GC 主控/检测器）与工作站各自承担的职责
 - TCP 主协议上行/下行的关键命令与数据内容
@@ -124,4 +121,3 @@
 - 旧版 X 轴起点固定为 0（从开始分析时间算起）。
 - `fullScreenTime` 决定显示窗口宽度（可等于 stopTime，也可小于 stopTime 用于滚动窗口）。
   - 在 Win 版保存时：`disLg.lgXBeg=0`、`disLg.lgX=fullScreenTime`。
-

@@ -1,0 +1,311 @@
+package main
+
+import (
+	"encoding/binary"
+	"encoding/json"
+	"fmt"
+	"math"
+	"net/http"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/goburrow/modbus"
+)
+
+var (
+	globalModbusEPCCtrl *ModbusEPCController
+	modbusEPCCtrlMu     sync.Mutex
+)
+
+type ModbusEPCController struct {
+	client  modbus.Client
+	handler modbus.ClientHandler
+	mu      sync.Mutex
+	portMu  *SharedPortLock // Mutex for sharing COM port across slaves
+	port    string
+	address byte
+}
+
+type EPCState struct {
+	RealPressure float32 `json:"real_pressure"` // 0x0000
+	RealFlow     float32 `json:"real_flow"`     // 0x0002
+	ValveOpen    uint16  `json:"valve_open"`    // 0x0004
+	Status       uint16  `json:"status"`        // 0x0005
+	Temp         int16   `json:"temp"`          // 0x0006
+	Connected    bool    `json:"connected"`
+}
+
+func NewModbusEPCController(port string, slaveID byte) *ModbusEPCController {
+	var handler modbus.ClientHandler
+	var portMu *SharedPortLock
+
+	if strings.Contains(port, ":") {
+		tcpHandler := modbus.NewTCPClientHandler(port)
+		tcpHandler.SlaveId = slaveID
+		tcpHandler.Timeout = 2 * time.Second
+		handler = tcpHandler
+	} else {
+		rtuHandler, mu := getSharedRTUHandler(port)
+		handler = rtuHandler
+		portMu = mu
+	}
+
+	return &ModbusEPCController{
+		handler: handler,
+		portMu:  portMu,
+		port:    port,
+		address: slaveID,
+	}
+}
+
+func (m *ModbusEPCController) Connect() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.client != nil {
+		return nil
+	}
+
+	if h, ok := m.handler.(*modbus.RTUClientHandler); ok {
+		if err := h.Connect(); err != nil {
+			return fmt.Errorf("failed to connect modbus RTU for EPC on %s: %v", m.port, err)
+		}
+	} else if h, ok := m.handler.(*modbus.TCPClientHandler); ok {
+		if err := h.Connect(); err != nil {
+			return fmt.Errorf("failed to connect modbus TCP for EPC on %s: %v", m.port, err)
+		}
+	}
+
+	m.client = modbus.NewClient(m.handler)
+	return nil
+}
+
+func (m *ModbusEPCController) Close() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if h, ok := m.handler.(*modbus.RTUClientHandler); ok {
+		h.Close()
+	} else if h, ok := m.handler.(*modbus.TCPClientHandler); ok {
+		h.Close()
+	}
+
+	m.client = nil
+}
+
+func (m *ModbusEPCController) ReadState() (EPCState, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var state EPCState
+	if m.client == nil {
+		if h, ok := m.handler.(*modbus.RTUClientHandler); ok {
+			if err := h.Connect(); err != nil {
+				return state, fmt.Errorf("failed to connect: %v", err)
+			}
+		}
+		m.client = modbus.NewClient(m.handler)
+	}
+
+	if m.portMu != nil {
+		m.portMu.Lock()
+		defer m.portMu.Unlock()
+		if rtu, ok := m.handler.(*modbus.RTUClientHandler); ok {
+			rtu.SlaveId = m.address
+		}
+	}
+
+	// 0x03 read holding registers. Address 0x0000, 7 registers.
+	results, err := m.client.ReadHoldingRegisters(0, 7)
+	if err != nil {
+		return state, fmt.Errorf("read epc state failed: %v", err)
+	}
+
+	if len(results) >= 14 {
+		// Pressure: 0x0000 - 0x0001
+		reg1 := binary.BigEndian.Uint16(results[0:2])
+		reg2 := binary.BigEndian.Uint16(results[2:4])
+		packedPress := uint32(reg1)<<16 | uint32(reg2)
+		state.RealPressure = math.Float32frombits(packedPress)
+
+		// Flow: 0x0002 - 0x0003
+		reg3 := binary.BigEndian.Uint16(results[4:6])
+		reg4 := binary.BigEndian.Uint16(results[6:8])
+		packedFlow := uint32(reg3)<<16 | uint32(reg4)
+		state.RealFlow = math.Float32frombits(packedFlow)
+
+		// Valve: 0x0004
+		state.ValveOpen = binary.BigEndian.Uint16(results[8:10])
+
+		// Status: 0x0005
+		state.Status = binary.BigEndian.Uint16(results[10:12])
+
+		// Temp: 0x0006
+		state.Temp = int16(binary.BigEndian.Uint16(results[12:14]))
+	}
+
+	state.Connected = true
+	return state, nil
+}
+
+func (m *ModbusEPCController) ensureClient() error {
+	if m.client == nil {
+		if h, ok := m.handler.(*modbus.RTUClientHandler); ok {
+			if err := h.Connect(); err != nil {
+				return fmt.Errorf("failed to connect: %v", err)
+			}
+		}
+		m.client = modbus.NewClient(m.handler)
+	}
+	return nil
+}
+
+func (m *ModbusEPCController) lockPort() {
+	if m.portMu != nil {
+		m.portMu.Lock()
+		if rtu, ok := m.handler.(*modbus.RTUClientHandler); ok {
+			rtu.SlaveId = m.address
+		}
+	}
+}
+
+func (m *ModbusEPCController) unlockPort() {
+	if m.portMu != nil {
+		m.portMu.Unlock()
+	}
+}
+
+func (m *ModbusEPCController) WriteSingleRegister(addr uint16, val uint16) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.ensureClient(); err != nil { return err }
+
+	m.lockPort()
+	defer m.unlockPort()
+
+	_, err := m.client.WriteSingleRegister(addr, val)
+	return err
+}
+
+func (m *ModbusEPCController) WriteFloat32(addr uint16, val float32) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.ensureClient(); err != nil { return err }
+
+	m.lockPort()
+	defer m.unlockPort()
+
+	bits := math.Float32bits(val)
+	data := make([]byte, 4)
+	binary.BigEndian.PutUint32(data, bits)
+
+	_, err := m.client.WriteMultipleRegisters(addr, 2, data)
+	return err
+}
+
+// WriteControlMode 0x0014
+func (m *ModbusEPCController) WriteControlMode(mode uint16) error {
+	return m.WriteSingleRegister(0x0014, mode)
+}
+
+// WriteTargetPressure 0x0015
+func (m *ModbusEPCController) WriteTargetPressure(val float32) error {
+	return m.WriteFloat32(0x0015, val)
+}
+
+// WriteTargetFlow 0x0017
+func (m *ModbusEPCController) WriteTargetFlow(val float32) error {
+	return m.WriteFloat32(0x0017, val)
+}
+
+// WriteGasType 0x0019
+func (m *ModbusEPCController) WriteGasType(gt uint16) error {
+	return m.WriteSingleRegister(0x0019, gt)
+}
+
+// WriteUnits 0x001A
+func (m *ModbusEPCController) WriteUnits(u uint16) error {
+	return m.WriteSingleRegister(0x001A, u)
+}
+
+func handleEPCState(w http.ResponseWriter, r *http.Request) {
+	modbusEPCCtrlMu.Lock()
+	ctrl := globalModbusEPCCtrl
+	modbusEPCCtrlMu.Unlock()
+
+	if ctrl == nil {
+		writeJSON(w, http.StatusOK, EPCState{Connected: false})
+		return
+	}
+
+	state, err := ctrl.ReadState()
+	if err != nil {
+		writeJSON(w, http.StatusOK, EPCState{Connected: false})
+		return
+	}
+	writeJSON(w, http.StatusOK, state)
+}
+
+func handleEPCConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	modbusEPCCtrlMu.Lock()
+	ctrl := globalModbusEPCCtrl
+	modbusEPCCtrlMu.Unlock()
+
+	if ctrl == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "EPC未连接"})
+		return
+	}
+
+	var req struct {
+		Mode     *uint16  `json:"mode"`
+		Pressure *float32 `json:"pressure"`
+		Flow     *float32 `json:"flow"`
+		GasType  *uint16  `json:"gasType"`
+		Units    *uint16  `json:"units"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+		return
+	}
+
+	if req.Mode != nil {
+		if err := ctrl.WriteControlMode(*req.Mode); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "设置控制模式失败: " + err.Error()})
+			return
+		}
+	}
+	if req.Pressure != nil {
+		if err := ctrl.WriteTargetPressure(*req.Pressure); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "设置目标压力失败: " + err.Error()})
+			return
+		}
+	}
+	if req.Flow != nil {
+		if err := ctrl.WriteTargetFlow(*req.Flow); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "设置目标流量失败: " + err.Error()})
+			return
+		}
+	}
+	if req.GasType != nil {
+		if err := ctrl.WriteGasType(*req.GasType); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "设置载气类型失败: " + err.Error()})
+			return
+		}
+	}
+	if req.Units != nil {
+		if err := ctrl.WriteUnits(*req.Units); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "设置单位失败: " + err.Error()})
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"success": true})
+}
+

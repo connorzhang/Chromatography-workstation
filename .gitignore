@@ -429,3 +429,8 @@ src/开发文档/
 src/salvo-backend/**/target/
 src/ui/**/dist/
 src/ui/**/node_modules/
+
+# Trae AI IDE
+.trae/
+.temp_docs_repo/
+

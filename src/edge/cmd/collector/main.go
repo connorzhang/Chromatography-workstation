@@ -32,7 +32,7 @@ import (
 //go:embed static/*
 var staticFS embed.FS
 
-const AppVersion = "v0.3.112"
+const AppVersion = "v0.3.116"
 
 var startedAt = time.Now().UTC()
 
@@ -63,13 +63,14 @@ type lastResult struct {
 }
 
 type runSession struct {
-	token        string
-	active       bool
-	startedAt    time.Time
-	snapshotDone bool
-	dtS          float64
-	values       []float64
-	lastSample   float64
+	token         string
+	active        bool
+	startedAt     time.Time
+	snapshotDone  bool
+	dtS           float64
+	values        []float64
+	lastSample    float64
+	lastEventMask int // 上次下发的事件掩码，用于检测变化时才下发 IO 指令
 }
 
 func newRunSession(active bool) *runSession {
@@ -627,7 +628,11 @@ func main() {
 		// 启动 MQTT 客户端
 		sysCfg := ps.LoadSysConfig()
 		if sysCfg.DriverMode == "modular" {
-			getState(states, "GC-MODULAR") // Force inject GC-MODULAR for modular mode
+			modDevID := sysCfg.ModularDeviceID
+			if modDevID == "" {
+				modDevID = "GC-MODULAR"
+			}
+			getState(states, modDevID) // Force inject configured modular device
 		}
 		if sysCfg.MqttEnabled {
 			if sysCfg.MqttClientID == "" {
@@ -816,7 +821,11 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			pstore.SaveSysConfig(cfg)
 
 			if cfg.DriverMode == "modular" {
-				getState(states, "GC-MODULAR") // Force inject GC-MODULAR for modular mode
+				modDevID := cfg.ModularDeviceID
+				if modDevID == "" {
+					modDevID = "GC-MODULAR"
+				}
+				getState(states, modDevID) // Force inject configured modular device
 			}
 
 			// 重启 MQTT (简单处理，只重新实例化，真正的断开旧连接可以暂时忽略或者在 telemetry 里做)
@@ -1084,21 +1093,25 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			return
 		}
 		st := stAny.(*deviceState)
+		driver := getDriver(st, deviceID)
 
 		if in.Control == "query" {
-			_ = sendCmd(st, deviceID, 250, nil) // Query ignite thresholds
-			_ = sendCmd(st, deviceID, 48, nil)  // Query ignite duration (Cmd 48)
-			_ = sendCmd(st, deviceID, 4, nil)   // Query cycle parameters (Cmd 4 -> Cmd 132/140)
+			if err := driver.QueryIgniteParams(); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+				return
+			}
 			writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 			return
 		} else if in.Control == "set" {
 			hw, _ := pstore.LoadHardwareConfig(deviceID)
 			t1 := byte(math.Round(hw.IgniteThreshold1 * 10))
 			t2 := byte(math.Round(hw.IgniteThreshold2 * 10))
-			_ = sendCmd(st, deviceID, 249, []byte{t1, t2})
-
 			durByte := byte(math.Round(hw.IgniteDuration))
-			_ = sendCmd(st, deviceID, 50, []byte{durByte})
+
+			if err := driver.SetIgniteParams(t1, t2, durByte); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+				return
+			}
 			writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 			return
 		}
@@ -1128,46 +1141,22 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			return
 		}
 		st := stAny.(*deviceState)
+		driver := getDriver(st, deviceID)
 
 		if in.Control == "query" {
-			_ = sendCmd(st, deviceID, 4, nil)
+			if err := driver.QueryCycleParams(); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+				return
+			}
 			writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 			return
 		} else if in.Control == "set" {
 			hw, _ := pstore.LoadHardwareConfig(deviceID)
 
-			if pstore != nil && pstore.LoadSysConfig().DriverMode == "modular" {
-				writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+			if err := driver.SetCycleParams(hw.CycleCount, hw.CycleInterval); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 				return
 			}
-
-			// FloatToBCD for interval
-			val := hw.CycleInterval
-			if val > 1000.0 {
-				val = 1000.0
-			}
-			text := fmt.Sprintf("%04.0f", val*10) // e.g. 2.0 -> 20 -> 0020
-			if len(text) > 4 {
-				text = text[len(text)-4:]
-			}
-
-			b0 := (text[0]-'0')<<4 + (text[1] - '0')
-			b1 := (text[2]-'0')<<4 + (text[3] - '0')
-
-			// IntToBCD for count
-			count := hw.CycleCount
-			c1 := byte(count / 100)
-			c2 := byte(count % 100)
-			c1Hex, _ := strconv.ParseUint(fmt.Sprintf("%d", c1), 16, 8)
-			c2Hex, _ := strconv.ParseUint(fmt.Sprintf("%d", c2), 16, 8)
-
-			payload := []byte{
-				b0, b1,
-				byte(c1Hex), byte(c2Hex),
-				0, // injectSpendTime (not used)
-				0, // injectLightTime (not used)
-			}
-			_ = sendCmd(st, deviceID, 12, payload)
 			writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 			return
 		}
@@ -1243,21 +1232,8 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 		}
 		pstore.SaveHardwareConfig(deviceID, hw)
 
-		// Cmd 34 (0x22): 姘旇矾鍘嬪姏娴侀噺璁惧畾
-		// 绠€鍗曞亣璁剧洰鍓嶄粎鏀寔鍓?3 璺?(杞芥皵, H2, Air)锛屾瘡璺崰 8 瀛楄妭
-		// 鏍煎紡: 鍘嬪姏璁惧畾(2B), 娴侀噺璁惧畾(2B), 鍒嗘祦姣?2B), 鐘舵€?1B), 姘斾綋绫诲瀷(1B)
-		payload := make([]byte, 24)
-
-		cPsi := u16Bytes(hw.EPCs["Carrier1"], 100)
-		h2Psi := u16Bytes(hw.EPCs["H2"], 100)
-		airPsi := u16Bytes(hw.EPCs["Air"], 100)
-
-		copy(payload[0:2], cPsi)
-		copy(payload[8:10], h2Psi)
-		copy(payload[16:18], airPsi)
-
 		driver := getDriver(st, deviceID)
-		if err := driver.SetEPC(payload); err != nil {
+		if err := driver.SetEPC(hw.EPCs); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 			return
 		}
@@ -1271,12 +1247,8 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 		}
 
 		deviceID := uiLastDevice
-		stAny, ok := states.Load(deviceID)
-		if !ok {
-			writeJSON(w, http.StatusNotFound, map[string]any{"error": "device not found"})
-			return
-		}
-		st := stAny.(*deviceState)
+		// 使用 getState 确保设备状态存在（Modular 模式下可能未通过 TCP 注册）
+		st := getState(states, deviceID)
 		driver := getDriver(st, deviceID)
 
 		if r.Method == http.MethodGet {
@@ -1931,38 +1903,47 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 			return
 		}
 		type dev struct {
-			DeviceID   string            `json:"deviceId"`
-			LastSeen   time.Time         `json:"lastSeen"`
-			LastCmd    int               `json:"lastCmd"`
-			CmdCounts  map[string]uint64 `json:"cmdCounts"`
-			Last143    time.Time         `json:"last143"`
-			Connected  bool              `json:"connected"`
-			AllowCtrl  bool              `json:"allowControl"`
-			CanStart22 bool              `json:"canStart22"`
+			DeviceID     string            `json:"deviceId"`
+			LastSeen     time.Time         `json:"lastSeen"`
+			LastCmd      int               `json:"lastCmd"`
+			CmdCounts    map[string]uint64 `json:"cmdCounts"`
+			Last143      time.Time         `json:"last143"`
+			Connected    bool              `json:"connected"`
+			AllowCtrl    bool              `json:"allowControl"`
+			CanStart22   bool              `json:"canStart22"`
+			Capabilities Capabilities      `json:"capabilities"`
 		}
 		out := make([]dev, 0)
 		states.Range(func(key, value any) bool {
 			id := key.(string)
-			// In modular mode, GC-MODULAR is the local edge device, don't skip it.
+			// In modular mode, the configured ModularDeviceID is the local edge device, don't skip it.
 			cfg := pstore.LoadSysConfig()
+			modDevID := cfg.ModularDeviceID
+			if modDevID == "" {
+				modDevID = "GC-MODULAR"
+			}
+			
 			if cfg.DriverMode != "modular" && strings.HasPrefix(id, "DEV") {
 				return true
 			}
 			st := value.(*deviceState)
+			driver := getDriver(st, id)
+			caps := driver.Capabilities()
+
 			st.mu.Lock()
 			cc := map[string]uint64{}
 			for k, v := range st.cmdCnt {
 				cc[strconv.Itoa(int(k))] = v
 			}
 			connected := st.conn != nil
-			if cfg.DriverMode == "modular" && id == "GC-MODULAR" {
+			if cfg.DriverMode == "modular" && id == modDevID {
 				connected = true // Virtual edge device is always considered connected
 			}
 			lastSeen := st.lastSeen
 			lastCmd := st.lastCmd
 			last143 := st.last143
 			st.mu.Unlock()
-			out = append(out, dev{DeviceID: id, LastSeen: lastSeen, LastCmd: int(lastCmd), CmdCounts: cc, Last143: last143, Connected: connected, AllowCtrl: allowControl, CanStart22: allowControl && connected})
+			out = append(out, dev{DeviceID: id, LastSeen: lastSeen, LastCmd: int(lastCmd), CmdCounts: cc, Last143: last143, Connected: connected, AllowCtrl: allowControl, CanStart22: allowControl && connected, Capabilities: caps})
 			return true
 		})
 		writeJSON(w, http.StatusOK, out)
@@ -1982,6 +1963,11 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 	mux.HandleFunc("/api/v1/tcd/set_bridge", handleTCDSetBridge)
 	mux.HandleFunc("/api/v1/tcd/zeroing", handleTCDZeroing)
 	mux.HandleFunc("/api/v1/tcd/read_bridge", handleTCDReadBridge)
+
+	// EPC 调试接口
+	mux.HandleFunc("/api/v1/epc/state", handleEPCState)
+		mux.HandleFunc("/api/v1/epc/config", handleEPCConfig)
+		mux.HandleFunc("/api/v1/voltage/state", handleVoltageState)
 
 	mux.HandleFunc("/api/v1/devices/", func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/api/v1/devices/")
@@ -3033,17 +3019,6 @@ func parseEventTable(payload []byte) *[4][8]float64 {
 	return &m
 }
 
-// 杈呭姪鏂规硶锛氬皢鏁板€艰浆鎹负澶х uint16 瀛楄妭
-func u16Bytes(v float64, scale float64) []byte {
-	iv := int(math.Round(v * scale))
-	if iv < 0 {
-		iv = 0
-	}
-	if iv > 65535 {
-		iv = 65535
-	}
-	return []byte{byte(iv >> 8), byte(iv & 0xFF)}
-}
 
 func sendCmd(st *deviceState, deviceID string, cmd byte, payload []byte) error {
 	st.mu.Lock()

@@ -70,6 +70,7 @@ type HardwareConfig struct {
 	CycleInterval    float64        `json:"cycleInterval"`
 	CycleCount       int            `json:"cycleCount"`
 	Events       []EventRow         `json:"events"`       // 外部事件序列
+	TCDBridgeCurrent uint8          `json:"tcdBridgeCurrent"` // TCD 桥流设定值
 }
 
 // UploadConfig 上传与数采仪配置
@@ -125,6 +126,7 @@ type SysConfig struct {
 	ModbusServerPort    int    `json:"modbus_server_port"`    // Modbus TCP Server 端口 (默认 1502)
 	ModbusServerAddress string `json:"modbus_server_address"` // Modbus Server 设备地址标识
 	ModbusUploadLog     bool   `json:"modbus_upload_log"`     // 是否将日志上传至 Modbus
+	ModularDeviceID     string `json:"modular_device_id"`     // Modular架构: 自定义设备ID (默认: GC-MODULAR)
 	ModularTCDPort      string `json:"modular_tcd_port"`      // Modular架构: TCD串口 (例: COM11)
 	ModularTempPort     string `json:"modular_temp_port"`     // Modular架构: 温控板串口 (例: COM7)
 	ModularTempSlaveID  int    `json:"modular_temp_slave_id"` // Modular架构: 温控板从机ID (默认 20)

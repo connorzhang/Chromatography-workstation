@@ -143,21 +143,32 @@ func (c *TCDController) parseFrame(frame []byte) {
 	for i := 0; i < 20; i++ {
 		idx := dataOffset + (i * 4)
 
-		// 惊天真相：TCD 的协议中，符号位并不是最高 bit（Bit 31），而是最高半字节（Nibble）！
-		// 官方文档说的“最高位为1”其实是指：最高的一个十六进制字符为 1（即 0x10）。
-		// - 0x00 00 00 25 表示正数 0x25 (37)
-		// - 0x10 00 00 25 表示负数 -0x25 (-37)
+		// BCD编码：4字节 → 8个BCD数字
+		// 示例：0x12 0x34 0x56 0x78 → BCD: 1 2 3 4 5 6 7 8
+		//   第一个数字 1 → 负数，剩余 2345678 → -2345678 µV = -2345.678 mV
+		nibbles := [8]int{
+			int(frame[idx] >> 4),
+			int(frame[idx] & 0x0F),
+			int(frame[idx+1] >> 4),
+			int(frame[idx+1] & 0x0F),
+			int(frame[idx+2] >> 4),
+			int(frame[idx+2] & 0x0F),
+			int(frame[idx+3] >> 4),
+			int(frame[idx+3] & 0x0F),
+		}
 
-		signByte := frame[idx]
 		sign := 1.0
-		if (signByte & 0xF0) == 0x10 {
+		if nibbles[0] == 1 {
 			sign = -1.0
 		}
 
-		// 提取剩下的 28 bit 作为绝对值
-		absValue := uint32(frame[idx]&0x0F)<<24 | uint32(frame[idx+1])<<16 | uint32(frame[idx+2])<<8 | uint32(frame[idx+3])
+		var uvValue int64
+		for j := 1; j < 8; j++ {
+			uvValue = uvValue*10 + int64(nibbles[j])
+		}
 
-		c.state.Values[i] = sign * float64(absValue)
+		// µV → mV，保留小数点后3位精度
+		c.state.Values[i] = sign * float64(uvValue) / 1000.0
 	}
 	c.state.LastUpdate = time.Now()
 	pts := make([]float64, 20)
@@ -299,6 +310,16 @@ func handleTCDSetBridge(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf(`{"error":"%v"}`, err), http.StatusInternalServerError)
 		return
 	}
+
+	// Persist to HardwareConfig
+	cfg := pstore.LoadSysConfig()
+	devID := cfg.ModularDeviceID
+	if devID == "" {
+		devID = "GC-MODULAR"
+	}
+	hwCfg, _ := pstore.LoadHardwareConfig(devID)
+	hwCfg.TCDBridgeCurrent = req.Value
+	pstore.SaveHardwareConfig(devID, hwCfg)
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"status":"ok"}`))
