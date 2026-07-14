@@ -32,3 +32,5 @@ VOCs 色谱边缘工作站是一个基于 Go 语言开发的工业级色谱数�
 - [开发指南](development.md)
 - [SiLA 2 集成](sila2.md)
 - [故障排查](troubleshooting.md)
+- [色谱气路逻辑与动画演示](01-overview/valve_logic_demo.html)
+- [色谱气路逻辑与动画演示](01-overview/valve_logic_demo.html)
