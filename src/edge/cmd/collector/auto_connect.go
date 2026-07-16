@@ -10,15 +10,33 @@ import (
 	"chromatography-workstation/edge/internal/realtime"
 )
 
-var voltageHighFreqStarted = false
+var (
+	voltageHighFreqStarted = false
+	tempHighFreqStarted    = false
+	epcHighFreqStarted     = false
+)
 
-// startVoltageHighFreqPoll 独立的高频电压采集循环（500ms 一次 = 1秒2次）
-// 通过 SharedPortLock 自动与温控/EPC 排队，不会冲突
 func startVoltageHighFreqPoll(ctrl *VoltageController) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	for range ticker.C {
 		ctrl.ReadVoltageOnce()
+	}
+}
+
+func startTempHighFreqPoll(ctrl *ModbusTempController) {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for range ticker.C {
+		ctrl.ReadStateOnce()
+	}
+}
+
+func startEpcHighFreqPoll(ctrl *ModbusEPCController) {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for range ticker.C {
+		ctrl.ReadStateOnce()
 	}
 }
 
@@ -65,15 +83,22 @@ func startAutoConnect(states *sync.Map, hub *realtime.Hub) {
 					globalModbusTempCtrl.Close()
 				}
 				globalModbusTempCtrl = NewModbusTempController(modbusPort, modbusSlaveID)
+				tempHighFreqStarted = false
 			}
 			mCtrl := globalModbusTempCtrl
 			modbusTempCtrlMu.Unlock()
 
-			state, err := mCtrl.ReadState()
-			if err != nil {
+			mCtrl.ReadStateOnce()
+			if !tempHighFreqStarted {
+				tempHighFreqStarted = true
+				go startTempHighFreqPoll(mCtrl)
+			}
+			state := mCtrl.GetCachedState()
+
+			if !state.Connected {
 				// We don't close the port on timeout, because it might be shared with EPC.
 				// Just log and continue.
-				fmt.Printf("[AutoConnect] Modbus Temp read failed: %v\n", err)
+				fmt.Printf("[AutoConnect] Modbus Temp read failed\n")
 			} else {
 				// Push Modbus Temp data to modular device
 				te := telemetryEvent{
@@ -128,16 +153,13 @@ func startAutoConnect(states *sync.Map, hub *realtime.Hub) {
 		voltageCtrlMu.Lock()
 		if globalVoltageCtrl == nil || globalVoltageCtrl.port != voltagePort || globalVoltageCtrl.address != voltageSlaveID {
 			globalVoltageCtrl = NewVoltageController(voltagePort, voltageSlaveID)
+			voltageHighFreqStarted = false
 		}
 		vCtrl := globalVoltageCtrl
 		voltageCtrlMu.Unlock()
 
-		// 在此统一读取电压并缓存，前端 API 只读缓存值，避免与温控/EPC 争抢串口锁
-		vCtrl.ReadVoltageOnce()
-
-		// 启动独立的高频电压采集 goroutine（500ms 一次 = 1秒2次）
-		// 通过 SharedPortLock 自动与温控/EPC 排队，不会冲突
 		if !voltageHighFreqStarted {
+			vCtrl.ReadVoltageOnce() // initial read
 			voltageHighFreqStarted = true
 			go startVoltageHighFreqPoll(vCtrl)
 		}
@@ -158,13 +180,20 @@ func startAutoConnect(states *sync.Map, hub *realtime.Hub) {
 					globalModbusEPCCtrl.Close()
 				}
 				globalModbusEPCCtrl = NewModbusEPCController(epcPort, epcSlaveID)
+				epcHighFreqStarted = false
 			}
 			eCtrl := globalModbusEPCCtrl
 			modbusEPCCtrlMu.Unlock()
 
-			epcState, err := eCtrl.ReadState()
-			if err != nil {
-				fmt.Printf("[AutoConnect] Modbus EPC read failed: %v\n", err)
+			if !epcHighFreqStarted {
+				eCtrl.ReadStateOnce()
+				epcHighFreqStarted = true
+				go startEpcHighFreqPoll(eCtrl)
+			}
+			epcState := eCtrl.GetCachedState()
+
+			if !epcState.Connected {
+				fmt.Printf("[AutoConnect] Modbus EPC read failed\n")
 			} else {
 				// We can push EPC real-time telemetry here
 				te := telemetryEvent{
@@ -246,16 +275,21 @@ func startAutoConnect(states *sync.Map, hub *realtime.Hub) {
 				if err := tCtrl.Connect(); err == nil {
 					fmt.Printf("[AutoConnect] TCD re-connected on %s.\n", tcdPort)
 					
-					// Apply persisted TCD Bridge Current
-					hwCfg, _ := pstore.LoadHardwareConfig(modDevID)
-					if hwCfg.TCDBridgeCurrent > 0 {
-						// Sleep a bit to ensure port is ready
-						go func(val uint8) {
-							time.Sleep(1 * time.Second)
-							_ = tCtrl.SetBridgeCurrent(val)
-							fmt.Printf("[AutoConnect] Applied persisted TCD Bridge Current: %d\n", val)
-						}(hwCfg.TCDBridgeCurrent)
-					}
+					// On TCD re-connect, safely set Bridge Current to 0 to prevent overheating.
+					// Send it multiple times to ensure success.
+					go func() {
+						time.Sleep(1 * time.Second)
+						for i := 0; i < 3; i++ {
+							_ = tCtrl.SetBridgeCurrent(0)
+							time.Sleep(500 * time.Millisecond)
+						}
+						fmt.Printf("[AutoConnect] Safely reset TCD Bridge Current to 0 upon reconnection\n")
+						
+						// Update persisted config so UI reflects the 0 state
+						hwCfg, _ := pstore.LoadHardwareConfig(modDevID)
+						hwCfg.TCDBridgeCurrent = 0
+						pstore.SaveHardwareConfig(modDevID, hwCfg)
+					}()
 				}
 			}
 
