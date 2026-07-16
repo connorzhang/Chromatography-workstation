@@ -1,6 +1,6 @@
-module deploy
+﻿module deploy
 
-go 1.26.3
+go 1.26.2
 
 require (
 	github.com/kr/fs v0.1.0 // indirect
