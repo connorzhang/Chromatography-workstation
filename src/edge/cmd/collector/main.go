@@ -4982,24 +4982,18 @@ func processFrame(c net.Conn, f gckc.Frame, hub *realtime.Hub, states *sync.Map,
 
 
 func resetAllSessions(st *deviceState) {
+st.mu.Lock()
+defer st.mu.Unlock()
+st.lastTS = map[int]float64{}
+if st.sessions == nil {
+st.sessions = map[int]*runSession{}
+}
 
-	st.mu.Lock()
-
-	defer st.mu.Unlock()
-
-	st.lastTS = map[int]float64{}
-
-	if st.sessions == nil {
-
-		st.sessions = map[int]*runSession{}
-
-	}
-
-	for ch := range st.sessions {
-		st.sessions[ch] = newRunSession(true)
-	st.sessions[ch].auditRemark = st.nextAuditRemark
-	}
-
+// Create sessions for all standard channels
+for ch := 0; ch < 8; ch++ {
+st.sessions[ch] = newRunSession(true)
+st.sessions[ch].auditRemark = st.nextAuditRemark
+}
 }
 
 

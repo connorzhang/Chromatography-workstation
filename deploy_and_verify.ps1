@@ -13,6 +13,7 @@ while ($RetryCount -lt $MaxRetries) {
         if (-not (Test-Path $env:GOMODCACHE)) { New-Item -ItemType Directory -Force -Path $env:GOMODCACHE | Out-Null }
         D:\GOPATH\go1.26.2\bin\go.exe build -o collector.exe .
         if ($LASTEXITCODE -ne 0) { throw "Compile failed!" }
+        Start-Sleep -Seconds 2
         Set-Location "i:\GIT\VS2022\Chromatography-workstation\src\edge\cmd\collector"
 
         Write-Host "[Step 2] Zipping deployment files..." -ForegroundColor Cyan

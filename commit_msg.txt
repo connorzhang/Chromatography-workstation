@@ -1,0 +1,15 @@
+[IChanged] Bump version to v0.3.135
+
+[Description]
+Bumped application version to v0.3.135 following the channel isolation fix for the TCD/FID live chart zigzag issue.
+
+[Root Cause]
+Forgot to increment the version number in the previous commit per project constraints.
+
+[Solution]
+Incremented AppVersion in main.go from v0.3.134 to v0.3.135.
+
+[Test Plan]
+Verify the new version number is displayed in the UI after deployment.
+
+Change-Id: Ic4902e91162f4e519417901249488020

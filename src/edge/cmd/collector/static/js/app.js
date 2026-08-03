@@ -80,13 +80,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.showToast('未找到在线设备', true);
                 return;
             }
-            // 默认选第一个 GC 设备
-            let deviceId = devices[0].deviceId;
-            for (let d of devices) {
-                if (String(d.deviceId).startsWith('GC')) {
-                    deviceId = d.deviceId;
-                    break;
-                }
+            // 找出所有 GC 设备
+            let gcDevices = devices.filter(d => String(d.deviceId).startsWith('GC'));
+            if (gcDevices.length === 0) {
+                // 如果没有 GC 开头的，默认使用第一个
+                gcDevices = [devices[0]];
             }
 
             // 如果是开始分析，提示输入审计备注
@@ -100,15 +98,25 @@ document.addEventListener('DOMContentLoaded', () => {
                 remarkParam = `&remark=${encodeURIComponent(remark)}`;
             }
 
-            // 2. 发送指令
-            const cmdRes = await fetch(`/api/v1/devices/${deviceId}/cmd?name=${cmdName}${remarkParam}`, {
-                method: 'POST'
-            });
-            const cmdData = await cmdRes.json();
-            if (cmdRes.ok) {
+            // 2. 广播指令到所有相关的设备
+            let successCount = 0;
+            let errorMsg = '';
+            for (let dev of gcDevices) {
+                const cmdRes = await fetch(`/api/v1/devices/${dev.deviceId}/cmd?name=${cmdName}${remarkParam}`, {
+                    method: 'POST'
+                });
+                if (cmdRes.ok) {
+                    successCount++;
+                } else {
+                    const cmdData = await cmdRes.json();
+                    errorMsg = cmdData.error;
+                }
+            }
+            
+            if (successCount > 0) {
                 window.showToast(`指令 ${cmdName} 下发成功`);
             } else {
-                window.showToast(`下发失败: ${cmdData.error}`, true);
+                window.showToast(`下发失败: ${errorMsg}`, true);
             }
         } catch(e) {
             console.error(e);
