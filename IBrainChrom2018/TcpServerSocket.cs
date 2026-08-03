@@ -2856,7 +2856,7 @@ public class TcpServerSocket
 				{
 					array[num3] -= float_0;
 				}
-				sglsSampling[3].AddDots(array, myClass78.byte_0, out newDot, mybool_0, frmParam.iSmooths);
+				sglsSampling[3].AddDots(array, myClass78.byte_0, out newDot, mybool_0, frmParam.iSmooths, myClass78.byte_2);
 				method_20(newDot);
 				struct0_0.float_0 = array[array.Length - 1];
 				break;
@@ -2931,7 +2931,7 @@ public class TcpServerSocket
 			}
 			else
 			{
-				signal.AddDots(myClass78.float_0, myClass78.byte_0, out newDot2, bAnlyse, frmParam.iSmooths);
+				signal.AddDots(myClass78.float_0, myClass78.byte_0, out newDot2, bAnlyse, frmParam.iSmooths, b);
 			}
 			if (newDot2.X > 20480f)
 			{
@@ -3209,7 +3209,7 @@ public class TcpServerSocket
 					mybool0 = true;
 				}
 			});
-			signal_0.AddDots(float_1, detectorParseList[int_7].byte_0, out var newDot, mybool0, frmParam.iSmooths);
+			signal_0.AddDots(float_1, detectorParseList[int_7].byte_0, out var newDot, mybool0, frmParam.iSmooths, detectorParseList[int_7].byte_2);
 			if (newDot.X > 20480f)
 			{
 				signal_0.ResetOriDots(createDiskFile: true);

@@ -1,2562 +1,5147 @@
-﻿package main
+package main
+
+
 
 import (
+
 	"bufio"
+
 	"embed"
+
 	"encoding/json"
+
 	"errors"
+
 	"fmt"
+
 	"io"
+
 	"math"
+
 	"net"
+
 	"net/http"
+
 	"os"
+
 	"path/filepath"
+
 	"sort"
+
 	"strconv"
+
 	"strings"
+
 	"sync"
+
 	"sync/atomic"
+
 	"time"
 
+
+
 	"chromatography-workstation/edge/internal/analyzer"
+
 	v1 "chromatography-workstation/edge/internal/contracts/v1"
+
 	"chromatography-workstation/edge/internal/modbusslave"
+
 	"chromatography-workstation/edge/internal/models"
+
 	"chromatography-workstation/edge/internal/protocol/chromsend143"
+
 	"chromatography-workstation/edge/internal/protocol/gckc"
+
 	"chromatography-workstation/edge/internal/realtime"
+
 	"chromatography-workstation/edge/internal/telemetry"
+
 )
 
+
+
 //go:embed static/*
+
 var staticFS embed.FS
 
-const AppVersion = "v0.3.124"
+
+
+const AppVersion = "v0.3.134"
+
+
 
 var startedAt = time.Now().UTC()
 
+
+
 var mbSlave *modbusslave.Server
+
 var mqttClient *telemetry.MqttClient
+
+
 
 var runSessionSeq uint64
 
+
+
 type deviceState struct {
+
 	mu             sync.Mutex
+
 	Twin           *models.DigitalTwin
+
 	lastTS         map[int]float64
+
 	lastSeen       time.Time
+
 	lastCmd        byte
+
 	cmdCnt         map[byte]uint64
+
 	conn           net.Conn
+
 	seq            uint32
+
 	last143        time.Time
+
 	sessions       map[int]*runSession
+
 	lastResultByCh map[int]lastResult
+
 	synced         bool
+
+	nextAuditRemark string
 }
+
+
 
 type lastResult struct {
+
 	token string
+
 	at    time.Time
+
 	res   v1.Result
+
 }
+
+
 
 type runSession struct {
+
 	token         string
+
 	active        bool
+
 	startedAt     time.Time
+
 	snapshotDone  bool
+
 	dtS           float64
+
 	values        []float64
+
 	lastSample    float64
+
 	lastEventMask int // 涓婃涓嬪彂鐨勪簨浠舵帺鐮侊紝鐢ㄤ簬妫€娴嬪彉鍖栨椂鎵嶄笅鍙?IO 鎸囦护
+
+	auditRemark   string
 }
+
+
 
 func newRunSession(active bool) *runSession {
+
 	n := atomic.AddUint64(&runSessionSeq, 1)
+
 	return &runSession{token: fmt.Sprintf("%d-%d", time.Now().UnixNano(), n), active: active, startedAt: time.Now()}
+
 }
+
+
 
 type event struct {
+
 	Type     string    `json:"type"`
+
 	DeviceID string    `json:"deviceId"`
+
 	At       time.Time `json:"at"`
 
+
+
 	Channel      int       `json:"channel"`
+
 	SessionToken string    `json:"sessionToken"`
+
 	DTs          float64   `json:"dtS"`
+
 	T0s          float64   `json:"t0S"`
+
 	Values       []float64 `json:"values"`
+
 }
+
+
 
 type sessionSnapshot struct {
+
 	DtS    float64
+
 	Values []float64
+
 }
+
+
 
 type nmhcRecord struct {
+
 	TimeRFC3339 string  `json:"time"`
+
 	DeviceID    string  `json:"deviceId"`
+
 	TraceID     string  `json:"traceId"`
+
 	THC         float64 `json:"thc"`
+
 	CH4         float64 `json:"ch4"`
+
 	NMHC        float64 `json:"nmhc"`
+
 }
+
+
 
 type nmhcHistoryStore struct {
+
 	mu       sync.Mutex
+
 	byDevice map[string][]nmhcRecord
+
 	path     string
+
 }
+
+
 
 func newNMHCHistoryStore(path string) *nmhcHistoryStore {
+
 	return &nmhcHistoryStore{byDevice: map[string][]nmhcRecord{}, path: path}
+
 }
+
+
 
 func (s *nmhcHistoryStore) Load() {
+
 	s.mu.Lock()
+
 	defer s.mu.Unlock()
+
 	s.byDevice = map[string][]nmhcRecord{}
+
 	f, err := os.Open(s.path)
+
 	if err != nil {
+
 		return
+
 	}
+
 	defer f.Close()
+
 	sc := bufio.NewScanner(f)
+
 	for sc.Scan() {
+
 		line := strings.TrimSpace(sc.Text())
+
 		if line == "" {
+
 			continue
+
 		}
+
 		var r nmhcRecord
+
 		if json.Unmarshal([]byte(line), &r) != nil {
+
 			continue
+
 		}
+
 		if r.DeviceID == "" {
+
 			continue
+
 		}
+
 		s.byDevice[r.DeviceID] = append(s.byDevice[r.DeviceID], r)
+
 	}
+
 }
+
+
 
 func (s *nmhcHistoryStore) Add(r nmhcRecord) {
+
 	if r.DeviceID == "" || r.TimeRFC3339 == "" {
+
 		return
+
 	}
+
 	s.mu.Lock()
+
 	defer s.mu.Unlock()
+
 	s.byDevice[r.DeviceID] = append(s.byDevice[r.DeviceID], r)
+
 	_ = os.MkdirAll(filepath.Dir(s.path), 0o755)
+
 	f, err := os.OpenFile(s.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+
 	if err != nil {
+
 		return
+
 	}
+
 	_, _ = f.Write(append(mustJSONLine(r), '\n'))
+
 	_ = f.Close()
+
 	if pstore != nil {
+
 		pstore.AddNMHC(r)
+
 	}
+
 }
+
+
 
 func mustJSONLine(v any) []byte {
+
 	b, err := json.Marshal(v)
+
 	if err != nil {
+
 		return []byte("{}")
+
 	}
+
 	return b
+
 }
+
+
 
 func (s *nmhcHistoryStore) Query(deviceID string, from, to *time.Time, limit int) []nmhcRecord {
+
 	s.mu.Lock()
+
 	defer s.mu.Unlock()
+
 	src := s.byDevice[deviceID]
+
 	out := make([]nmhcRecord, 0, len(src))
+
 	for i := 0; i < len(src); i++ {
+
 		r := src[i]
+
 		t, err := time.Parse(time.RFC3339, r.TimeRFC3339)
+
 		if err != nil {
+
 			continue
+
 		}
+
 		if from != nil && t.Before(*from) {
+
 			continue
+
 		}
+
 		if to != nil && t.After(*to) {
+
 			continue
+
 		}
+
 		out = append(out, r)
+
 	}
+
 	sort.Slice(out, func(i, j int) bool {
+
 		ti, e1 := time.Parse(time.RFC3339, out[i].TimeRFC3339)
+
 		tj, e2 := time.Parse(time.RFC3339, out[j].TimeRFC3339)
+
 		if e1 != nil || e2 != nil {
+
 			return false
+
 		}
+
 		return tj.After(ti)
+
 	})
+
 	if limit > 0 && len(out) > limit {
+
 		out = out[:limit]
+
 	}
+
 	return out
+
 }
+
+
 
 func (s *nmhcHistoryStore) DeleteRange(deviceID string, from, to time.Time) int {
+
 	s.mu.Lock()
+
 	defer s.mu.Unlock()
+
 	src := s.byDevice[deviceID]
+
 	if len(src) == 0 {
+
 		return 0
+
 	}
+
 	out := make([]nmhcRecord, 0, len(src))
+
 	deleted := 0
+
 	for i := 0; i < len(src); i++ {
+
 		r := src[i]
+
 		t, err := time.Parse(time.RFC3339, r.TimeRFC3339)
+
 		if err != nil {
+
 			out = append(out, r)
+
 			continue
+
 		}
+
 		if !t.Before(from) && !t.After(to) {
+
 			deleted++
+
 			continue
+
 		}
+
 		out = append(out, r)
+
 	}
+
 	s.byDevice[deviceID] = out
+
 	s.rewriteLocked()
+
 	return deleted
+
 }
+
+
 
 func (s *nmhcHistoryStore) rewriteLocked() {
+
 	_ = os.MkdirAll(filepath.Dir(s.path), 0o755)
+
 	tmp := s.path + ".tmp"
+
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+
 	if err != nil {
+
 		return
+
 	}
+
 	for _, rs := range s.byDevice {
+
 		for i := 0; i < len(rs); i++ {
+
 			_, _ = f.Write(append(mustJSONLine(rs[i]), '\n'))
+
 		}
+
 	}
+
 	_ = f.Close()
+
 	_ = os.Rename(tmp, s.path)
+
 }
+
+
 
 func parseTimeAny(s string) (*time.Time, error) {
+
 	s = strings.TrimSpace(s)
+
 	if s == "" {
+
 		return nil, nil
+
 	}
+
 	if t, err := time.Parse(time.RFC3339, s); err == nil {
+
 		return &t, nil
+
 	}
+
 	if t, err := time.ParseInLocation("2006-01-02 15:04:05", s, time.Local); err == nil {
+
 		tt := t.UTC()
+
 		return &tt, nil
+
 	}
+
 	return nil, errors.New("invalid time")
+
 }
+
+
 
 func extractNMHC(res v1.Result) (thc, ch4, nmhc float64, ok bool) {
+
 	var thcOK, ch4OK bool
+
 	for i := 0; i < len(res.Pollutants); i++ {
+
 		p := res.Pollutants[i]
+
 		switch p.Code {
+
 		case "THC":
+
 			thc = p.Amount
+
 			thcOK = true
+
 		case "CH4":
+
 			ch4 = p.Amount
+
 			ch4OK = true
+
 		}
-	}
-	if !thcOK || !ch4OK {
-		return 0, 0, 0, false
+
 	}
 
+	if !thcOK || !ch4OK {
+
+		return 0, 0, 0, false
+
+	}
+
+
+
 	// 浠?Groups 涓彁鍙栬绠楀ソ鐨?NMHC
+
 	var nmhcOK bool
+
 	for _, g := range res.Groups {
+
 		if g.Code == "NMHC" {
+
 			nmhc = g.Amount
+
 			nmhcOK = true
+
 			break
+
 		}
+
 	}
+
 	if !nmhcOK {
+
 		nmhc = thc - ch4
+
 	}
+
 	return thc, ch4, nmhc, true
+
 }
+
+
 
 var nmhcStore = newNMHCHistoryStore(filepath.Join(".run", "results_nmch.jsonl"))
 
+
+
 var pstore *persistStore
 
+
+
 type uiState struct {
+
 	DeviceID        string  `json:"deviceId"`
+
 	ActiveTab       string  `json:"activeTab"`
+
 	SelectedChannel int     `json:"selectedChannel"`
+
 	FullMin         float64 `json:"fullMin"`
+
 	YLow            float64 `json:"yLow"`
+
 	YHigh           float64 `json:"yHigh"`
+
 	AutoY           bool    `json:"autoY"`
+
 	AcqMin          float64 `json:"acqMin"`
+
 	Loop            bool    `json:"loop"`
+
 	CycleMin        float64 `json:"cycleMin"`
+
 	CycleMax        int     `json:"cycleMax"`
+
 	EpcCarrier      int     `json:"epcCarrier"`
+
 	EpcH2           int     `json:"epcH2"`
+
 	EpcAir          int     `json:"epcAir"`
+
 	UpdatedAt       string  `json:"updatedAt"`
+
 }
+
+
 
 var uiMu sync.Mutex
+
 var uiByDevice = map[string]uiState{}
+
 var uiLastDevice string
 
+
+
 func getDeviceNo(defaultID string) string {
+
 	if pstore != nil {
+
 		if cfg, ok := pstore.LoadUploadConfig(defaultID); ok && cfg.DeviceNo != "" {
+
 			return cfg.DeviceNo
+
 		}
+
 	}
+
 	return defaultID
+
 }
+
+
 
 func defaultUIState(deviceID string) uiState {
+
 	return uiState{DeviceID: deviceID, ActiveTab: "overview", SelectedChannel: 0, FullMin: 2, YLow: 0, YHigh: 40, AutoY: true, AcqMin: 2, Loop: true, CycleMin: 2, CycleMax: 9999, EpcCarrier: 0, EpcH2: 1, EpcAir: 2}
+
 }
+
+
 
 type resultEvent struct {
+
 	Type         string    `json:"type"`
+
 	DeviceID     string    `json:"deviceId"`
+
 	Channel      int       `json:"channel"`
+
 	SessionToken string    `json:"sessionToken"`
+
 	At           time.Time `json:"at"`
+
 	Result       v1.Result `json:"result"`
+
 	Trace        v1.Trace  `json:"trace"`
+
 	Method       v1.Method `json:"method"`
+
 	Error        string    `json:"error,omitempty"`
+
 }
 
+
+
 type telemetryEvent struct {
+
 	Type     string    `json:"type"`
+
 	DeviceID string    `json:"deviceId"`
+
 	At       time.Time `json:"at"`
 
+
+
 	// 6璺俯搴﹀疄娴嬪€?
+
 	TempInj1 *float64 `json:"tempInj1,omitempty"`
+
 	TempCol  *float64 `json:"tempCol,omitempty"`
+
 	TempDet1 *float64 `json:"tempDet1,omitempty"`
+
 	TempInj2 *float64 `json:"tempInj2,omitempty"`
+
 	TempDet2 *float64 `json:"tempDet2,omitempty"`
+
 	TempDet3 *float64 `json:"tempDet3,omitempty"`
 
+
+
 	// 6璺俯搴﹁瀹氬€?(閫氳繃瀹氭椂涓嬪彂Cmd 0鏌ヨ寰楀埌)
+
 	SetTempInj1 *float64 `json:"setTempInj1,omitempty"`
+
 	SetTempCol  *float64 `json:"setTempCol,omitempty"`
+
 	SetTempDet1 *float64 `json:"setTempDet1,omitempty"`
+
 	SetTempInj2 *float64 `json:"setTempInj2,omitempty"`
+
 	SetTempDet2 *float64 `json:"setTempDet2,omitempty"`
+
 	SetTempDet3 *float64 `json:"setTempDet3,omitempty"`
 
+
+
 	// 6璺俯搴︿繚鎶ゅ€?
+
 	ProtTempInj1 *float64 `json:"protTempInj1,omitempty"`
+
 	ProtTempCol  *float64 `json:"protTempCol,omitempty"`
+
 	ProtTempDet1 *float64 `json:"protTempDet1,omitempty"`
+
 	ProtTempInj2 *float64 `json:"protTempInj2,omitempty"`
+
 	ProtTempDet2 *float64 `json:"protTempDet2,omitempty"`
+
 	ProtTempDet3 *float64 `json:"protTempDet3,omitempty"`
 
+
+
 	// 缁崵绮洪悩鑸碘偓?
+
 	Heating *bool `json:"heating,omitempty"`
+
 	Ready   *bool `json:"ready,omitempty"`
+
+
 
 	Epc []telemetryEpc `json:"epc,omitempty"`
 
+
+
 	CarrierPsi  *float64 `json:"carrierPsi,omitempty"`
+
 	CarrierSccm *float64 `json:"carrierSccm,omitempty"`
+
 	H2Psi       *float64 `json:"h2Psi,omitempty"`
+
 	H2Sccm      *float64 `json:"h2Sccm,omitempty"`
+
 	AirPsi      *float64 `json:"airPsi,omitempty"`
+
 	AirSccm     *float64 `json:"airSccm,omitempty"`
+
 }
+
+
 
 type telemetryEpc struct {
+
 	InputPsi float64 `json:"inputPsi"`
+
 	Psi      float64 `json:"psi"`
+
 	Sccm     float64 `json:"sccm"`
+
 }
+
+
 
 func f64p(v float64) *float64 {
+
 	return &v
+
 }
+
+
 
 func bcd2Temp1(data []byte, off int) (float64, bool) {
+
 	if off < 0 || off+1 >= len(data) {
+
 		return 0, false
+
 	}
+
 	b0 := data[off]
+
 	neg := (b0 & 0xD0) == 0xD0
+
 	if neg {
+
 		b0 -= 0xD0
+
 	}
+
 	d1 := int((b0 >> 4) & 0x0F)
+
 	d2 := int(b0 & 0x0F)
+
 	d3 := int((data[off+1] >> 4) & 0x0F)
+
 	d4 := int(data[off+1] & 0x0F)
+
 	if d1 > 9 || d2 > 9 || d3 > 9 || d4 > 9 {
+
 		return 0, false
+
 	}
+
 	v := float64(d1*100+d2*10+d3) + float64(d4)*0.1
+
 	if neg {
+
 		v = -v
+
 	}
+
 	return v, true
+
 }
+
+
 
 func u16BE(data []byte, off int) (uint16, bool) {
+
 	if off < 0 || off+1 >= len(data) {
+
 		return 0, false
+
 	}
+
 	return uint16(data[off])<<8 | uint16(data[off+1]), true
+
 }
+
+
 
 func parseSetTemps128(payload []byte) (telemetryEvent, bool) {
+
 	if len(payload) < 24 {
+
 		return telemetryEvent{}, false
+
 	}
+
 	inj1, ok0 := bcd2Temp1(payload, 0)
+
 	col, ok1 := bcd2Temp1(payload, 2)
+
 	det1, ok2 := bcd2Temp1(payload, 4)
+
 	det2, ok4 := bcd2Temp1(payload, 6)
+
 	inj2, ok3 := bcd2Temp1(payload, 8)
+
 	det3, ok5 := bcd2Temp1(payload, 10)
+
+
 
 	pinj1, pok0 := bcd2Temp1(payload, 12)
+
 	pcol, pok1 := bcd2Temp1(payload, 14)
+
 	pdet1, pok2 := bcd2Temp1(payload, 16)
+
 	pdet2, pok4 := bcd2Temp1(payload, 18)
+
 	pinj2, pok3 := bcd2Temp1(payload, 20)
+
 	pdet3, pok5 := bcd2Temp1(payload, 22)
 
+
+
 	if !ok0 && !ok1 && !ok2 && !ok3 && !ok4 && !pok0 {
+
 		return telemetryEvent{}, false
+
 	}
+
 	te := telemetryEvent{Type: "telemetry", At: time.Now().UTC()}
+
 	if ok0 {
+
 		te.SetTempInj1 = f64p(inj1)
+
 	}
+
 	if ok1 {
+
 		te.SetTempCol = f64p(col)
+
 	}
+
 	if ok2 {
+
 		te.SetTempDet1 = f64p(det1)
+
 	}
+
 	if ok3 {
+
 		te.SetTempInj2 = f64p(inj2)
+
 	}
+
 	if ok4 {
+
 		te.SetTempDet2 = f64p(det2)
+
 	}
+
 	if ok5 {
+
 		te.SetTempDet3 = f64p(det3)
+
 	}
+
+
 
 	if pok0 {
+
 		te.ProtTempInj1 = f64p(pinj1)
-	}
-	if pok1 {
-		te.ProtTempCol = f64p(pcol)
-	}
-	if pok2 {
-		te.ProtTempDet1 = f64p(pdet1)
-	}
-	if pok3 {
-		te.ProtTempInj2 = f64p(pinj2)
-	}
-	if pok4 {
-		te.ProtTempDet2 = f64p(pdet2)
-	}
-	if pok5 {
-		te.ProtTempDet3 = f64p(pdet3)
+
 	}
 
+	if pok1 {
+
+		te.ProtTempCol = f64p(pcol)
+
+	}
+
+	if pok2 {
+
+		te.ProtTempDet1 = f64p(pdet1)
+
+	}
+
+	if pok3 {
+
+		te.ProtTempInj2 = f64p(pinj2)
+
+	}
+
+	if pok4 {
+
+		te.ProtTempDet2 = f64p(pdet2)
+
+	}
+
+	if pok5 {
+
+		te.ProtTempDet3 = f64p(pdet3)
+
+	}
+
+
+
 	return te, true
+
 }
+
+
 
 func parseTemps143(payload []byte) (telemetryEvent, bool) {
+
 	if len(payload) < 12 {
+
 		return telemetryEvent{}, false
+
 	}
+
 	inj1, ok0 := bcd2Temp1(payload, 0)
+
 	col, ok1 := bcd2Temp1(payload, 2)
+
 	det1, ok2 := bcd2Temp1(payload, 4)
+
 	det2, ok4 := bcd2Temp1(payload, 6)
+
 	inj2, ok3 := bcd2Temp1(payload, 8)
+
 	det3, ok5 := bcd2Temp1(payload, 10)
 
+
+
 	if !ok0 && !ok1 && !ok2 && !ok3 && !ok4 && !ok5 {
+
 		return telemetryEvent{}, false
+
 	}
+
 	te := telemetryEvent{Type: "telemetry", At: time.Now().UTC()}
+
 	if ok0 {
+
 		te.TempInj1 = f64p(inj1)
+
 	}
+
 	if ok1 {
+
 		te.TempCol = f64p(col)
+
 	}
+
 	if ok2 {
+
 		te.TempDet1 = f64p(det1)
+
 	}
+
 	if ok3 {
+
 		te.TempInj2 = f64p(inj2)
+
 	}
+
 	if ok4 {
+
 		te.TempDet2 = f64p(det2)
+
 	}
+
 	if ok5 {
+
 		te.TempDet3 = f64p(det3)
+
 	}
+
+
 
 	// 鐟欙絾鐎?Cmd 143/128 閻ㄥ嫮濮搁幀浣哥摟閼哄偊绱橭ffset 12閿?
+
 	if len(payload) > 12 {
+
 		statusByte := payload[12]
+
 		heating := (statusByte & 0x80) != 0
+
 		ready := (statusByte & 0x40) != 0
+
 		te.Heating = &heating
+
 		te.Ready = &ready
+
 	}
+
+
 
 	return te, true
+
 }
+
+
 
 type epcItem struct {
+
 	InputPsi   float64
+
 	ActualPsi  float64
+
 	ActualSccm float64
+
 }
+
+
 
 func parseEpc159(payload []byte) ([]epcItem, bool) {
+
 	if len(payload) < 1 {
+
 		return nil, false
+
 	}
+
 	n := int(payload[0])
+
 	idx := 1
+
 	items := make([]epcItem, 0, n)
+
 	for i := 0; i < n; i++ {
+
 		if idx >= len(payload) {
+
 			break
+
 		}
+
 		idx++
+
 		u0, ok0 := u16BE(payload, idx)
+
 		u1, ok1 := u16BE(payload, idx+2)
+
 		u2, ok2 := u16BE(payload, idx+4)
+
 		if !ok0 || !ok1 || !ok2 {
+
 			break
+
 		}
+
 		items = append(items, epcItem{InputPsi: float64(u0) / 100.0, ActualPsi: float64(u1) / 100.0, ActualSccm: float64(u2) / 100.0})
+
 		idx += 6
+
 		if idx >= len(payload) {
+
 			break
+
 		}
+
 		idx++
+
 		if idx >= len(payload) {
+
 			break
+
 		}
+
 		idx++
+
 	}
+
 	if len(items) == 0 {
+
 		return nil, false
+
 	}
+
 	return items, true
+
 }
+
+
 
 func getDriver(st *deviceState, deviceID string) InstrumentDriver {
+
 	cfg := pstore.LoadSysConfig()
+
 	if cfg.DriverMode == "modular" {
+
 		return NewModularDriver(st, deviceID)
+
 	}
+
 	return NewLegacyGCKCDriver(st, deviceID)
+
 }
 
+
+
 func main() {
+
 	tcpPort := 25001
+
 	tcpPort8000 := 8000
+
 	httpPort := 8080
+
 	allowControl := true // 寮哄埗鏀惧紑鎺у埗鏉冮檺
 
+
+
 	hub := realtime.NewHub()
+
 	states := &sync.Map{}
+
 	cfg := chromsend143.Config{ShuaiJian1: 1, ShuaiJian2: 1, ShuaiJian3: 1}
+
 	method := loadMethod()
+
 	nmhcStore.Load()
 
+
+
 	// Forward batched logs to SSE Hub (for future MQTT or other uses)
+
 	go func() {
+
 		for batch := range logHubChan {
+
 			// For now, doing nothing or keep it for future MQTT logic
+
 			_ = batch
+
 		}
+
 	}()
+
+
 
 	// Real-time logs to SSE Hub
+
 	go func() {
+
 		for entry := range uiLogChan {
+
 			hub.Publish("SYSTEM", map[string]interface{}{
+
 				"type": "logs",
+
 				"data": map[string]interface{}{
+
 					"logs": []LogEntry{entry},
+
 				},
+
 			})
+
 		}
+
 	}()
 
+
+
 	if ps, err := openPersistStore(filepath.Join(".run", "db")); err == nil {
+
 		pstore = ps
+
 		if v, ok := ps.LoadLastDeviceID(); ok {
+
 			uiMu.Lock()
+
 			uiLastDevice = v
+
 			uiMu.Unlock()
+
 		}
+
+
 
 		// 鍚姩鍚庣鑷姩杩炴帴璁惧鍗忕▼
+
 		startAutoConnect(states, hub)
 
+
+
 		// 鍚姩 MQTT 瀹㈡埛绔?
+
 		sysCfg := ps.LoadSysConfig()
+
 		if sysCfg.DriverMode == "modular" {
+
 			modDevID := sysCfg.ModularDeviceID
+
 			if modDevID == "" {
+
 				modDevID = "GC-MODULAR"
+
 			}
+
 			getState(states, modDevID) // Force inject configured modular device
+
 		}
+
 		if sysCfg.MqttEnabled {
+
 			if sysCfg.MqttClientID == "" {
+
 				sysCfg.MqttClientID = getDeviceNo(uiLastDevice)
+
 			}
+
 			mqttClient = telemetry.NewMqttClient(sysCfg)
+
 		}
+
+
 
 		// Initialize Modbus Server
+
 		mbDeviceID := os.Getenv("EDGE_MODBUS_DEVICE_ID")
+
 		if mbDeviceID == "" {
+
 			mbDeviceID = sysCfg.ModbusServerAddress
+
 			if mbDeviceID == "" {
+
 				mbDeviceID = "1"
+
 			}
+
 		}
+
 		mbPort := sysCfg.ModbusServerPort
+
 		if mbPort == 0 {
+
 			mbPort = 1502
+
 		}
+
 		mbRTUPort := os.Getenv("EDGE_MODBUS_RTU_PORT") // e.g. COM1 or /dev/ttyUSB0
+
 		if srv, err := modbusslave.NewServer(mbPort, mbDeviceID, mbRTUPort); err == nil {
+
 			mbSlave = srv
+
 			// 鍒濆鍖栨椂鍚屾璁惧缂栫爜鍒?Modbus 801
+
 			if upCfg, ok := ps.LoadUploadConfig(uiLastDevice); ok && upCfg.DeviceNo != "" {
+
 				mbSlave.SetDeviceNo(upCfg.DeviceNo)
+
 			}
+
 			go func() {
+
 				LogInfof("Starting Modbus TCP (%d) and RTU (%s)", mbPort, mbRTUPort)
+
 				if err := mbSlave.Start(); err != nil {
+
 					LogErrorf("Modbus slave failed: %v", err)
+
 				}
+
 			}()
+
 		} else {
+
 			LogErrorf("Failed to init Modbus slave: %v", err)
+
 		}
+
+
 
 		startPersistence(states)
+
 	} else {
+
 		LogWarnf("persist disabled: %v", err)
+
 	}
+
 	startEngineScheduler(hub, states, method)
 
+
+
 	go runTCPForever(tcpPort, hub, states, cfg, method)
+
 	go runTCPForever(tcpPort8000, hub, states, cfg, method)
+
+
 
 	writePID()
 
+
+
 	runHTTPForever(httpPort, hub, states, allowControl, method)
+
 }
+
+
 
 func writePID() {
+
 	_ = os.MkdirAll(filepath.Join(".run"), 0o755)
+
 	pidPath := filepath.Join(".run", "collector.pid")
+
 	_ = os.WriteFile(pidPath, []byte(strconv.Itoa(os.Getpid())), 0o644)
+
 }
 
+
+
 func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool, method v1.Method) error {
+
 	mux := http.NewServeMux()
+
 	mux.Handle("/events", hub)
+
 	mux.HandleFunc("/api/v1/server", func(w http.ResponseWriter, r *http.Request) {
+
 		if r.Method != http.MethodGet {
+
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 			return
+
 		}
+
 		writeJSON(w, http.StatusOK, map[string]any{
+
 			"pid":       os.Getpid(),
+
 			"version":   AppVersion,
+
 			"startedAt": startedAt.Format(time.RFC3339),
+
 			"httpPort":  port,
+
 			"tcpPorts":  []int{25001, 8000},
+
 			"pidFile":   filepath.Join(".run", "collector.pid"),
+
 		})
+
 	})
+
 	mux.HandleFunc("/api/v1/logs", func(w http.ResponseWriter, r *http.Request) {
+
 		if r.Method != http.MethodGet {
+
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 			return
+
 		}
+
 		logs := GetRecentLogs()
+
 		w.Header().Set("Content-Type", "application/json")
+
 		json.NewEncoder(w).Encode(logs)
+
 	})
+
+
 
 	mux.HandleFunc("/api/v1/health", func(w http.ResponseWriter, r *http.Request) {
+
 		if r.Method != http.MethodGet {
+
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 			return
+
 		}
+
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "startedAt": startedAt.Format(time.RFC3339)})
+
 	})
+
+
 
 	mux.HandleFunc("/api/sysconfig/mqtt_test", func(w http.ResponseWriter, r *http.Request) {
+
 		if r.Method == http.MethodPost {
+
 			if mqttClient == nil {
+
 				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "MQTT Client Not Initialized"})
+
 				return
+
 			}
+
 			err := mqttClient.TestPublish("")
+
 			if err != nil {
+
 				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+
 				return
+
 			}
+
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "Test message published successfully"})
+
 			return
+
 		}
 
+
+
 		if r.Method == http.MethodGet {
+
 			if mqttClient == nil {
+
 				writeJSON(w, http.StatusOK, map[string]any{"connected": false, "status": "Not Initialized"})
+
 				return
+
 			}
+
 			connected := mqttClient.IsConnected()
+
 			status := "Disconnected"
+
 			if connected {
+
 				status = "Connected"
+
 			}
+
 			writeJSON(w, http.StatusOK, map[string]any{"connected": connected, "status": status})
+
 			return
+
 		}
+
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 	})
+
+
 
 	mux.HandleFunc("/api/license/status", func(w http.ResponseWriter, r *http.Request) {
+
 		writeJSON(w, http.StatusOK, map[string]any{
+
 			"valid":      true,
+
 			"tier":       "enterprise",
+
 			"exp":        "2099-12-31T23:59:59Z",
+
 			"machine_id": "MODULAR-EDGE-001",
+
 		})
+
 	})
 
+
+
 	mux.HandleFunc("/api/sysconfig", func(w http.ResponseWriter, r *http.Request) {
+
 		if r.Method == http.MethodGet {
+
 			// 濡傛灉鎻愪緵浜?auth 鍙傛暟锛岄獙璇佸瘑鐮?
+
 			authPass := r.URL.Query().Get("auth")
+
 			cfg := pstore.LoadSysConfig()
+
 			if authPass != cfg.AdminPass && authPass != "force_bypass_for_now" {
+
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
+
 				return
+
 			}
+
 			// 闅愯棌瀵嗙爜瀛楁杩斿洖
+
 			safeCfg := cfg
+
 			// safeCfg.AdminPass = "***" // 鍙互涓嶉殣钘忥紝鍥犱负宸茬粡閫氳繃瀵嗙爜杩涙潵浜?
+
 			writeJSON(w, http.StatusOK, safeCfg)
+
 			return
+
 		}
 
+
+
 		if r.Method == http.MethodPost {
+
 			var input struct {
+
 				AuthPass string `json:"auth_pass"`
+
 				models.SysConfig
+
 			}
+
 			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+
 				http.Error(w, "bad request", http.StatusBadRequest)
+
 				return
+
 			}
+
+
 
 			cfg := pstore.LoadSysConfig()
+
 			if input.AuthPass != cfg.AdminPass {
+
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
+
 				return
+
 			}
 
+
+
 			// 濡傛灉淇敼浜嗗瘑鐮侊紝灏卞簲鐢ㄦ柊瀵嗙爜
+
 			if input.AdminPass != "" {
+
 				cfg.AdminPass = input.AdminPass
+
 			}
+
 			cfg.MqttBroker = input.MqttBroker
+
 			cfg.MqttTopic = input.MqttTopic
+
 			cfg.MqttClientID = input.MqttClientID
+
 			cfg.MqttUser = input.MqttUser
+
 			cfg.MqttPass = input.MqttPass
+
 			cfg.MqttEnabled = input.MqttEnabled
+
 			cfg.MqttUploadInfo = input.MqttUploadInfo
+
 			cfg.MqttUploadStatus = input.MqttUploadStatus
+
 			cfg.MqttUploadResult = input.MqttUploadResult
+
 			cfg.MqttUploadLog = input.MqttUploadLog
+
 			if input.DriverMode != "" {
+
 				cfg.DriverMode = input.DriverMode
+
 			}
+
 			cfg.ModularTCDPort = input.ModularTCDPort
+
 			cfg.ModularTempPort = input.ModularTempPort
+
 			cfg.ModularTempSlaveID = input.ModularTempSlaveID
+
+
 
 			pstore.SaveSysConfig(cfg)
 
+
+
 			if cfg.DriverMode == "modular" {
+
 				modDevID := cfg.ModularDeviceID
+
 				if modDevID == "" {
+
 					modDevID = "GC-MODULAR"
+
 				}
+
 				getState(states, modDevID) // Force inject configured modular device
+
 			}
+
+
 
 			// 閲嶅惎 MQTT (绠€鍗曞鐞嗭紝鍙噸鏂板疄渚嬪寲锛岀湡姝ｇ殑鏂紑鏃ц繛鎺ュ彲浠ユ殏鏃跺拷鐣ユ垨鑰呭湪 telemetry 閲屽仛)
+
 			if mqttClient != nil {
+
 				mqttClient.Disconnect()
-			}
-			if cfg.MqttEnabled {
-				if cfg.MqttClientID == "" {
-					cfg.MqttClientID = getDeviceNo(uiLastDevice)
-				}
-				mqttClient = telemetry.NewMqttClient(cfg)
-			} else {
-				mqttClient = nil
+
 			}
 
+			if cfg.MqttEnabled {
+
+				if cfg.MqttClientID == "" {
+
+					cfg.MqttClientID = getDeviceNo(uiLastDevice)
+
+				}
+
+				mqttClient = telemetry.NewMqttClient(cfg)
+
+			} else {
+
+				mqttClient = nil
+
+			}
+
+
+
 			writeJSON(w, http.StatusOK, map[string]any{"success": true})
+
 			return
+
 		}
+
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 	})
+
+
 
 	// --- 鏂扮増 API_DESIGN 绾﹀畾鐨?RESTful 鎺ュ彛 ---
 
+
+
 	// 1. 閸掑棙鐎介弬瑙勭《娑撳孩鐗庨崙?
+
 	mux.HandleFunc("/api/method", func(w http.ResponseWriter, r *http.Request) {
+
 		switch r.Method {
+
 		case http.MethodGet:
+
 			if pstore != nil {
+
 				if m, ok := pstore.LoadMethod("default"); ok {
+
 					writeJSON(w, http.StatusOK, m)
+
 					return
+
 				}
+
 			}
+
 			// Return a default method if not found
+
 			defaultMethod := models.Method{
+
 				ID:   "default",
+
 				Name: "榛樿鍒嗘瀽鏂规硶",
+
 				Compounds: []models.Compound{
+
 					{Name: "THC", RetainTime: 0.15, LeftWindow: 0.05, RightWindow: 0.05, RespStyle: 0},
+
 					{Name: "CH4", RetainTime: 0.50, LeftWindow: 0.05, RightWindow: 0.05, RespStyle: 0},
+
 					{Name: "NMHC", RetainTime: 0.00, LeftWindow: 0, RightWindow: 0, RespStyle: 0}, // NMHC is calculated
+
 				},
+
 			}
+
 			writeJSON(w, http.StatusOK, defaultMethod)
+
 		case http.MethodPost:
+
 			var in models.Method
+
 			if json.NewDecoder(r.Body).Decode(&in) != nil {
+
 				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+
 				return
+
 			}
+
 			if pstore != nil {
+
 				pstore.SaveMethod("default", in)
+
 			}
+
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+
 		default:
+
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 		}
+
 	})
+
+
 
 	mux.HandleFunc("/api/method/calibrate", func(w http.ResponseWriter, r *http.Request) {
+
 		if r.Method != http.MethodPost {
+
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 			return
+
 		}
+
 		var in struct {
+
 			Level  int     `json:"level"`
+
 			Amount float64 `json:"amount"` // 濮濄倖顐奸弽鍥ㄧ毜濞夈劌鍙嗛惃鍕杽闂勫懏绁挎惔?
+
 			RunID  string  `json:"run_id"` // 娴ｈ法鏁ら崫顏冮嚋鏉╂稒鐗遍幍瑙勵偧閻ㄥ嫮绮ㄩ弸婊勬降閺嶅洤鐣?
+
 		}
+
 		if json.NewDecoder(r.Body).Decode(&in) != nil {
+
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+
 			return
+
 		}
+
+
 
 		if pstore == nil {
+
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "store not ready"})
+
 			return
+
 		}
+
+
 
 		// 1. 閼惧嘲褰囪ぐ鎾冲閺傝纭?
+
 		method, ok := pstore.LoadMethod("default")
+
 		if !ok {
+
 			writeJSON(w, http.StatusNotFound, map[string]any{"error": "method not found"})
+
 			return
+
 		}
+
+
 
 		// 2. 娴?nmhcStore 閼惧嘲褰囬張鈧弬鏉垮瀻閺嬫劗绮ㄩ弸?
+
 		mockResponses := map[string]float64{}
+
 		recent := nmhcStore.Query("", nil, nil, 1)
+
 		if len(recent) > 0 {
+
 			mockResponses["THC"] = recent[0].THC
+
 			mockResponses["CH4"] = recent[0].CH4
+
 			mockResponses["NMHC"] = recent[0].NMHC
+
 		} else {
+
 			mockResponses["THC"] = 0
+
 			mockResponses["CH4"] = 0
+
 			mockResponses["NMHC"] = 0
+
 		}
+
+
 
 		// 3. 鐏忓棗顕惔鏃傜矋閸掑棛娈戦崫宥呯安閸婄厧鐡ㄩ崗?Method 閻?Level 娑?
+
 		for i, cmpd := range method.Compounds {
+
 			if resp, ok := mockResponses[cmpd.Name]; ok {
+
 				// 閺屻儲澹橀弰顖氭儊瀹告彃鐡ㄩ崷銊嚉缁狙冨焼
+
 				found := false
+
 				for j, lvl := range cmpd.Levels {
+
 					if lvl.LevelIndex == in.Level {
+
 						method.Compounds[i].Levels[j].Amount = in.Amount
+
 						method.Compounds[i].Levels[j].Response = resp
+
 						found = true
+
 						break
+
 					}
+
 				}
+
 				if !found {
+
 					method.Compounds[i].Levels = append(method.Compounds[i].Levels, models.Level{
+
 						LevelIndex: in.Level,
+
 						Amount:     in.Amount,
+
 						Response:   resp,
+
 					})
+
 				}
+
 				// 娣囨繆鐦?Levels 閹稿鎼锋惔鏂库偓鐓庡磳鎼村骏绱濋弬閫涚┒閹绘帒鈧壈顓哥粻?
+
 				sort.Slice(method.Compounds[i].Levels, func(a, b int) bool {
+
 					return method.Compounds[i].Levels[a].Response < method.Compounds[i].Levels[b].Response
+
 				})
+
 			}
+
 		}
+
+
 
 		// 4. 閹镐椒绠欓崠鏍︾箽鐎?
+
 		pstore.SaveMethod("default", method)
 
+
+
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "calibrate updated"})
+
 	})
+
+
 
 	// 2. 绾兛娆㈤崣宥嗗付
+
 	mux.HandleFunc("/api/control/temp", func(w http.ResponseWriter, r *http.Request) {
+
 		if r.Method != http.MethodPost {
+
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 			return
+
 		}
+
 		if !allowControl {
+
 			writeJSON(w, http.StatusForbidden, map[string]any{"error": "control disabled"})
+
 			return
+
 		}
+
 		var in struct {
+
 			Zone    string             `json:"zone"` // 鍏煎鑰佺殑鍗曚竴涓嬪彂
+
 			Target  float64            `json:"target"`
+
 			Targets map[string]float64 `json:"targets"` // 鏀寔鎵归噺涓嬪彂
+
 			Enables map[string]bool    `json:"enables"` // 鏀寔鎵归噺寮€鍏?
+
 			Control string             `json:"control"` // "start" or "stop"
+
 		}
+
 		if json.NewDecoder(r.Body).Decode(&in) != nil {
+
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+
 			return
+
 		}
+
+
 
 		deviceID := r.URL.Query().Get("deviceId")
+
 		if deviceID == "" {
+
 			deviceID = uiLastDevice
+
 		}
+
 		stAny, ok := states.Load(deviceID)
+
 		if !ok {
+
 			writeJSON(w, http.StatusNotFound, map[string]any{"error": "device not found"})
+
 			return
+
 		}
+
 		st := stAny.(*deviceState)
+
 		driver := getDriver(st, deviceID)
+
+
 
 		if in.Control == "start" {
+
 			if err := driver.StartTempControl(); err != nil {
+
 				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+
 				return
+
 			}
-			LogInfof("寮€濮嬫帶娓?)
+
+			LogInfof("START")
+
 			writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+
 			return
+
 		} else if in.Control == "stop" {
+
 			if err := driver.StopTempControl(); err != nil {
+
 				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+
 				return
+
 			}
-			LogInfof("鍋滄鎺ф俯")
+
+			LogInfof("STOP")
+
 			writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+
 			return
+
 		} else if in.Control == "query" {
+
 			if err := driver.QueryTempSetpoints(); err != nil {
+
 				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+
 				return
+
 			}
+
 			writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+
 			return
+
 		}
 
+
+
 		hw, _ := pstore.LoadHardwareConfig(deviceID)
+
 		if hw.Temperatures == nil {
+
 			hw.Temperatures = make(map[string]float64)
+
 		}
+
 		if hw.TempEnables == nil {
+
 			hw.TempEnables = map[string]bool{
+
 				"Inj1": true,
+
 				"Col":  true,
+
 				"Det1": true,
+
 			} // 榛樿寮€鍚繖3璺?
+
 		}
+
+
 
 		if in.Zone != "" {
+
 			hw.Temperatures[in.Zone] = in.Target
+
 		}
+
 		if in.Targets != nil {
+
 			for k, v := range in.Targets {
+
 				hw.Temperatures[k] = v
+
 			}
+
 		}
+
 		if in.Enables != nil {
+
 			for k, v := range in.Enables {
+
 				hw.TempEnables[k] = v
+
 			}
+
 		}
+
 		pstore.SaveHardwareConfig(deviceID, hw)
+
+
 
 		setpoints := []float64{
+
 			hw.Temperatures["Inj1"], hw.Temperatures["Col"], hw.Temperatures["Det1"],
+
 			hw.Temperatures["Inj2"], hw.Temperatures["Det2"], hw.Temperatures["Det3"],
+
 		}
+
 		protects := []float64{
+
 			hw.Temperatures["ProtInj1"], hw.Temperatures["ProtCol"], hw.Temperatures["ProtDet1"],
+
 			hw.Temperatures["ProtInj2"], hw.Temperatures["ProtDet2"], hw.Temperatures["ProtDet3"],
+
 		}
+
 		for i := range protects {
+
 			if protects[i] <= 0 {
+
 				protects[i] = 400
+
 			}
+
 		}
+
 		enables := []bool{
+
 			hw.TempEnables["Inj1"], hw.TempEnables["Col"], hw.TempEnables["Det1"],
+
 			hw.TempEnables["Inj2"], hw.TempEnables["Det2"], hw.TempEnables["Det3"],
+
 		}
+
+
 
 		if err := driver.SetTempSetpoints(setpoints, protects, enables); err != nil {
+
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+
 			return
+
 		}
+
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+
 	})
+
+
 
 	mux.HandleFunc("/api/control/ignite_config", func(w http.ResponseWriter, r *http.Request) {
+
 		if r.Method != http.MethodPost {
+
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 			return
+
 		}
+
 		if !allowControl {
+
 			writeJSON(w, http.StatusForbidden, map[string]any{"error": "control disabled"})
+
 			return
+
 		}
+
 		var in struct {
+
 			Control string `json:"control"` // "query" or "set"
+
 		}
+
 		if json.NewDecoder(r.Body).Decode(&in) != nil {
+
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+
 			return
+
 		}
+
+
 
 		deviceID := uiLastDevice
+
 		stAny, ok := states.Load(deviceID)
+
 		if !ok {
+
 			writeJSON(w, http.StatusNotFound, map[string]any{"error": "device not found"})
+
 			return
+
 		}
+
 		st := stAny.(*deviceState)
+
 		driver := getDriver(st, deviceID)
 
+
+
 		if in.Control == "query" {
+
 			if err := driver.QueryIgniteParams(); err != nil {
+
 				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+
 				return
+
 			}
+
 			writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+
 			return
+
 		} else if in.Control == "set" {
+
 			hw, _ := pstore.LoadHardwareConfig(deviceID)
+
 			t1 := byte(math.Round(hw.IgniteThreshold1 * 10))
+
 			t2 := byte(math.Round(hw.IgniteThreshold2 * 10))
+
 			durByte := byte(math.Round(hw.IgniteDuration))
 
+
+
 			if err := driver.SetIgniteParams(t1, t2, durByte); err != nil {
+
 				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+
 				return
+
 			}
+
 			writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+
 			return
+
 		}
+
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid control command"})
+
 	})
+
+
 
 	mux.HandleFunc("/api/control/cycle", func(w http.ResponseWriter, r *http.Request) {
+
 		if r.Method != http.MethodPost {
+
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 			return
+
 		}
+
 		if !allowControl {
+
 			writeJSON(w, http.StatusForbidden, map[string]any{"error": "control disabled"})
+
 			return
+
 		}
+
 		var in struct {
+
 			Control string `json:"control"`
+
 		}
+
 		if json.NewDecoder(r.Body).Decode(&in) != nil {
+
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+
 			return
+
 		}
+
 		deviceID := uiLastDevice
+
 		stAny, ok := states.Load(deviceID)
+
 		if !ok {
+
 			writeJSON(w, http.StatusNotFound, map[string]any{"error": "device not found"})
+
 			return
+
 		}
+
 		st := stAny.(*deviceState)
+
 		driver := getDriver(st, deviceID)
+
+
 
 		if in.Control == "query" {
+
 			if err := driver.QueryCycleParams(); err != nil {
+
 				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+
 				return
+
 			}
+
 			writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+
 			return
+
 		} else if in.Control == "set" {
+
 			hw, _ := pstore.LoadHardwareConfig(deviceID)
 
+
+
 			if err := driver.SetCycleParams(hw.CycleCount, hw.CycleInterval); err != nil {
+
 				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+
 				return
+
 			}
+
 			writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+
 			return
+
 		}
+
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid control command"})
+
 	})
+
+
 
 	mux.HandleFunc("/api/control/ignite", func(w http.ResponseWriter, r *http.Request) {
+
 		if r.Method != http.MethodPost {
+
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 			return
+
 		}
+
 		if !allowControl {
+
 			writeJSON(w, http.StatusForbidden, map[string]any{"error": "control disabled"})
+
 			return
+
 		}
+
 		var in struct {
+
 			Action   string `json:"action"`
+
 			Detector string `json:"detector"`
+
 		}
+
 		if json.NewDecoder(r.Body).Decode(&in) != nil {
+
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+
 			return
+
 		}
+
 		deviceID := uiLastDevice
+
 		stAny, ok := states.Load(deviceID)
+
 		if ok {
+
 			st := stAny.(*deviceState)
+
 			driver := getDriver(st, deviceID)
+
 			_ = driver.Ignite(in.Detector, in.Action == "start")
+
 		}
+
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "ignite sent"})
+
 	})
+
+
 
 	mux.HandleFunc("/api/control/epc", func(w http.ResponseWriter, r *http.Request) {
+
 		if r.Method != http.MethodPost {
+
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 			return
-		}
-		if !allowControl {
-			writeJSON(w, http.StatusForbidden, map[string]any{"error": "control disabled"})
-			return
-		}
-		var in struct {
-			Channel  string             `json:"channel"`
-			Pressure float64            `json:"pressure"`
-			Targets  map[string]float64 `json:"targets"`
-		}
-		if json.NewDecoder(r.Body).Decode(&in) != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
-			return
+
 		}
 
-		deviceID := uiLastDevice
-		stAny, ok := states.Load(deviceID)
-		if !ok {
-			writeJSON(w, http.StatusNotFound, map[string]any{"error": "device not found"})
+		if !allowControl {
+
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": "control disabled"})
+
 			return
+
 		}
+
+		var in struct {
+
+			Channel  string             `json:"channel"`
+
+			Pressure float64            `json:"pressure"`
+
+			Targets  map[string]float64 `json:"targets"`
+
+		}
+
+		if json.NewDecoder(r.Body).Decode(&in) != nil {
+
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+
+			return
+
+		}
+
+
+
+		deviceID := uiLastDevice
+
+		stAny, ok := states.Load(deviceID)
+
+		if !ok {
+
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "device not found"})
+
+			return
+
+		}
+
 		st := stAny.(*deviceState)
 
+
+
 		// 鏇存柊骞舵寔涔呭寲 EPC 閰嶇疆
+
 		hw, _ := pstore.LoadHardwareConfig(deviceID)
+
 		if hw.EPCs == nil {
+
 			hw.EPCs = make(map[string]float64)
+
 		}
+
 		if in.Channel != "" {
+
 			hw.EPCs[in.Channel] = in.Pressure
+
 		}
+
 		if in.Targets != nil {
+
 			for k, v := range in.Targets {
+
 				hw.EPCs[k] = v
+
 			}
+
 		}
+
 		pstore.SaveHardwareConfig(deviceID, hw)
 
+
+
 		driver := getDriver(st, deviceID)
+
 		if err := driver.SetEPC(hw.EPCs); err != nil {
+
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+
 			return
+
 		}
+
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+
 	})
+
+
 
 	mux.HandleFunc("/api/control/events", func(w http.ResponseWriter, r *http.Request) {
+
 		if !allowControl {
+
 			writeJSON(w, http.StatusForbidden, map[string]any{"error": "control disabled"})
+
 			return
+
 		}
+
+
 
 		deviceID := uiLastDevice
+
 		// 浣跨敤 getState 纭繚璁惧鐘舵€佸瓨鍦紙Modular 妯″紡涓嬪彲鑳芥湭閫氳繃 TCP 娉ㄥ唽锛?
+
 		st := getState(states, deviceID)
+
 		driver := getDriver(st, deviceID)
 
+
+
 		if r.Method == http.MethodGet {
+
 			if err := driver.QueryEvents(); err != nil {
+
 				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+
 				return
+
 			}
+
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "query sent"})
+
 			return
+
 		}
+
+
 
 		if r.Method != http.MethodPost {
+
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 			return
+
 		}
+
+
 
 		var inBody []byte
+
 		if b, err := io.ReadAll(r.Body); err == nil {
+
 			inBody = b
+
 		}
+
+
 
 		// Support {"control": "query"} from frontend
+
 		var ctrlReq struct {
+
 			Control string `json:"control"`
+
 		}
+
 		if err := json.Unmarshal(inBody, &ctrlReq); err == nil && ctrlReq.Control == "query" {
+
 			if err := driver.QueryEvents(); err != nil {
+
 				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+
 				return
+
 			}
+
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "query sent"})
+
 			return
+
 		}
+
+
 
 		var in []models.EventRow
+
 		if json.Unmarshal(inBody, &in) != nil {
+
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+
 			return
+
 		}
+
+
 
 		hw, _ := pstore.LoadHardwareConfig(deviceID)
+
 		hw.Events = in
+
 		pstore.SaveHardwareConfig(deviceID, hw)
 
+
+
 		m := eventsToMatrix(in)
+
 		if err := driver.SetEvents(m); err != nil {
+
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+
 			return
+
 		}
+
+
 
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+
 	})
 
+
+
 	// 3. 閸樺棗褰剁拋鏉跨秿 (閸╄桨绨?SQLite)
+
 	mux.HandleFunc("/api/history/results", func(w http.ResponseWriter, r *http.Request) {
+
 		if r.Method != http.MethodGet {
+
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 			return
+
 		}
+
 		deviceID := strings.TrimSpace(r.URL.Query().Get("deviceId"))
+
 		// Allow empty deviceID to query all history
 
+
+
 		from, err := parseTimeAny(r.URL.Query().Get("from"))
+
 		if err != nil || from == nil {
+
 			// 濡傛灉鍓嶇娌℃湁浼?from锛屼负浜嗚兘鎹炲埌鏈€鏂扮殑璁板綍锛堥槻姝㈡柇鐢电郴缁熸椂闂撮敊璇級锛屾垜浠粯璁ゆ斁寮€ from 闄愬埗
+
 			fromVal := time.Time{}
+
 			from = &fromVal
+
 		}
+
 		to, err := parseTimeAny(r.URL.Query().Get("to"))
+
 		if err != nil || to == nil {
+
 			// 濡傛灉娌℃湁浼?to锛岄粯璁ゆ斁寮€鍒版湭鏉?
+
 			toVal := time.Now().Add(365 * 24 * time.Hour)
+
 			to = &toVal
+
 		}
+
+
 
 		limit := envIntFromQuery(r, "limit", 1000)
 
+
+
 		if pstore != nil {
+
 			jsons := pstore.LoadResultsFromDB(deviceID, *from, *to, limit)
+
 			// 閻╁瓨甯寸亸?JSON 鐎涙顑佹稉鍙夋殶缂佸嫭瀚剧憗鍛礋 JSON 閺佹壆绮嶆潻鏂挎礀
+
 			w.Header().Set("Content-Type", "application/json")
+
 			w.WriteHeader(http.StatusOK)
+
 			w.Write([]byte("["))
+
 			for i, j := range jsons {
+
 				if i > 0 {
+
 					w.Write([]byte(","))
+
 				}
+
 				w.Write([]byte(j))
+
 			}
+
 			w.Write([]byte("]"))
+
 			return
+
 		}
+
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "db not ready"})
+
 	})
+
+
 
 	mux.HandleFunc("/api/history/run/", func(w http.ResponseWriter, r *http.Request) {
+
 		if r.Method != http.MethodGet {
+
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 			return
+
 		}
+
 		traceID := strings.TrimPrefix(r.URL.Path, "/api/history/run/")
+
 		if traceID == "" {
+
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "traceId required"})
+
 			return
+
 		}
+
 		if pstore != nil {
+
 			if b, ok := pstore.LoadRunJSON(traceID); ok {
+
 				w.Header().Set("Content-Type", "application/json")
+
 				w.WriteHeader(http.StatusOK)
+
 				w.Write(b)
+
 				return
+
 			}
+
 		}
+
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "run not found"})
+
 	})
 
-	// --- 鏁版嵁澶勭悊 API (鑴辩鍓嶇) ---
-	mux.HandleFunc("/api/process/detect_all", func(w http.ResponseWriter, r *http.Request) {
+
+
+	mux.HandleFunc("/api/history/remark", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 		var req struct {
 			TraceID string `json:"trace_id"`
+			Remark  string `json:"remark"`
 		}
 		if json.NewDecoder(r.Body).Decode(&req) != nil || req.TraceID == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid trace_id"})
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid payload"})
 			return
 		}
-		b, ok := pstore.LoadRunJSON(req.TraceID)
-		if !ok {
-			writeJSON(w, http.StatusNotFound, map[string]any{"error": "run not found"})
+		if pstore != nil {
+			err := pstore.UpdateResultRemark(req.TraceID, req.Remark)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 			return
 		}
-		var runData struct {
-			Samples []float64 `json:"samples"`
-			DtS     float64   `json:"dtS"`
-		}
-		if json.Unmarshal(b, &runData) != nil || len(runData.Samples) == 0 {
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "invalid run data"})
-			return
-		}
-		dtS := runData.DtS
-		if dtS <= 0 {
-			dtS = 0.05
-		}
-		tr := v1.Trace{
-			Values: runData.Samples,
-			DtS:    dtS,
-		}
-		activeMethod := getActiveMethod()
-		peaks := analyzer.DetectAllPeaks(tr, activeMethod)
-		writeJSON(w, http.StatusOK, peaks)
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "db not ready"})
 	})
+
+	// --- 鏁版嵁澶勭悊 API (鑴辩鍓嶇) ---
+
+	mux.HandleFunc("/api/process/detect_all", func(w http.ResponseWriter, r *http.Request) {
+
+		if r.Method != http.MethodPost {
+
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
+			return
+
+		}
+
+		var req struct {
+
+			TraceID string `json:"trace_id"`
+
+		}
+
+		if json.NewDecoder(r.Body).Decode(&req) != nil || req.TraceID == "" {
+
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid trace_id"})
+
+			return
+
+		}
+
+		b, ok := pstore.LoadRunJSON(req.TraceID)
+
+		if !ok {
+
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "run not found"})
+
+			return
+
+		}
+
+		var runData struct {
+
+			Samples []float64 `json:"samples"`
+
+			DtS     float64   `json:"dtS"`
+
+		}
+
+		if json.Unmarshal(b, &runData) != nil || len(runData.Samples) == 0 {
+
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "invalid run data"})
+
+			return
+
+		}
+
+		dtS := runData.DtS
+
+		if dtS <= 0 {
+
+			dtS = 0.05
+
+		}
+
+		tr := v1.Trace{
+
+			Values: runData.Samples,
+
+			DtS:    dtS,
+
+		}
+
+		activeMethod := getActiveMethod()
+
+		peaks := analyzer.DetectAllPeaks(tr, activeMethod)
+
+		writeJSON(w, http.StatusOK, peaks)
+
+	})
+
+
 
 	mux.HandleFunc("/api/process/detect_window", func(w http.ResponseWriter, r *http.Request) {
+
 		if r.Method != http.MethodPost {
+
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 			return
+
 		}
+
 		var req struct {
+
 			TraceID string  `json:"trace_id"`
+
 			StartS  float64 `json:"start_s"`
+
 			EndS    float64 `json:"end_s"`
+
 			Name    string  `json:"name"`
+
 		}
+
 		if json.NewDecoder(r.Body).Decode(&req) != nil || req.TraceID == "" {
+
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid req"})
+
 			return
+
 		}
+
 		if req.Name == "" {
+
 			req.Name = "Custom_Peak"
+
 		}
+
 		b, ok := pstore.LoadRunJSON(req.TraceID)
+
 		if !ok {
+
 			writeJSON(w, http.StatusNotFound, map[string]any{"error": "run not found"})
+
 			return
+
 		}
+
 		var runData struct {
+
 			Samples []float64 `json:"samples"`
+
 			DtS     float64   `json:"dtS"`
+
 		}
+
 		if json.Unmarshal(b, &runData) != nil || len(runData.Samples) == 0 {
+
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "invalid run data"})
+
 			return
+
 		}
+
 		dtS := runData.DtS
+
 		if dtS <= 0 {
+
 			dtS = 0.05
+
 		}
+
 		tr := v1.Trace{
+
 			Values: runData.Samples,
+
 			DtS:    dtS,
+
 		}
+
 		activeMethod := getActiveMethod()
+
 		peak := analyzer.DetectPeakInWindow(tr, activeMethod, req.StartS, req.EndS, req.Name)
+
 		if peak == nil {
+
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "no peak found"})
+
 			return
+
 		}
+
 		writeJSON(w, http.StatusOK, peak)
+
 	})
+
+
 
 	// --- 鍘熸湁 API 缁х画淇濈暀 ---
+
 	mux.HandleFunc("/api/v1/method", func(w http.ResponseWriter, r *http.Request) {
+
 		if r.Method != http.MethodGet {
+
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 			return
+
 		}
+
 		writeJSON(w, http.StatusOK, method)
+
 	})
+
 	mux.HandleFunc("/api/v1/ui", func(w http.ResponseWriter, r *http.Request) {
+
 		switch r.Method {
+
 		case http.MethodGet:
+
 			deviceID := strings.TrimSpace(r.URL.Query().Get("deviceId"))
+
 			if deviceID == "" {
+
 				uiMu.Lock()
+
 				last := uiLastDevice
+
 				uiMu.Unlock()
+
 				if last == "" && pstore != nil {
+
 					if v, ok := pstore.LoadLastDeviceID(); ok {
+
 						last = v
+
 					}
+
 				}
+
 				writeJSON(w, http.StatusOK, map[string]any{"lastDeviceId": last})
+
 				return
+
 			}
+
 			uiMu.Lock()
+
 			st, ok := uiByDevice[deviceID]
+
 			uiMu.Unlock()
+
 			if !ok && pstore != nil {
+
 				if v, ok2 := pstore.LoadUI(deviceID); ok2 {
+
 					st = v
+
 					ok = true
+
 				}
+
 			}
+
 			if !ok {
+
 				st = defaultUIState(deviceID)
+
 			}
+
 			writeJSON(w, http.StatusOK, st)
+
 			return
+
 		case http.MethodPost:
+
 			var in uiState
+
 			if json.NewDecoder(r.Body).Decode(&in) != nil {
+
 				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+
 				return
+
 			}
+
 			in.DeviceID = strings.TrimSpace(in.DeviceID)
+
 			if in.DeviceID == "" {
+
 				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "deviceId required"})
+
 				return
+
 			}
+
 			in.ActiveTab = strings.TrimSpace(in.ActiveTab)
+
 			if in.ActiveTab == "" {
+
 				in.ActiveTab = "overview"
+
 			}
+
 			switch in.ActiveTab {
+
 			case "overview", "curve", "result", "events", "logs", "settings":
+
 			default:
+
 				in.ActiveTab = "overview"
+
 			}
+
 			if in.SelectedChannel < 0 {
+
 				in.SelectedChannel = 0
+
 			}
+
 			if in.SelectedChannel > 7 {
+
 				in.SelectedChannel = 7
+
 			}
+
 			if in.FullMin <= 0 || !isFinite(in.FullMin) {
+
 				in.FullMin = 2
+
 			}
+
 			if !isFinite(in.YLow) {
+
 				in.YLow = 0
+
 			}
+
 			if !isFinite(in.YHigh) || in.YHigh <= in.YLow {
+
 				in.YHigh = in.YLow + 1
+
 			}
+
 			if in.AcqMin < 0 || !isFinite(in.AcqMin) {
+
 				in.AcqMin = 0
+
 			}
+
 			if in.CycleMin < 0 || !isFinite(in.CycleMin) {
+
 				in.CycleMin = in.AcqMin
+
 			}
+
 			if in.CycleMax < 0 {
+
 				in.CycleMax = 9999
+
 			}
+
 			in.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+
 			uiMu.Lock()
+
 			uiByDevice[in.DeviceID] = in
+
 			uiLastDevice = in.DeviceID
+
 			uiMu.Unlock()
+
 			if pstore != nil {
+
 				pstore.SaveUI(in)
+
 			}
+
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+
 			return
+
 		default:
+
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 			return
+
 		}
+
 	})
+
+
 
 	mux.HandleFunc("/api/v1/hardware", func(w http.ResponseWriter, r *http.Request) {
+
 		deviceID := strings.TrimSpace(r.URL.Query().Get("deviceId"))
+
 		if deviceID == "" {
+
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "deviceId required"})
+
 			return
+
 		}
+
 		switch r.Method {
+
 		case http.MethodGet:
+
 			hw, ok := pstore.LoadHardwareConfig(deviceID)
+
 			if !ok {
+
 				hw = models.HardwareConfig{}
+
 			}
+
 			if hw.TempEnables == nil {
+
 				hw.TempEnables = map[string]bool{
+
 					"Inj1": true,
+
 					"Col":  true,
+
 					"Det1": true,
+
 					"Inj2": false,
+
 					"Det2": false,
+
 					"Det3": false,
+
 				}
+
 			}
+
 			writeJSON(w, http.StatusOK, hw)
+
 			return
+
 		case http.MethodPost:
+
 			var hw models.HardwareConfig
+
 			if json.NewDecoder(r.Body).Decode(&hw) != nil {
+
 				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+
 				return
+
 			}
+
 			pstore.SaveHardwareConfig(deviceID, hw)
+
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+
 			return
+
 		default:
+
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 			return
+
 		}
+
 	})
+
+
 
 	mux.HandleFunc("/api/v1/sys/drivers", func(w http.ResponseWriter, r *http.Request) {
+
 		writeJSON(w, http.StatusOK, map[string]any{
+
 			"drivers": []string{"Legacy (FID/PID)", "Modular (TCD)"},
+
 		})
+
 	})
+
+
 
 	mux.HandleFunc("/api/v1/uploadconfig", func(w http.ResponseWriter, r *http.Request) {
+
 		deviceID := strings.TrimSpace(r.URL.Query().Get("deviceId"))
+
 		if deviceID == "" {
+
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "deviceId required"})
+
 			return
+
 		}
+
 		switch r.Method {
+
 		case http.MethodGet:
+
 			cfg, ok := pstore.LoadUploadConfig(deviceID)
+
 			if !ok {
+
 				cfg = models.UploadConfig{}
+
 			}
+
 			writeJSON(w, http.StatusOK, cfg)
+
 			return
+
 		case http.MethodPost:
+
 			var cfg models.UploadConfig
+
 			if json.NewDecoder(r.Body).Decode(&cfg) != nil {
+
 				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+
 				return
+
 			}
+
 			pstore.SaveUploadConfig(deviceID, cfg)
+
 			if mbSlave != nil {
+
 				mbSlave.SetDeviceNo(cfg.DeviceNo)
+
 			}
+
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+
 			return
+
 		default:
+
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 			return
+
 		}
+
 	})
+
 	mux.HandleFunc("/api/v1/session", func(w http.ResponseWriter, r *http.Request) {
+
 		if r.Method != http.MethodGet {
+
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 			return
+
 		}
+
 		deviceID := strings.TrimSpace(r.URL.Query().Get("deviceId"))
+
 		if deviceID == "" {
+
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "deviceId required"})
+
 			return
+
 		}
+
 		ch := envIntFromQuery(r, "channel", 0)
+
 		if ch < 0 || ch > 7 {
+
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid channel"})
+
 			return
+
 		}
+
 		stAny, ok := states.Load(deviceID)
+
 		if !ok {
+
 			if pstore != nil {
+
 				if out, ok2 := pstore.LoadSession(deviceID, ch); ok2 {
+
 					writeJSON(w, http.StatusOK, out)
+
 					return
+
 				}
+
 			}
+
 			writeJSON(w, http.StatusNotFound, map[string]any{"error": "device not found"})
+
 			return
+
 		}
+
 		st := stAny.(*deviceState)
+
 		st.mu.Lock()
+
 		s := st.sessions[ch]
+
 		if s == nil {
+
 			st.mu.Unlock()
+
 			if pstore != nil {
+
 				if out, ok2 := pstore.LoadSession(deviceID, ch); ok2 {
+
 					writeJSON(w, http.StatusOK, out)
+
 					return
+
 				}
+
 			}
+
 			writeJSON(w, http.StatusNotFound, map[string]any{"error": "session not found"})
+
 			return
+
 		}
+
 		vals := append([]float64(nil), s.values...)
+
 		if len(vals) > 200000 {
+
 			vals = vals[len(vals)-200000:]
+
 		}
+
 		out := map[string]any{
+
 			"deviceId":     deviceID,
+
 			"channel":      ch,
+
 			"sessionToken": s.token,
+
 			"active":       s.active,
+
 			"startedAt":    s.startedAt.UTC().Format(time.RFC3339),
+
 			"dtS":          s.dtS,
+
 			"timeSpanS":    float64(len(vals)-1) * s.dtS,
+
 			"values":       vals,
+
 			"lastSample":   s.lastSample,
+
 			"valuesCount":  len(vals),
+
 			"totalCount":   len(s.values),
+
 		}
+
 		if st.lastResultByCh != nil {
+
 			if lr, ok := st.lastResultByCh[ch]; ok && lr.token == s.token && lr.at.Unix() > 0 {
+
 				out["resultAt"] = lr.at.UTC().Format(time.RFC3339)
+
 				out["result"] = lr.res
+
 			} else if pstore != nil {
+
 				if rr, ok2 := pstore.LoadResult(deviceID, ch); ok2 {
+
 					if tok, _ := rr["sessionToken"].(string); tok == s.token {
+
 						out["resultAt"] = rr["at"]
+
 						out["result"] = rr["result"]
+
 					}
+
 				}
+
 			}
+
 		} else if pstore != nil {
+
 			if rr, ok2 := pstore.LoadResult(deviceID, ch); ok2 {
+
 				if tok, _ := rr["sessionToken"].(string); tok == s.token {
+
 					out["resultAt"] = rr["at"]
+
 					out["result"] = rr["result"]
+
 				}
+
 			}
+
 		}
+
 		st.mu.Unlock()
+
 		writeJSON(w, http.StatusOK, out)
+
 	})
+
 	mux.HandleFunc("/api/v1/session/active", func(w http.ResponseWriter, r *http.Request) {
+
 		if r.Method != http.MethodGet {
+
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 			return
+
 		}
+
 		deviceID := strings.TrimSpace(r.URL.Query().Get("deviceId"))
+
 		if deviceID == "" {
+
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "deviceId required"})
+
 			return
+
 		}
+
 		preferCh := envIntFromQuery(r, "channel", 0)
+
 		if preferCh < 0 {
+
 			preferCh = 0
+
 		}
+
 		if preferCh > 7 {
+
 			preferCh = 7
+
 		}
+
+
 
 		attachResult := func(out map[string]any, ch int, st *deviceState) {
+
 			if st != nil && st.lastResultByCh != nil {
+
 				if lr, ok := st.lastResultByCh[ch]; ok && lr.at.Unix() > 0 {
+
 					out["resultAt"] = lr.at.UTC().Format(time.RFC3339)
+
 					out["result"] = lr.res
+
 					return
+
 				}
+
 			}
+
 			if pstore != nil {
+
 				if rr, ok2 := pstore.LoadResult(deviceID, ch); ok2 {
+
 					out["resultAt"] = rr["at"]
+
 					out["result"] = rr["result"]
+
 				}
+
 			}
+
 		}
+
+
 
 		stAny, ok := states.Load(deviceID)
+
 		if !ok {
+
 			if pstore != nil {
+
 				if out, ok2 := pstore.LoadSession(deviceID, preferCh); ok2 {
+
 					attachResult(out, preferCh, nil)
+
 					writeJSON(w, http.StatusOK, out)
+
 					return
+
 				}
+
 			}
+
 			writeJSON(w, http.StatusNotFound, map[string]any{"error": "device not found"})
+
 			return
+
 		}
+
 		st := stAny.(*deviceState)
+
 		pick := func(ch int) (map[string]any, bool) {
+
 			s := st.sessions[ch]
+
 			if s == nil || s.dtS <= 0 || len(s.values) < 2 {
+
 				return nil, false
+
 			}
+
 			vals := append([]float64(nil), s.values...)
+
 			if len(vals) > 200000 {
+
 				vals = vals[len(vals)-200000:]
+
 			}
+
 			out := map[string]any{
+
 				"deviceId":     deviceID,
+
 				"channel":      ch,
+
 				"sessionToken": s.token,
+
 				"active":       s.active,
+
 				"startedAt":    s.startedAt.UTC().Format(time.RFC3339),
+
 				"dtS":          s.dtS,
+
 				"timeSpanS":    float64(len(vals)-1) * s.dtS,
+
 				"values":       vals,
+
 				"lastSample":   s.lastSample,
+
 				"valuesCount":  len(vals),
+
 				"totalCount":   len(s.values),
+
 			}
+
 			attachResult(out, ch, st)
+
 			return out, true
+
 		}
+
 		st.mu.Lock()
+
 		if out, ok := pick(preferCh); ok {
+
 			st.mu.Unlock()
+
 			writeJSON(w, http.StatusOK, out)
+
 			return
+
 		}
+
 		for ch := 0; ch < 8; ch++ {
+
 			if out, ok := pick(ch); ok {
+
 				st.mu.Unlock()
+
 				writeJSON(w, http.StatusOK, out)
+
 				return
+
 			}
+
 		}
+
 		st.mu.Unlock()
+
 		if pstore != nil {
+
 			if out, ok2 := pstore.LoadSession(deviceID, preferCh); ok2 {
+
 				attachResult(out, preferCh, nil)
+
 				writeJSON(w, http.StatusOK, out)
+
 				return
+
 			}
+
 		}
+
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "session not found"})
+
 	})
+
 	mux.HandleFunc("/api/v1/results/nmhc", func(w http.ResponseWriter, r *http.Request) {
+
 		deviceID := strings.TrimSpace(r.URL.Query().Get("deviceId"))
+
 		if deviceID == "" {
+
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "deviceId required"})
+
 			return
+
 		}
+
 		from, err := parseTimeAny(r.URL.Query().Get("from"))
+
 		if err != nil {
+
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid from"})
+
 			return
+
 		}
+
 		to, err := parseTimeAny(r.URL.Query().Get("to"))
+
 		if err != nil {
+
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid to"})
+
 			return
+
 		}
+
 		limit := envIntFromQuery(r, "limit", 2000)
+
 		if limit < 0 {
+
 			limit = 0
+
 		}
+
 		if limit > 5000 {
+
 			limit = 5000
+
 		}
+
+
 
 		switch r.Method {
+
 		case http.MethodGet:
+
 			out := nmhcStore.Query(deviceID, from, to, limit)
+
 			writeJSON(w, http.StatusOK, out)
+
 			return
+
 		case http.MethodDelete:
+
 			if from == nil || to == nil {
+
 				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "from/to required"})
+
 				return
+
 			}
+
 			deleted := nmhcStore.DeleteRange(deviceID, *from, *to)
+
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "deleted": deleted})
+
 			return
+
 		default:
+
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 			return
+
 		}
+
 	})
+
 	// CSV 閹躲儴銆冪€电厧鍤崝鐔诲厴 (閸╄桨绨?SQLite)
+
 	mux.HandleFunc("/api/history/export.csv", func(w http.ResponseWriter, r *http.Request) {
+
 		if r.Method != http.MethodGet {
+
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 			return
+
 		}
+
 		deviceID := strings.TrimSpace(r.URL.Query().Get("deviceId"))
+
 		// Allow empty deviceID to export all history
 
+
+
 		from, err := parseTimeAny(r.URL.Query().Get("from"))
+
 		if err != nil || from == nil {
+
 			fromVal := time.Now().Add(-24 * time.Hour)
+
 			from = &fromVal
-		}
-		to, err := parseTimeAny(r.URL.Query().Get("to"))
-		if err != nil || to == nil {
-			toVal := time.Now()
-			to = &toVal
+
 		}
 
-		if pstore == nil {
-			http.Error(w, "db not ready", http.StatusInternalServerError)
-			return
+		to, err := parseTimeAny(r.URL.Query().Get("to"))
+
+		if err != nil || to == nil {
+
+			toVal := time.Now()
+
+			to = &toVal
+
 		}
+
+
+
+		if pstore == nil {
+
+			http.Error(w, "db not ready", http.StatusInternalServerError)
+
+			return
+
+		}
+
+
 
 		jsons := pstore.LoadResultsFromDB(deviceID, *from, *to, 5000)
 
+
+
 		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+
 		w.Header().Set("Content-Disposition", "attachment; filename=history_"+deviceID+".csv")
 
+
+
 		// 閸愭瑥鍙?CSV 鐞涖劌銇?
+
 		io.WriteString(w, "Time,TraceID,MethodID,Code,Name,Amount,Status\n")
 
+
+
 		for _, j := range jsons {
+
 			var res v1.Result
+
 			if err := json.Unmarshal([]byte(j), &res); err == nil {
+
 				// 鐎电厧鍤崡鏇犵矋閸?
+
 				for _, p := range res.Pollutants {
+
 					line := fmt.Sprintf("%s,%s,%s,%s,%s,%.6f,%s\n", res.CreatedAt, res.TraceID, res.MethodID, p.Code, p.Name, p.Amount, p.Status)
+
 					io.WriteString(w, line)
+
 				}
+
 				// 鐎电厧鍤懕姘値缂佸嫬鍨?
+
 				for _, g := range res.Groups {
+
 					line := fmt.Sprintf("%s,%s,%s,%s,%s,%.6f,%s\n", res.CreatedAt, res.TraceID, res.MethodID, g.Code, g.Name, g.Amount, "OK")
+
 					io.WriteString(w, line)
+
 				}
+
 			}
+
 		}
+
 	})
+
+
 
 	// 閸樼喐婀侀惃?nmhc csv 鐎电厧鍤穱婵囧瘮閸忕厧顔?(闁插秴鐣鹃崥鎴濆煂閺傜増甯撮崣?
+
 	mux.HandleFunc("/api/v1/results/nmhc/export.csv", func(w http.ResponseWriter, r *http.Request) {
+
 		http.Redirect(w, r, "/api/history/export.csv?"+r.URL.RawQuery, http.StatusTemporaryRedirect)
+
 	})
+
 	mux.HandleFunc("/api/v1/devices", func(w http.ResponseWriter, r *http.Request) {
+
 		if r.Method != http.MethodGet {
+
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 			return
+
 		}
+
 		type dev struct {
+
 			DeviceID     string            `json:"deviceId"`
+
 			LastSeen     time.Time         `json:"lastSeen"`
+
 			LastCmd      int               `json:"lastCmd"`
+
 			CmdCounts    map[string]uint64 `json:"cmdCounts"`
+
 			Last143      time.Time         `json:"last143"`
+
 			Connected    bool              `json:"connected"`
+
 			AllowCtrl    bool              `json:"allowControl"`
+
 			CanStart22   bool              `json:"canStart22"`
+
 			Capabilities Capabilities      `json:"capabilities"`
+
 		}
+
 		out := make([]dev, 0)
+
 		states.Range(func(key, value any) bool {
+
 			id := key.(string)
+
 			// In modular mode, the configured ModularDeviceID is the local edge device, don't skip it.
+
 			cfg := pstore.LoadSysConfig()
+
 			modDevID := cfg.ModularDeviceID
+
 			if modDevID == "" {
+
 				modDevID = "GC-MODULAR"
+
 			}
+
 			
+
 			if cfg.DriverMode != "modular" && strings.HasPrefix(id, "DEV") {
+
 				return true
+
 			}
+
 			st := value.(*deviceState)
+
 			driver := getDriver(st, id)
+
 			caps := driver.Capabilities()
 
+
+
 			st.mu.Lock()
+
 			cc := map[string]uint64{}
+
 			for k, v := range st.cmdCnt {
+
 				cc[strconv.Itoa(int(k))] = v
+
 			}
+
 			connected := st.conn != nil
+
 			if cfg.DriverMode == "modular" && id == modDevID {
+
 				connected = true // Virtual edge device is always considered connected
+
 			}
+
 			lastSeen := st.lastSeen
+
 			lastCmd := st.lastCmd
+
 			last143 := st.last143
+
 			st.mu.Unlock()
+
 			out = append(out, dev{DeviceID: id, LastSeen: lastSeen, LastCmd: int(lastCmd), CmdCounts: cc, Last143: last143, Connected: connected, AllowCtrl: allowControl, CanStart22: allowControl && connected, Capabilities: caps})
+
 			return true
+
 		})
+
 		writeJSON(w, http.StatusOK, out)
+
 	})
+
+
 
 	// 娓╂帶妯″潡 Modbus 娴嬭瘯鎺ュ彛
+
 	mux.HandleFunc("/api/v1/modbus_temp/connect", handleModbusTempConnect)
+
 	mux.HandleFunc("/api/v1/modbus_temp/disconnect", handleModbusTempDisconnect)
+
 	mux.HandleFunc("/api/v1/modbus_temp/state", handleModbusTempState)
+
 	mux.HandleFunc("/api/v1/modbus_temp/set", handleModbusTempSet)
+
 	mux.HandleFunc("/api/v1/modbus_temp/set_io", handleModbusTempSetIO)
 
+
+
 	// TCD 娴嬭瘯鎺ュ彛
+
 	mux.HandleFunc("/api/v1/tcd/connect", handleTCDConnect)
+
 	mux.HandleFunc("/api/v1/tcd/disconnect", handleTCDDisconnect)
+
 	mux.HandleFunc("/api/v1/tcd/state", handleTCDState)
+
 	mux.HandleFunc("/api/v1/tcd/set_bridge", handleTCDSetBridge)
+
 	mux.HandleFunc("/api/v1/tcd/zeroing", handleTCDZeroing)
+
 	mux.HandleFunc("/api/v1/tcd/read_bridge", handleTCDReadBridge)
 
+
+
 	// EPC 璋冭瘯鎺ュ彛
+
 	mux.HandleFunc("/api/v1/epc/state", handleEPCState)
+
 		mux.HandleFunc("/api/v1/epc/config", handleEPCConfig)
+
 		mux.HandleFunc("/api/v1/voltage/state", handleVoltageState)
 
+
+
 	mux.HandleFunc("/api/v1/devices/", func(w http.ResponseWriter, r *http.Request) {
+
 		path := strings.TrimPrefix(r.URL.Path, "/api/v1/devices/")
+
 		parts := strings.Split(path, "/")
+
 		if len(parts) < 2 {
+
 			http.NotFound(w, r)
+
 			return
+
 		}
+
 		deviceID := parts[0]
+
 		action := parts[1]
+
 		if action != "cmd" && action != "localStart" && action != "localStop" && action != "localResult" {
+
 			http.NotFound(w, r)
+
 			return
+
 		}
+
 		if r.Method != http.MethodPost {
+
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+
 			return
+
 		}
+
 		stAny, ok := states.Load(deviceID)
+
 		if !ok {
+
 			writeJSON(w, http.StatusNotFound, map[string]any{"error": "device not found"})
+
 			return
+
 		}
+
 		cfg := pstore.LoadSysConfig()
+
 		if cfg.DriverMode != "modular" && strings.HasPrefix(deviceID, "DEV") {
+
 			writeJSON(w, http.StatusNotFound, map[string]any{"error": "device not found"})
+
 			return
+
 		}
+
 		st := stAny.(*deviceState)
+
 		driver := getDriver(st, deviceID)
 
+
+
 		switch action {
+
 		case "cmd":
+
 			if !allowControl {
+
 				writeJSON(w, http.StatusForbidden, map[string]any{"error": "control disabled: set EDGE_ALLOW_CONTROL=1"})
+
 				return
+
 			}
+
 			sub := r.URL.Query().Get("name")
 			ch := envIntFromQuery(r, "channel", 0)
+			remark := r.URL.Query().Get("remark")
+			
+			if r.URL.Query().Has("remark") {
+				st.mu.Lock()
+				st.nextAuditRemark = remark
+				st.mu.Unlock()
+			}
+
+
 
 			// Route through HAL where possible
+
 			var err error
+
 			var mappedCmd byte
+
 			switch sub {
+
 			case "start":
+
 				err = driver.StartAnalysis(byte(ch))
+
 				mappedCmd = 22
+
 			case "stop":
+
 				// Stop single channel is not explicitly in interface, but let's use the legacy sendCmd for now or add it.
+
 				// Actually driver.StopAnalysis stops all. Wait, Cmd 23 is single channel stop.
+
 				// Let's add it to HAL or just use a raw method. I'll use a raw method for legacy stuff not yet fully abstracted.
+
 				mappedCmd, payload, _ := buildCmd(sub, ch)
+
 				err = driver.SendRawCmd(mappedCmd, payload)
+
 			case "startAll":
+
 				err = driver.StartAnalysis(0xFF) // 0xFF denotes start all
+
 				mappedCmd = 18
+
 			case "stopAll":
+
 				err = driver.StopAnalysis() // Cmd 246? Wait, buildCmd says 19.
+
 				mappedCmd = 19
+
 			case "tempOn":
+
 				err = driver.StartTempControl()
+
 				mappedCmd = 16
+
 			case "tempOff":
+
 				err = driver.StopTempControl()
+
 				mappedCmd = 17
+
 			default:
+
 				mappedCmd, payload, e := buildCmd(sub, ch)
+
 				if e != nil {
+
 					writeJSON(w, http.StatusBadRequest, map[string]any{"error": e.Error()})
+
 					return
+
 				}
+
 				err = driver.SendRawCmd(mappedCmd, payload)
+
 			}
 
+
+
 			if err != nil {
+
 				writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+
 				return
+
 			}
+
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "cmd": mappedCmd})
+
 		case "localStart":
+
 			ch := envIntFromQuery(r, "channel", 0)
+
 			if ch < 0 || ch > 7 {
+
 				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid channel"})
+
 				return
+
 			}
+
 			force := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("force")))
+
 			if force != "1" && force != "true" && force != "yes" {
+
 				st.mu.Lock()
+
 				s := st.sessions[ch]
+
 				active := s != nil && s.active
+
 				st.mu.Unlock()
+
 				if active {
+
 					writeJSON(w, http.StatusOK, map[string]any{"ok": true, "skipped": true})
+
 					return
+
 				}
+
 			}
+
 			resetSession(st, ch)
+
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+
 		case "localStop":
+
 			ch := envIntFromQuery(r, "channel", 0)
+
 			if ch < 0 || ch > 7 {
+
 				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid channel"})
+
 				return
+
 			}
+
 			st.mu.Lock()
+
 			s := st.sessions[ch]
+
 			active := s != nil && s.active
+
 			st.mu.Unlock()
+
 			if !active {
+
 				writeJSON(w, http.StatusOK, map[string]any{"ok": true, "skipped": true})
+
 				return
+
 			}
+
 			if allowControl {
+
 				channelMask := byte(1 << uint(ch))
+
 				driver := getDriver(st, deviceID)
+
 				_ = driver.RequestStop(channelMask)
+
 				time.Sleep(100 * time.Millisecond)
+
 			}
-			ok, msg := finalizeSession(hub, st, deviceID, ch, method)
+
+			ok, msg, _ := finalizeSession(hub, st, deviceID, ch, method)
+
 			if !ok {
+
 				writeJSON(w, http.StatusConflict, map[string]any{"error": msg})
+
 				return
+
 			}
+
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+
 		case "localResult":
+
 			ch := envIntFromQuery(r, "channel", 0)
+
 			if ch < 0 || ch > 7 {
+
 				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid channel"})
+
 				return
+
 			}
+
 			st.mu.Lock()
+
 			s := st.sessions[ch]
+
 			active := s != nil && s.active
+
 			st.mu.Unlock()
+
 			if !active {
+
 				writeJSON(w, http.StatusOK, map[string]any{"ok": true, "skipped": true})
+
 				return
+
 			}
+
 			ok, msg := publishSessionResultSnapshot(hub, st, deviceID, ch, method)
+
 			if !ok {
+
 				writeJSON(w, http.StatusConflict, map[string]any{"error": msg})
+
 				return
+
 			}
+
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+
 		}
+
 	})
+
 	mux.Handle("/static/", http.FileServer(http.FS(staticFS)))
+
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+
 		if r.URL.Path != "/" {
+
 			http.NotFound(w, r)
+
 			return
+
 		}
+
 		content, err := staticFS.ReadFile("static/index.html")
+
 		if err != nil {
+
 			http.Error(w, "index.html not found", http.StatusInternalServerError)
+
 			return
+
 		}
+
+
 
 		htmlStr := strings.ReplaceAll(string(content), "{{.AppVersion}}", AppVersion)
 
+
+
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
 		w.Write([]byte(htmlStr))
+
 	})
+
 	host := "0.0.0.0"
+
 	addr := host + ":" + strconv.Itoa(port)
+
 	LogInfof("collector http listening on %s", addr)
+
 	return http.ListenAndServe(addr, mux)
+
 }
+
+
 
 func serveTCP(port int, hub *realtime.Hub, states *sync.Map, cfg chromsend143.Config, method v1.Method) error {
+
 	host := "0.0.0.0"
+
 	ln, err := net.Listen("tcp", fmt.Sprintf("%s:%d", host, port))
+
 	if err != nil {
+
 		return fmt.Errorf("tcp listen %d failed: %w", port, err)
+
 	}
+
 	LogInfof("collector tcp listening on 0.0.0.0:%d", port)
+
 	for {
+
 		c, err := ln.Accept()
+
 		if err != nil {
+
 			continue
+
 		}
+
 		go handleConn(c, hub, states, cfg, method)
+
 	}
+
 }
+
+
 
 func handleConn(c net.Conn, hub *realtime.Hub, states *sync.Map, cfg chromsend143.Config, method v1.Method) {
+
 	defer c.Close()
+
 	dec := &gckc.StreamDecoder{}
+
 	buf := make([]byte, 64*1024)
 
+
+
 	// 鍚姩涓€涓畾鏃跺櫒锛屾瘡 10 绉掑彂閫佷竴娆?Cmd 0 浠ユ煡璇㈣瀹氭俯搴?
+
 	done := make(chan struct{})
+
 	defer close(done)
+
 	go func() {
+
 		ticker := time.NewTicker(10 * time.Second)
+
 		defer ticker.Stop()
+
 		for {
+
 			select {
+
 			case <-done:
+
 				return
+
 			case <-ticker.C:
+
 				// 鍙戦€?Cmd 0 (鎺ф俯鍙傛暟鏌ヨ)
+
 				// DeviceID 鎴戜滑杩欓噷鎷夸笉鍒扮‘鍒囩殑锛堝湪绗竴鍖呮墠瑙ｆ瀽鍑烘潵锛夛紝浣嗛€氬父鍏?0 鎴栧崰浣嶇涔熻
+
 				// 鏈€濂芥槸浠?states 閲屾嬁鍒帮紝涓嶈繃鎴戜滑鍙互鍦?processFrame 鏀跺埌鍖呯‘璁?ID 鍚庡啀鍙?
+
 				// 绠€渚胯捣瑙侊紝鐩存帴鍙戜竴涓┖ DeviceID 鐨勫寘锛屼富鏉块€氬父鍙湅 Cmd 涓嶇湅 DeviceID
+
 				frame, _ := gckc.Encode(gckc.Frame{
+
 					DeviceID: "0000000000000000",
+
 					Seq:      0,
+
 					Cmd:      0,
+
 					Payload:  []byte{},
+
 				})
+
 				// 涓嶈璁剧疆 WriteDeadline锛屽惁鍒欎細褰卞搷鍏ㄥ眬 TCP 杩炴帴鐨勮鍐?
+
 				// _ = c.SetWriteDeadline(time.Now().Add(2 * time.Second))
+
 				_, _ = c.Write(frame)
+
 			}
+
 		}
+
 	}()
 
+
+
 	for {
+
 		n, err := c.Read(buf)
+
 		if n > 0 {
+
 			dec.Push(buf[:n])
+
 			for {
+
 				f, ok, derr := dec.Next()
+
 				if derr != nil {
+
 					break
+
 				}
+
 				if !ok {
+
 					break
+
 				}
+
 				processFrame(c, f, hub, states, cfg, method)
+
 			}
+
 		}
+
 		if err != nil {
+
 			if err == io.EOF {
+
 				return
+
 			}
+
 			return
+
 		}
+
 	}
+
 }
 
+
+
 func processFrame(c net.Conn, f gckc.Frame, hub *realtime.Hub, states *sync.Map, cfg chromsend143.Config, method v1.Method) {
+
 	if strings.HasPrefix(f.DeviceID, "DEV") {
+
 		return
+
 	}
+
 	st := getState(states, f.DeviceID)
+
 	st.mu.Lock()
+
 	isNewConn := st.conn != c || !st.synced
+
 	st.lastSeen = time.Now()
+
 	st.lastCmd = f.Cmd
+
 	if st.cmdCnt == nil {
+
 		st.cmdCnt = map[byte]uint64{}
+
 	}
+
 	st.cmdCnt[f.Cmd]++
+
 	st.conn = c
+
 	st.synced = true
+
 	if st.sessions == nil {
+
 		st.sessions = map[int]*runSession{}
+
 	}
+
 	st.mu.Unlock()
 
+
+
 	if isNewConn {
+
 		// Auto-sync hardware parameters upon connection
+
 		go func(deviceId string) {
+
 			LogInfof("Device %s connected, auto-syncing hardware parameters...", deviceId)
+
 			_ = sendCmd(st, deviceId, 0, nil)
+
 			time.Sleep(100 * time.Millisecond)
+
 			_ = sendCmd(st, deviceId, 2, nil)
+
 			time.Sleep(100 * time.Millisecond)
+
 			_ = sendCmd(st, deviceId, 100, nil)
+
 			time.Sleep(100 * time.Millisecond)
+
 			_ = sendCmd(st, deviceId, 48, nil)
+
 			time.Sleep(100 * time.Millisecond)
+
 			_ = sendCmd(st, deviceId, 250, nil)
+
 			time.Sleep(100 * time.Millisecond)
+
 			_ = sendCmd(st, deviceId, 4, nil)
+
 		}(f.DeviceID)
+
 	}
+
+
 
 	hub.Publish(f.DeviceID, event{Type: "device", DeviceID: f.DeviceID, At: time.Now()})
 
+
+
 	if f.Cmd != 143 && f.Cmd != 159 && f.Cmd != 128 {
+
 		LogDebugf("Received Cmd %d, Payload len: %d, Payload: %X", f.Cmd, len(f.Payload), f.Payload)
+
 	}
+
+
 
 	switch f.Cmd {
+
 	case 146:
+
 		resetAllSessions(st)
+
 	case 150:
+
 		if len(f.Payload) > 0 {
+
 			ch := int(f.Payload[0])
+
 			resetSession(st, ch)
+
 		}
+
 	case 147:
+
 		finalizeAllSessions(hub, st, f.DeviceID, method)
+
 	case 151:
+
 		if len(f.Payload) > 0 {
+
 			ch := int(f.Payload[0])
+
 			finalizeSession(hub, st, f.DeviceID, ch, method)
+
 		}
+
 	case 128:
+
 		if te, ok := parseSetTemps128(f.Payload); ok {
+
 			te.DeviceID = f.DeviceID
+
 			hub.Publish(f.DeviceID, te)
 
+
+
 			if mbSlave != nil {
+
 				if te.SetTempCol != nil {
+
 					mbSlave.SetFloat32(111, float32(*te.SetTempCol))
+
 				}
+
 				if te.SetTempInj1 != nil {
+
 					mbSlave.SetFloat32(115, float32(*te.SetTempInj1))
+
 				}
+
 				if te.SetTempDet1 != nil {
+
 					mbSlave.SetFloat32(119, float32(*te.SetTempDet1))
+
 				}
+
 			}
+
+
 
 			// Save the fetched settings to hardware config so UI can query them
+
 			hwCfg, _ := pstore.LoadHardwareConfig(f.DeviceID)
+
 			if hwCfg.Temperatures == nil {
+
 				hwCfg.Temperatures = make(map[string]float64)
+
 			}
+
 			if te.SetTempInj1 != nil {
+
 				hwCfg.Temperatures["Inj1"] = *te.SetTempInj1
+
 			}
+
 			if te.SetTempCol != nil {
+
 				hwCfg.Temperatures["Col"] = *te.SetTempCol
+
 			}
+
 			if te.SetTempDet1 != nil {
+
 				hwCfg.Temperatures["Det1"] = *te.SetTempDet1
+
 			}
+
 			if te.SetTempInj2 != nil {
+
 				hwCfg.Temperatures["Inj2"] = *te.SetTempInj2
+
 			}
+
 			if te.SetTempDet2 != nil {
+
 				hwCfg.Temperatures["Det2"] = *te.SetTempDet2
+
 			}
+
 			if te.SetTempDet3 != nil {
+
 				hwCfg.Temperatures["Det3"] = *te.SetTempDet3
+
 			}
+
+
 
 			if te.ProtTempInj1 != nil {
+
 				hwCfg.Temperatures["ProtInj1"] = *te.ProtTempInj1
+
 			}
+
 			if te.ProtTempCol != nil {
+
 				hwCfg.Temperatures["ProtCol"] = *te.ProtTempCol
+
 			}
+
 			if te.ProtTempDet1 != nil {
+
 				hwCfg.Temperatures["ProtDet1"] = *te.ProtTempDet1
+
 			}
+
 			if te.ProtTempInj2 != nil {
+
 				hwCfg.Temperatures["ProtInj2"] = *te.ProtTempInj2
+
 			}
+
 			if te.ProtTempDet2 != nil {
+
 				hwCfg.Temperatures["ProtDet2"] = *te.ProtTempDet2
+
 			}
+
 			if te.ProtTempDet3 != nil {
+
 				hwCfg.Temperatures["ProtDet3"] = *te.ProtTempDet3
+
 			}
+
 			pstore.SaveHardwareConfig(f.DeviceID, hwCfg)
+
 		}
+
 	case 130, 138:
+
 		// 瑙ｆ瀽澶栭儴浜嬩欢鏃堕棿绋嬪簭 Table0 (浜嬩欢 1~4)
+
 		m := parseEventTable(f.Payload)
+
 		if m != nil {
+
 			hwCfg, _ := pstore.LoadHardwareConfig(f.DeviceID)
+
 			matrix := eventsToMatrix(hwCfg.Events)
+
 			for ch := 0; ch < 4; ch++ {
+
 				matrix[ch] = m[ch]
+
 			}
+
 			hwCfg.Events = matrixToEvents(matrix)
+
 			pstore.SaveHardwareConfig(f.DeviceID, hwCfg)
+
 		}
+
 	case 228, 229:
+
 		// 瑙ｆ瀽澶栭儴浜嬩欢鏃堕棿绋嬪簭 Table1 (浜嬩欢 5~8)
+
 		m := parseEventTable(f.Payload)
+
 		if m != nil {
+
 			hwCfg, _ := pstore.LoadHardwareConfig(f.DeviceID)
+
 			matrix := eventsToMatrix(hwCfg.Events)
+
 			for ch := 0; ch < 4; ch++ {
+
 				matrix[ch+4] = m[ch]
+
 			}
+
 			hwCfg.Events = matrixToEvents(matrix)
+
 			pstore.SaveHardwareConfig(f.DeviceID, hwCfg)
+
 		}
+
 	case 159:
+
 		// 璋冭瘯杈撳嚭159鎶ユ枃鍏ㄩ儴鍐呭
+
 		LogDebugf("Cmd 159 Payload: %X", f.Payload)
+
 		if items, ok := parseEpc159(f.Payload); ok {
+
 			e := telemetryEvent{Type: "telemetry", DeviceID: f.DeviceID, At: time.Now().UTC()}
+
 			epc := make([]telemetryEpc, 0, len(items))
+
 			for i := 0; i < len(items) && i < 32; i++ {
+
 				epc = append(epc, telemetryEpc{InputPsi: items[i].InputPsi, Psi: items[i].ActualPsi, Sccm: items[i].ActualSccm})
+
 			}
+
 			e.Epc = epc
+
 			if len(items) > 0 {
+
 				e.CarrierPsi = f64p(items[0].ActualPsi)
+
 				e.CarrierSccm = f64p(items[0].ActualSccm)
+
 			}
+
 			// 杞芥皵1=EPC 1, 姘㈡皵1=EPC 10(index 9), 绌烘皵1=EPC 11(index 10)
+
 			if len(items) > 9 {
+
 				e.H2Psi = f64p(items[9].ActualPsi)
+
 				e.H2Sccm = f64p(items[9].ActualSccm)
+
 			}
+
 			if len(items) > 10 {
+
 				e.AirPsi = f64p(items[10].ActualPsi)
+
 				e.AirSccm = f64p(items[10].ActualSccm)
+
 			}
+
 			hub.Publish(f.DeviceID, e)
 
+
+
 			if mbSlave != nil {
+
 				if e.CarrierPsi != nil {
+
 					mbSlave.SetFloat32(131, float32(*e.CarrierPsi))
+
 				}
+
 				if e.H2Sccm != nil {
+
 					mbSlave.SetFloat32(127, float32(*e.H2Sccm))
+
 				}
+
 				if e.AirSccm != nil {
+
 					mbSlave.SetFloat32(125, float32(*e.AirSccm))
+
 				}
+
 			}
+
 		}
+
 	case 250:
+
 		if len(f.Payload) >= 2 {
+
 			hwCfg, _ := pstore.LoadHardwareConfig(f.DeviceID)
+
 			hwCfg.IgniteThreshold1 = float64(f.Payload[0]) / 10.0
+
 			hwCfg.IgniteThreshold2 = float64(f.Payload[1]) / 10.0
+
 			pstore.SaveHardwareConfig(f.DeviceID, hwCfg)
+
 		}
+
 	case 181, 178:
+
 		if len(f.Payload) >= 1 {
+
 			hwCfg, _ := pstore.LoadHardwareConfig(f.DeviceID)
+
 			hwCfg.IgniteDuration = float64(f.Payload[0])
+
 			pstore.SaveHardwareConfig(f.DeviceID, hwCfg)
+
 		}
+
 	case 132, 140:
+
 		if len(f.Payload) >= 6 {
+
 			hwCfg, _ := pstore.LoadHardwareConfig(f.DeviceID)
+
 			// byte 0,1 -> float (interval)
+
 			b0 := int(f.Payload[0]>>4)*100 + int(f.Payload[0]&0x0f)*10 + int(f.Payload[1]>>4)
+
 			b1 := int(f.Payload[1] & 0x0f)
+
 			interval := float64(b0) + float64(b1)*0.1
 
+
+
 			// byte 2,3 -> int (NTimes)
+
 			nTimes := int(f.Payload[2]>>4)*1000 + int(f.Payload[2]&0x0f)*100 + int(f.Payload[3]>>4)*10 + int(f.Payload[3]&0x0f)
 
+
+
 			hwCfg.CycleInterval = interval
+
 			hwCfg.CycleCount = nTimes
+
 			pstore.SaveHardwareConfig(f.DeviceID, hwCfg)
+
 		}
+
 	}
+
+
 
 	if f.Cmd != 143 {
+
 		return
+
 	}
+
 	if te, ok := parseTemps143(f.Payload); ok {
+
 		te.DeviceID = f.DeviceID
+
 		hub.Publish(f.DeviceID, te)
 
+
+
 		if mbSlave != nil {
+
 			if te.TempCol != nil {
+
 				mbSlave.SetFloat32(113, float32(*te.TempCol))
+
 			}
+
 			if te.TempInj1 != nil {
+
 				mbSlave.SetFloat32(117, float32(*te.TempInj1))
+
 			}
+
 			if te.TempDet1 != nil {
+
 				mbSlave.SetFloat32(121, float32(*te.TempDet1))
+
 			}
+
 			if te.Heating != nil {
+
 				v := uint16(0)
+
 				if *te.Heating {
+
 					v = 1
+
 				}
+
 				mbSlave.SetUint16(147, v)
+
 				mbSlave.SetUint16(146, v)
+
 				mbSlave.SetUint16(145, v)
+
 			}
+
 		}
+
 	}
+
 	parsedAll, has, err := chromsend143.ParseAll(f.Payload, cfg)
+
 	if err != nil || !has || len(parsedAll) == 0 {
+
 		return
+
 	}
+
+
 
 	for _, parsed := range parsedAll {
+
 		// 鎭㈠鏈€鍘熷鐨勩€佸畬鍏ㄦ纭殑閫昏緫锛?
+
 		// 瀹為檯涓婏紝纭欢鍗忚閲岀殑 freqByte 鏄?(閲囨牱鐜?/ 10)銆?
+
 		// 姣斿 50Hz 鐨勯噰鏍风巼锛宖reqByte 灏辨槸 5銆傛墍浠?parsed.Freq10 (freqByte * 10) 灏辨槸鐪熷疄鐨?50Hz锛?
+
 		// 閭ｄ箞姣忎釜鐐圭殑鏃堕棿闂撮殧灏辨槸 dtS = 1.0 / 50.0 = 0.02 绉掋€?
+
 		dtS := 1.0 / float64(parsed.Freq10)
+
 		st.mu.Lock()
+
 		if st.lastTS == nil {
+
 			st.lastTS = map[int]float64{}
+
 		}
+
 		t0 := st.lastTS[parsed.Channel]
+
 		st.lastTS[parsed.Channel] = t0 + float64(len(parsed.Values))*dtS
+
 		st.last143 = time.Now()
+
 		tok, _ := appendSessionSamplesLocked(st, parsed.Channel, dtS, t0, parsed.Values)
+
 		st.mu.Unlock()
+
 		hub.Publish(f.DeviceID, event{Type: "samples", DeviceID: f.DeviceID, At: time.Now(), Channel: parsed.Channel, SessionToken: tok, DTs: dtS, T0s: t0, Values: parsed.Values})
+
 	}
+
 }
+
+
 
 func resetAllSessions(st *deviceState) {
+
 	st.mu.Lock()
+
 	defer st.mu.Unlock()
+
 	st.lastTS = map[int]float64{}
+
 	if st.sessions == nil {
+
 		st.sessions = map[int]*runSession{}
+
 	}
+
 	for ch := range st.sessions {
 		st.sessions[ch] = newRunSession(true)
+	st.sessions[ch].auditRemark = st.nextAuditRemark
 	}
+
 }
 
+
+
 func resetSession(st *deviceState, ch int) {
+
 	st.mu.Lock()
+
 	defer st.mu.Unlock()
+
 	if st.lastTS == nil {
+
 		st.lastTS = map[int]float64{}
+
 	}
+
 	st.lastTS[ch] = 0
+
 	if st.sessions == nil {
 		st.sessions = map[int]*runSession{}
 	}
 	st.sessions[ch] = newRunSession(true)
+	st.sessions[ch].auditRemark = st.nextAuditRemark
 
-	LogInfof("寮€濮嬪垎鏋?)
+
+
+			LogInfof("FIXED_LOG")
+
 
 	if mbSlave != nil {
+
 		mbSlave.SetUint16(101, 1) // 1: 娴嬮噺涓?
+
 	}
+
 }
+
+
 
 func appendSessionSamplesLocked(st *deviceState, ch int, dtS float64, t0 float64, vals []float64) (string, bool) {
+
 	if st.sessions == nil {
+
 		st.sessions = make(map[int]*runSession)
+
 	}
+
 	s, ok := st.sessions[ch]
+
 	if !ok || s == nil {
+
 		s = newRunSession(false) // 榛樿涓嶅浜庡垎鏋愮姸鎬侊紝闄ら潪涓诲姩鏀跺埌寮€濮嬪垎鏋愭寚浠?
+
 		st.sessions[ch] = s
+
 	}
+
 	if !s.active {
+
 		return s.token, false
+
 	}
+
 	if s.dtS == 0 {
+
 		s.dtS = dtS
+
 	} else if mathAbs(s.dtS-dtS) > 1e-6 {
+
 		s.dtS = dtS
+
 		s.values = nil
+
 		s.snapshotDone = false
+
 	}
+
 	idx0 := int(t0 / s.dtS)
+
 	if idx0 < 0 {
+
 		idx0 = 0
+
 	}
+
 	need := idx0 + len(vals)
+
 	if len(s.values) < need {
+
 		last := s.lastSample
+
 		if len(s.values) > 0 {
+
 			last = s.values[len(s.values)-1]
+
 		}
+
 		for len(s.values) < need {
+
 			s.values = append(s.values, last)
+
 		}
+
 	}
+
 	for i := 0; i < len(vals); i++ {
+
 		s.values[idx0+i] = vals[i]
+
 		s.lastSample = vals[i]
+
 	}
+
 	return s.token, true
+
 }
 
+
+
 func finalizeAllSessions(hub *realtime.Hub, st *deviceState, deviceID string, method v1.Method) {
+
 	st.mu.Lock()
+
 	chs := make([]int, 0, len(st.sessions))
+
 	for ch := range st.sessions {
+
 		chs = append(chs, ch)
+
 	}
+
 	st.mu.Unlock()
+
 	for _, ch := range chs {
 		finalizeSession(hub, st, deviceID, ch, method)
 	}
+
 }
 
-func finalizeSession(hub *realtime.Hub, st *deviceState, deviceID string, ch int, method v1.Method) (bool, string) {
+
+
+func finalizeSession(hub *realtime.Hub, st *deviceState, deviceID string, ch int, method v1.Method) (bool, string, string) {
 	st.mu.Lock()
 	s, ok := st.sessions[ch]
 	if !ok || s == nil || !s.active || s.dtS <= 0 || len(s.values) < 2 {
@@ -2564,7 +5149,7 @@ func finalizeSession(hub *realtime.Hub, st *deviceState, deviceID string, ch int
 			s.active = false
 		}
 		st.mu.Unlock()
-		return false, "no active session"
+		return false, "no active session", ""
 	}
 	trace := v1.Trace{
 		Schema:    "voc-trace.v1",
@@ -2578,2279 +5163,4545 @@ func finalizeSession(hub *realtime.Hub, st *deviceState, deviceID string, ch int
 		Values:    append([]float64(nil), s.values...),
 	}
 	tok := s.token
+	auditRem := s.auditRemark
 	s.active = false
 	st.mu.Unlock()
 
+
+
 	// 姣忔鍒嗘瀽鏃跺疄鏃惰幏鍙栨渶鏂扮殑鏂规硶锛堝寘鍚渶鏂扮殑鏍″噯鍙傛暟锛?
+
 	activeMethod := getActiveMethod()
+
 	res, err := analyzer.Analyze(trace, activeMethod, "dev", time.Now())
+
 	e := resultEvent{Type: "result", DeviceID: deviceID, Channel: ch, SessionToken: tok, At: time.Now(), Trace: trace, Method: activeMethod}
+
 	if err != nil {
+
 		LogErrorf("鍒嗘瀽寮傚父: %v", err)
+
 		e.Error = err.Error()
+
 	} else {
+
 		LogInfof("鍒嗘瀽缁撴潫, 鏁版嵁宸插瓨鍏ユ暟鎹簱")
+
 		e.Result = res
+
 		st.mu.Lock()
+
 		if st.lastResultByCh == nil {
+
 			st.lastResultByCh = map[int]lastResult{}
+
 		}
+
 		st.lastResultByCh[ch] = lastResult{token: tok, at: e.At.UTC(), res: res}
+
 		st.mu.Unlock()
+
 		if pstore != nil {
+
 			// Save the latest result for UI summary
+
 			pstore.SaveResult(deviceID, ch, map[string]any{"deviceId": deviceID, "channel": ch, "sessionToken": tok, "at": e.At.UTC().Format(time.RFC3339), "result": res})
 
+
+
 			// Save to SQLite History and Disk
-			resBytes, _ := json.Marshal(map[string]any{"device_id": deviceID, "trace_id": trace.TraceID, "created_at": e.At.UTC().Format(time.RFC3339), "result": res})
+			resBytes, _ := json.Marshal(map[string]any{"device_id": deviceID, "trace_id": trace.TraceID, "created_at": e.At.UTC().Format(time.RFC3339), "result": res, "audit_remark": auditRem})
 			runBytes, _ := json.Marshal(map[string]any{"trace_id": trace.TraceID, "dtS": trace.DtS, "samples": trace.Values, "pollutants": res.Pollutants})
 			pstore.SaveResultToDB(deviceID, trace.TraceID, e.At.UTC(), activeMethod.MethodID, string(resBytes), runBytes)
+
 		}
+
 		// 杩欓噷鍙栨秷浠呭綋 thc 鍜?ch4 鍚屾椂瀛樺湪鐨勯檺鍒讹紝鍏佽浠讳綍缁撴灉淇濆瓨鍒?nmhcStore
+
 		// 浠ヤ繚璇?TCD 杩欑涓嶅寘鍚?THC/CH4 鐨勫垎鏋愯褰曚篃鑳芥樉绀哄湪鍥捐〃鍜屾姤琛ㄤ笂
+
 		if thc, ch4, nmhc, _ := extractNMHC(res); true {
+
 			nmhcStore.Add(nmhcRecord{
+
 				TimeRFC3339: e.At.UTC().Format(time.RFC3339),
+
 				DeviceID:    deviceID,
+
 				TraceID:     trace.TraceID,
+
 				THC:         thc,
+
 				CH4:         ch4,
+
 				NMHC:        nmhc,
+
 			})
 
+
+
 			// 鍚屾鏇存柊 Modbus 瀵勫瓨鍣?
+
 			if mbSlave != nil {
+
 				mbSlave.UpdateFullResult(res)
+
 				mbSlave.SetUint16(101, 0) // 0: 绌洪棽
+
 				// 鍋囪鎴戜滑杩欓噷绠€鍗曞湴灏嗗綋鍓嶆娴嬬殑 Unix 鏃堕棿鎴充綔涓哄敮涓€鏍囩ず鎴栧彧鏇存柊鐘舵€?
+
 				// 杩欓噷鏆傛椂涓嶇疮鍔犺繍琛屾鏁帮紝闄ら潪涓氬姟鏈夌‖鎬ц姹傘€備篃鍙互鍦ㄨ繖鑷 143銆?
+
 			}
+
+
 
 			// 婢х偤鍣烘稉濠冨Г MQTT
+
 			if mqttClient != nil {
+
 				polls := make(map[string]float64)
+
 				for _, p := range res.Pollutants {
+
 					polls[p.Code] = math.Round(p.Amount*1000) / 1000
+
 				}
+
 				for _, g := range res.Groups {
+
 					polls[g.Code] = math.Round(g.Amount*1000) / 1000
+
 				}
+
 				payload := map[string]any{
+
 					"time":     e.At.Unix(),
+
 					"trace_id": trace.TraceID,
+
 					"results":  polls,
+
 				}
+
 				mqttClient.PublishResult(deviceID, payload)
+
 			}
+
+
 
 			// 璋卞浘鏂囦欢涓婁紶锛圚J212-2025 VOC鏍囧噯璋卞浘閫氳锛?
+
 			if pstore != nil {
+
 				if upCfg, ok := pstore.LoadUploadConfig(deviceID); ok {
+
 					uploadSpectrum(trace, res, e.At, upCfg)
+
 				}
+
 			}
+
 		}
+
 	}
+
 	hub.Publish(deviceID, e)
-	return true, e.Error
+	return true, e.Error, auditRem
 }
 
+
+
 func publishSessionResultSnapshot(hub *realtime.Hub, st *deviceState, deviceID string, ch int, method v1.Method) (bool, string) {
+
 	st.mu.Lock()
+
 	s, ok := st.sessions[ch]
+
 	if !ok || s == nil || !s.active || s.dtS <= 0 || len(s.values) < 2 {
+
 		st.mu.Unlock()
+
 		return false, "no active session"
+
 	}
+
 	snap := sessionSnapshot{DtS: s.dtS, Values: append([]float64(nil), s.values...)}
 	tok := s.token
+	auditRem := s.auditRemark
 	s.snapshotDone = true
 	st.mu.Unlock()
 
+
+
 	trace := v1.Trace{
+
 		Schema:    "voc-trace.v1",
+
 		TraceID:   fmt.Sprintf("%s-%d-snap-%d", deviceID, ch, time.Now().UnixNano()),
+
 		DeviceID:  deviceID,
+
 		StationID: deviceID,
+
 		DataTime:  time.Now().UTC().Format(time.RFC3339),
+
 		DtS:       snap.DtS,
+
 		TimeSpanS: float64(len(snap.Values)-1) * snap.DtS,
+
 		Unit:      "pA",
+
 		Values:    snap.Values,
+
 	}
+
+
 
 	activeMethod := getActiveMethod()
+
 	e := resultEvent{Type: "result", DeviceID: deviceID, Channel: ch, SessionToken: tok, At: time.Now().UTC(), Trace: trace, Method: activeMethod}
+
 	res, err := analyzer.Analyze(trace, activeMethod, deviceID, time.Now())
+
 	if err != nil {
+
 		LogErrorf("鍒嗘瀽寮傚父: %v", err)
+
 		e.Error = err.Error()
+
 	} else {
+
 		LogInfof("鍒嗘瀽缁撴潫, 鏁版嵁宸插瓨鍏ユ暟鎹簱")
+
 		e.Result = res
+
 		st.mu.Lock()
+
 		if st.lastResultByCh == nil {
+
 			st.lastResultByCh = map[int]lastResult{}
+
 		}
+
 		st.lastResultByCh[ch] = lastResult{token: tok, at: e.At.UTC(), res: res}
+
 		st.mu.Unlock()
+
 		if pstore != nil {
+
 			// Save the latest result for UI summary
+
 			pstore.SaveResult(deviceID, ch, map[string]any{"deviceId": deviceID, "channel": ch, "sessionToken": tok, "at": e.At.UTC().Format(time.RFC3339), "result": res})
 
+
+
 			// Save to SQLite History and Disk
-			resBytes, _ := json.Marshal(map[string]any{"device_id": deviceID, "trace_id": trace.TraceID, "created_at": e.At.UTC().Format(time.RFC3339), "result": res})
+			resBytes, _ := json.Marshal(map[string]any{"device_id": deviceID, "trace_id": trace.TraceID, "created_at": e.At.UTC().Format(time.RFC3339), "result": res, "audit_remark": auditRem})
 			runBytes, _ := json.Marshal(map[string]any{"trace_id": trace.TraceID, "dtS": trace.DtS, "samples": trace.Values, "pollutants": res.Pollutants})
 			pstore.SaveResultToDB(deviceID, trace.TraceID, e.At.UTC(), activeMethod.MethodID, string(resBytes), runBytes)
+
 		}
+
 		// 杩欓噷鍙栨秷浠呭綋 thc 鍜?ch4 鍚屾椂瀛樺湪鐨勯檺鍒讹紝鍏佽浠讳綍缁撴灉淇濆瓨鍒?nmhcStore
+
 		// 浠ヤ繚璇?TCD 杩欑涓嶅寘鍚?THC/CH4 鐨勫垎鏋愯褰曚篃鑳芥樉绀哄湪鍥捐〃鍜屾姤琛ㄤ笂
+
 		if thc, ch4, nmhc, _ := extractNMHC(res); true {
+
 			nmhcStore.Add(nmhcRecord{
+
 				TimeRFC3339: e.At.UTC().Format(time.RFC3339),
+
 				DeviceID:    deviceID,
+
 				TraceID:     trace.TraceID,
+
 				THC:         thc,
+
 				CH4:         ch4,
+
 				NMHC:        nmhc,
+
 			})
 
+
+
 			// 鍚屾鏇存柊 Modbus 瀵勫瓨鍣?
+
 			if mbSlave != nil {
+
 				mbSlave.UpdateFullResult(res)
+
 				mbSlave.SetUint16(101, 0) // 0: 绌洪棽
+
 			}
+
+
 
 			// 澧為噺涓婃姤 MQTT
+
 			if mqttClient != nil {
+
 				polls := make(map[string]float64)
+
 				for _, p := range res.Pollutants {
+
 					polls[p.Code] = math.Round(p.Amount*1000) / 1000
+
 				}
+
 				for _, g := range res.Groups {
+
 					polls[g.Code] = math.Round(g.Amount*1000) / 1000
+
 				}
+
 				payload := map[string]any{
+
 					"time":     e.At.Unix(),
+
 					"trace_id": trace.TraceID,
+
 					"results":  polls,
+
 				}
+
 				mqttClient.PublishResult(deviceID, payload)
+
 			}
+
 		}
+
 	}
+
 	hub.Publish(deviceID, e)
+
 	return true, e.Error
+
 }
+
+
 
 func mathAbs(v float64) float64 {
+
 	if v < 0 {
+
 		return -v
+
 	}
+
 	return v
+
 }
+
+
 
 func isFinite(v float64) bool {
+
 	return !math.IsNaN(v) && !math.IsInf(v, 0)
+
 }
+
+
 
 func getActiveMethod() v1.Method {
+
 	if pstore != nil {
+
 		if m, ok := pstore.LoadMethod("default"); ok {
+
 			out := v1.Method{
+
 				MethodID: m.ID,
+
 				Version:  1,
+
 			}
+
 			for _, c := range m.Compounds {
+
 				// 杞崲 levels
+
 				var v1Levels []v1.Level
+
 				for _, l := range c.Levels {
+
 					v1Levels = append(v1Levels, v1.Level{
+
 						LevelIndex: l.LevelIndex,
+
 						Amount:     l.Amount,
+
 						Response:   l.Response,
+
 					})
+
 				}
+
 				out.Pollutants = append(out.Pollutants, v1.PollutantSpec{
+
 					Code:      c.Name,
+
 					Name:      c.Name,
+
 					RtS:       c.RetainTime * 60.0,
+
 					StartS:    (c.RetainTime - c.LeftWindow) * 60.0,
+
 					EndS:      (c.RetainTime + c.RightWindow) * 60.0,
+
 					PaddingS:  (c.LeftWindow + c.RightWindow) * 60.0,
+
 					Threshold: 0,
+
 					RespStyle: c.RespStyle,
+
 					CurveFunc: c.CurveFunc,
+
 					Levels:    v1Levels,
+
 				})
+
 			}
+
 			// 纭繚鏈夊熀鏈殑鍑哄嘲鏃堕棿锛屽鏋滄病鏈夛紝缁欓粯璁ゅ€?
+
 			for i, p := range out.Pollutants {
+
 				if p.StartS < 0 {
+
 					out.Pollutants[i].StartS = 0
+
 				}
+
 				if p.EndS <= p.StartS {
+
 					out.Pollutants[i].EndS = out.Pollutants[i].StartS
+
 				}
+
 			}
+
 			out.Groups = []v1.PeakGroupSpec{
+
 				{
+
 					Code:         "NMHC",
+
 					Name:         "闈炵敳鐑锋€荤儍",
+
 					IncludeCodes: []string{"THC"},
+
 					ExcludeCodes: []string{"CH4"},
+
 				},
+
 			}
+
 			out.Integration = v1.IntegrationSpec{
+
 				MinHeight: m.Integration.MinHeight,
+
 				Slope:     m.Integration.Slope,
+
 				MinWidth:  m.Integration.MinWidth,
+
 			}
+
 			return out
+
 		}
+
 	}
+
+
 
 	return v1.Method{
+
 		MethodID: "default",
+
 		Version:  1,
+
 		Pollutants: []v1.PollutantSpec{
+
 			{Code: "THC", Name: "鎬荤儍", StartS: 0, EndS: 20, PaddingS: 2, Threshold: 0},
+
 			{Code: "CH4", Name: "鐢茬兎", StartS: 20, EndS: 80, PaddingS: 2, Threshold: 0},
+
 		},
+
 		Groups: []v1.PeakGroupSpec{
+
 			{
+
 				Code:         "NMHC",
+
 				Name:         "闈炵敳鐑锋€荤儍",
+
 				IncludeCodes: []string{"THC"},
+
 				ExcludeCodes: []string{"CH4"},
+
 			},
+
 		},
+
 	}
+
 }
+
+
 
 func loadMethod() v1.Method {
+
 	return getActiveMethod()
+
 }
+
+
 
 func getState(states *sync.Map, deviceID string) *deviceState {
+
 	v, ok := states.Load(deviceID)
+
 	if ok {
+
 		return v.(*deviceState)
+
 	}
+
 	st := &deviceState{Twin: models.NewDigitalTwin(deviceID), lastTS: map[int]float64{}, lastResultByCh: map[int]lastResult{}, sessions: map[int]*runSession{}}
+
 	states.Store(deviceID, st)
+
 	return st
+
 }
+
+
 
 func envInt(name string, def int) int {
+
 	v := os.Getenv(name)
+
 	if v == "" {
+
 		return def
+
 	}
+
 	n, err := strconv.Atoi(v)
+
 	if err != nil {
+
 		return def
+
 	}
+
 	return n
+
 }
+
+
 
 func envBool(name string, def bool) bool {
+
 	v := os.Getenv(name)
+
 	if v == "" {
+
 		return def
+
 	}
+
 	v = strings.TrimSpace(strings.ToLower(v))
+
 	return v == "1" || v == "true" || v == "yes" || v == "on"
+
 }
+
+
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
+
 	w.Header().Set("Content-Type", "application/json")
+
 	w.WriteHeader(status)
+
 	_ = json.NewEncoder(w).Encode(v)
+
 }
+
+
 
 func envIntFromQuery(r *http.Request, key string, def int) int {
+
 	v := r.URL.Query().Get(key)
+
 	if v == "" {
+
 		return def
+
 	}
+
 	n, err := strconv.Atoi(v)
+
 	if err != nil {
+
 		return def
+
 	}
+
 	return n
+
 }
+
+
 
 func buildCmd(name string, channel int) (byte, []byte, error) {
+
 	switch name {
+
 	case "start":
+
 		return 22, []byte{byte(channel)}, nil
+
 	case "stop":
+
 		return 23, []byte{byte(channel)}, nil
+
 	case "startAll":
+
 		return 18, nil, nil
+
 	case "stopAll":
+
 		return 19, nil, nil
+
 	case "tempOn":
+
 		return 16, nil, nil
+
 	case "tempOff":
+
 		return 17, nil, nil
+
 	default:
+
 		return 0, nil, fmt.Errorf("unknown cmd name: %s", name)
+
 	}
+
 }
+
+
 
 // 鏉堝懎濮弬瑙勭《閿涙艾鐨?0~399 閻ㄥ嫭淇惔锕€鈧壈娴嗛幑顫礋 2 鐎涙濡?BCD 閻?
+
 // 灏?float * 100锛屾彁鍙?6 浣?BCD 鏁板瓧锛屾嫾瑁呮垚 3 瀛楄妭 (Cmd 10 闇€瑕?
+
 func floatToBcd3B(val float64) []byte {
+
 	v := int(math.Round(val * 100))
+
 	if v < 0 {
+
 		v = 0
+
 	}
+
 	if v > 999999 {
+
 		v = 999999
+
 	}
+
+
 
 	digits := make([]byte, 6)
+
 	for i := 5; i >= 0; i-- {
+
 		digits[i] = byte(v % 10)
+
 		v = v / 10
+
 	}
+
+
 
 	out := make([]byte, 3)
+
 	out[0] = (digits[0] << 4) | digits[1]
+
 	out[1] = (digits[2] << 4) | digits[3]
+
 	out[2] = (digits[4] << 4) | digits[5]
+
 	return out
+
 }
+
+
 
 // 瑙ｆ瀽 3 瀛楄妭 BCD 涓?float64
+
 func bcd3BToFloat(b []byte) float64 {
+
 	if len(b) < 3 {
+
 		return 0
+
 	}
+
 	v := int(b[0]>>4)*100000 + int(b[0]&0x0F)*10000 +
+
 		int(b[1]>>4)*1000 + int(b[1]&0x0F)*100 +
+
 		int(b[2]>>4)*10 + int(b[2]&0x0F)
+
 	return float64(v) / 100.0
+
 }
+
+
 
 func eventsToMatrix(events []models.EventRow) [8][8]float64 {
+
 	var m [8][8]float64
+
 	var prevMask int
+
 	for _, evt := range events {
+
 		mask := evt.EventMask
+
 		t := evt.Time
+
 		for ch := 0; ch < 8; ch++ {
+
 			wasOn := (prevMask & (1 << ch)) != 0
+
 			isOn := (mask & (1 << ch)) != 0
+
 			if !wasOn && isOn {
+
 				if m[ch][0] == 0 {
+
 					m[ch][0] = t
+
 				} else if m[ch][2] == 0 {
+
 					m[ch][2] = t
+
 				} else if m[ch][4] == 0 {
+
 					m[ch][4] = t
+
 				} else if m[ch][6] == 0 {
+
 					m[ch][6] = t
+
 				}
+
 			}
+
 			if wasOn && !isOn {
+
 				if m[ch][1] == 0 {
+
 					m[ch][1] = t
+
 				} else if m[ch][3] == 0 {
+
 					m[ch][3] = t
+
 				} else if m[ch][5] == 0 {
+
 					m[ch][5] = t
+
 				} else if m[ch][7] == 0 {
+
 					m[ch][7] = t
+
 				}
+
 			}
+
 		}
+
 		prevMask = mask
+
 	}
+
 	return m
+
 }
+
+
 
 func matrixToEvents(m [8][8]float64) []models.EventRow {
+
 	timeSet := make(map[float64]bool)
+
 	for ch := 0; ch < 8; ch++ {
+
 		for act := 0; act < 8; act++ {
+
 			if t := m[ch][act]; t > 0 {
+
 				timeSet[t] = true
+
 			}
+
 		}
+
 	}
+
 	var times []float64
+
 	for t := range timeSet {
+
 		times = append(times, t)
+
 	}
+
 	sort.Float64s(times)
 
+
+
 	var events []models.EventRow
+
 	var currentMask int
+
 	for _, t := range times {
+
 		for ch := 0; ch < 8; ch++ {
+
 			// actions: 0,2,4,6 are ON, 1,3,5,7 are OFF
+
 			if m[ch][0] == t || m[ch][2] == t || m[ch][4] == t || m[ch][6] == t {
+
 				currentMask |= (1 << ch)
+
 			}
+
 			if m[ch][1] == t || m[ch][3] == t || m[ch][5] == t || m[ch][7] == t {
+
 				currentMask &^= (1 << ch)
+
 			}
+
 		}
+
 		events = append(events, models.EventRow{Time: t, EventMask: currentMask})
+
 	}
+
 	return events
+
 }
 
+
+
 func parseEventTable(payload []byte) *[4][8]float64 {
+
 	if len(payload) < 96 {
+
 		return nil
+
 	}
+
 	var m [4][8]float64
+
 	idx := 0
+
 	for ch := 0; ch < 4; ch++ {
+
 		for act := 0; act < 8; act++ {
+
 			m[ch][act] = bcd3BToFloat(payload[idx : idx+3])
+
 			idx += 3
+
 		}
+
 	}
+
 	return &m
+
 }
+
+
+
 
 
 func sendCmd(st *deviceState, deviceID string, cmd byte, payload []byte) error {
+
 	st.mu.Lock()
+
 	conn := st.conn
+
 	st.mu.Unlock()
+
 	if conn == nil {
+
 		return fmt.Errorf("device %s not connected", deviceID)
+
 	}
+
 	seq := uint16(atomic.AddUint32(&st.seq, 1) & 0xFFFF)
+
 	frame, err := gckc.Encode(gckc.Frame{DeviceID: deviceID, Seq: seq, Cmd: cmd, Payload: payload})
+
 	if err != nil {
+
 		return err
+
 	}
+
 	_, err = conn.Write(frame)
+
 	return err
+
 }
 
+
+
 var indexHTML = `<!doctype html>
+
 <html lang="zh-CN">
+
 <head>
+
   <meta charset="utf-8" />
+
   <meta name="viewport" content="width=device-width,initial-scale=1" />
+
   <title>Edge Collector</title>
+
   <style>
+
     :root{--bg:#F3F6FB;--card:#FFFFFF;--stroke:#D9E2EF;--grid:#E6EEF8;--shadow:0 2px 10px rgba(15,39,71,0.08);--text:#1F2A44;--muted:#5B6B84;--primary:#2B6DFF;--dark:#3B3B3B;--dark2:#2F2F2F;--ok:#3AC268;--warn:#FF4D4F;--blueCard:#6FB6FF;--blueCard2:#56A6FF}
+
     *{box-sizing:border-box}
+
     html,body{height:100%}
+
     body{font-family:system-ui,"Segoe UI",Arial;margin:0;background:var(--bg);color:var(--text)}
+
     .mono{font-variant-numeric:tabular-nums}
+
     .shell{min-height:100%;display:flex;flex-direction:column}
+
     .topbar{background:linear-gradient(180deg,var(--dark),var(--dark2));color:#fff;display:flex;align-items:center;gap:18px;padding:10px 16px}
+
     .brand{font-size:26px;letter-spacing:1px;white-space:nowrap;margin-right:8px}
+
     .tabs{display:flex;gap:10px;align-items:center;flex:1}
+
     .tab{appearance:none;border:none;background:transparent;color:#fff;display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:10px;cursor:pointer;opacity:0.9}
+
     .tab:hover{background:rgba(255,255,255,0.08);opacity:1}
+
     .tab.active{background:rgba(255,255,255,0.14);opacity:1}
+
     .tabIcon{width:28px;height:28px;border-radius:999px;background:rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;font-size:14px;position:relative;flex:none}
+
     .tab.active .tabIcon::after{content:"";position:absolute;bottom:-6px;left:50%;transform:translateX(-50%);width:10px;height:10px;border-radius:999px;background:rgba(144,238,144,0.9);box-shadow:0 0 0 2px rgba(0,0,0,0.25)}
+
     .tabText{font-size:13px;white-space:nowrap}
+
     .flame{width:46px;height:46px;border-radius:14px;background:#fff;display:flex;align-items:center;justify-content:center;box-shadow:var(--shadow);border:1px solid var(--stroke)}
+
     .flameInner{width:22px;height:22px;background:var(--warn);border-radius:14px 14px 14px 0;transform:rotate(45deg)}
+
     .main{padding:14px 16px;flex:1}
+
     .view{display:none}
+
     .view.active{display:block}
+
     .card{background:var(--card);border:1px solid var(--stroke);border-radius:10px;box-shadow:var(--shadow)}
+
     .cardPad{padding:12px}
+
     .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+
     .spacer{flex:1}
+
     .btn{appearance:none;border:1px solid var(--stroke);background:#fff;color:var(--text);border-radius:8px;padding:8px 12px;cursor:pointer}
+
     .btn:hover{background:rgba(43,109,255,0.06);border-color:rgba(43,109,255,0.35)}
+
     .btn.dark{background:#444;color:#fff;border-color:#444}
+
     .btn.primary{background:var(--primary);border-color:var(--primary);color:#fff}
+
     .btn:disabled{opacity:0.45;cursor:not-allowed}
+
     .input,.select{border:1px solid var(--stroke);border-radius:8px;padding:8px 10px;background:#fff;color:var(--text);outline:none}
+
     .label{font-size:12px;color:var(--muted)}
+
     .dot{width:10px;height:10px;border-radius:999px;display:inline-block}
+
     .modeItem{display:flex;gap:6px;align-items:center;color:var(--text);font-size:13px}
+
     .modeItem input{accent-color:var(--primary)}
 
+
+
     #row{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+
     #status{padding:6px 10px;border:1px solid var(--stroke);border-radius:6px;background:#fff}
+
     #panel{display:grid;grid-template-columns:1fr 380px;gap:12px;align-items:start}
+
     #chartWrap{min-width:720px}
+
     @media (max-width:1200px){#panel{grid-template-columns:1fr}#chartWrap{min-width:unset}}
+
     canvas{border:1px solid var(--stroke);border-radius:8px;background:#fff;width:100%;height:440px;display:block}
+
     #right{border:1px solid var(--stroke);border-radius:10px;overflow:hidden;background:#fff;box-shadow:var(--shadow)}
+
     #tblTitle{background:rgba(31,42,68,0.92);color:#fff;padding:10px 12px;font-size:12px}
+
     table{width:100%;border-collapse:collapse}
+
     th{background:rgba(31,42,68,0.92);color:#fff;font-weight:600;text-align:left;padding:10px 12px;font-size:12px}
+
     td{padding:10px 12px;border-top:1px solid var(--grid);font-size:12px}
 
+
+
     .homeGrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;max-width:560px}
+
     .blueCard{background:linear-gradient(180deg,var(--blueCard),var(--blueCard2));border:1px solid rgba(255,255,255,0.65);border-radius:6px;min-height:118px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;color:#0b1b2f}
+
     .blueTitle{font-size:18px;opacity:0.92}
+
     .blueValue{font-size:28px;font-weight:700;letter-spacing:0.5px}
+
     .bottomBar{margin-top:12px;display:grid;grid-template-columns:1fr 60px 300px;gap:12px;align-items:end;max-width:980px}
+
     .statusStrip{background:linear-gradient(180deg,#87C2FF,#74B9FF);border-radius:6px;padding:8px 12px;color:#0b1b2f}
+
     .ctrlStrip{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+
     .ctrlBtn{background:#E9EEF5;border:1px solid #D0D7E2;border-radius:6px;padding:8px 12px;color:#20314f}
+
     .ctrlVal{background:#87C2FF;border:1px solid rgba(255,255,255,0.6);border-radius:6px;padding:8px 12px;color:#0b1b2f;min-width:100px;text-align:center}
+
     .ctrlAction{background:#2B6DFF;border:1px solid rgba(0,0,0,0.05);border-radius:6px;padding:8px 16px;color:#fff}
+
     .clock{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;background:#fff;border:1px solid #000;border-radius:2px;padding:10px 12px;font-size:28px;letter-spacing:1px;text-align:center}
+
     @media (max-width:1200px){.bottomBar{grid-template-columns:1fr}}
+
   </style>
+
 </head>
+
 <body>
+
   <div class="shell">
+
     <header class="topbar">
+
       <div class="brand">鍦ㄧ嚎鐩戞祴 <span style="font-size:12px;opacity:0.6;margin-left:10px">{{.AppVersion}}</span></div>
+
       <nav class="tabs" id="tabs">
+
         <button class="tab active" data-tab="overview"><span class="tabIcon">濮?/span><span class="tabText">濮掑倽顫?/span></button>
+
         <button class="tab" data-tab="curve"><span class="tabIcon">閺?/span><span class="tabText">閺囪尙鍤?/span></button>
+
         <button class="tab" data-tab="result"><span class="tabIcon">閺?/span><span class="tabText">缂佹挻鐏?/span></button>
+
         <button class="tab" data-tab="events"><span class="tabIcon">娴?/span><span class="tabText">娴滃娆?/span></button>
+
         <button class="tab" data-tab="logs"><span class="tabIcon">韫?/span><span class="tabText">閺冦儱绻?/span></button>
+
         <button class="tab" data-tab="settings"><span class="tabIcon">鐠?/span><span class="tabText">鐠佸墽鐤?/span></button>
+
       </nav>
+
       <div class="flame" title="閸涘﹨顒?><div class="flameInner"></div></div>
+
     </header>
 
+
+
     <main class="main">
+
       <section id="view-overview" class="view active">
+
         <div class="card cardPad" style="max-width:980px">
+
           <div class="homeGrid">
+
             <div class="blueCard"><div class="blueTitle">閹崵鍎?/div><div class="blueValue mono" id="kpi-thc">-</div></div>
+
             <div class="blueCard"><div class="blueTitle" style="opacity:0.0">閸楃姳缍?/div><div class="blueValue mono" id="kpi-thc2"> </div></div>
+
             <div class="blueCard"><div class="blueTitle">閻㈣尙鍏?/div><div class="blueValue mono" id="kpi-ch4">-</div></div>
+
             <div class="blueCard"><div class="blueTitle" style="opacity:0.0">閸楃姳缍?/div><div class="blueValue mono" id="kpi-ch4b"> </div></div>
+
             <div class="blueCard"><div class="blueTitle">闂堢偟鏁抽悜閿嬧偓鑽ゅ剭</div><div class="blueValue mono" id="kpi-nmhc">-</div></div>
+
             <div class="blueCard"><div class="blueTitle" style="opacity:0.0">閸楃姳缍?/div><div class="blueValue mono" id="kpi-nmhc2"> </div></div>
+
           </div>
+
+
 
           <div class="bottomBar">
+
             <div>
+
               <div class="statusStrip mono" id="home-status">閺冨爼妫? 0.000 min   娣団€冲娇: 0.000 pA</div>
+
               <div style="margin-top:10px" class="ctrlStrip">
+
                 <button class="ctrlBtn">鏉╂劘顢戝▎鈩冩殶</button>
+
                 <div class="ctrlVal mono" id="home-runCountVal">1720</div>
+
                 <button class="ctrlBtn">閸楁洑缍?/button>
+
                 <div class="ctrlVal mono" id="home-unitVal">mg/m椴?/div>
+
                 <button class="ctrlAction" id="home-inject">鏉╂稒鐗?/button>
+
               </div>
+
             </div>
+
             <div class="flame" title="閻樿埖鈧?><div class="flameInner"></div></div>
+
             <div class="clock mono" id="home-clock">0000-00-00 00:00:00</div>
+
           </div>
+
         </div>
+
         <div class="card cardPad" style="max-width:980px;margin-top:12px">
+
           <div id="tblTitle">鐠佹儳顦崚妤勩€?/div>
+
           <table>
+
             <thead><tr><th>鐠佹儳顦?/th><th>閸︺劎鍤?/th><th>lastSeen</th><th>143</th><th>last143</th></tr></thead>
+
             <tbody id="overview-devices"><tr><td class="mono" colspan="5" style="color:var(--muted)">缁涘绶?GC...</td></tr></tbody>
+
           </table>
+
         </div>
+
       </section>
+
+
 
       <section id="view-curve" class="view">
+
         <div class="card cardPad" style="max-width:1240px">
-          <div class="row" style="margin-bottom:10px">
-            <button class="btn dark">闁岸浜?缂佹挻娼?/button>
-            <label class="modeItem"><span class="dot" style="background:var(--ok)"></span><input type="radio" name="mode" checked /> 濮濓絽鐖舵潻娑欑壉</label>
-            <label class="modeItem"><span class="dot" style="background:#B7C0CF"></span><input type="radio" name="mode" /> 闂嗚埖鐨甸崣宥嗙垼</label>
-            <label class="modeItem"><span class="dot" style="background:#B7C0CF"></span><input type="radio" name="mode" /> 閺嶅洦鐨甸崣宥嗙垼</label>
-            <div class="spacer"></div>
-            <span class="label">娑撳妾?</span><input id="ylow" class="input mono" style="width:90px" value="0" />
-            <span class="label">娑撳﹪妾?</span><input id="yhigh" class="input mono" style="width:90px" value="40" />
-            <span class="label">闁插洭娉﹂弮鍫曟？:</span><input id="acqmin" class="input mono" style="width:50px" value="2" />
-            <span class="label">濠娾€崇潌閺冨爼妫?</span><input id="fullmin" class="input mono" style="width:50px" value="2" />
-            <span class="label">瀵邦亞骞嗛崨銊︽埂:</span><input id="cyclemin" class="input mono" style="width:50px" value="2" title="娑撳绔撮柦鍫ｅ殰閸斻劏绻橀弽椋庢畱闂傛挳娈ч弮鍫曟？" />
-            <span class="label">瀵邦亞骞嗗▎鈩冩殶:</span><input id="cyclemax" class="input mono" style="width:50px" value="9999" title="閺堚偓婢堆冩儕閻滎垵绻橀弽閿嬵偧閺? />
-          </div>
 
           <div class="row" style="margin-bottom:10px">
-            <div id="stat" class="mono">闁岸浜?: 0.000 min  0.000 pA  娣団€冲娇1:</div>
-            <label class="modeItem"><input id="autoy" type="checkbox" checked /> 瀹勪即鐝懛顏堚偓鍌氱安</label>
-            <label class="modeItem"><input id="loop" type="checkbox" checked /> 鏉╃偟鐢婚崚鍡樼€?/label>
-            <input id="name" class="input" placeholder="鐠嬪崬娴橀崥宥囆? style="width:200px" />
+
+            <button class="btn dark">闁岸浜?缂佹挻娼?/button>
+
+            <label class="modeItem"><span class="dot" style="background:var(--ok)"></span><input type="radio" name="mode" checked /> 濮濓絽鐖舵潻娑欑壉</label>
+
+            <label class="modeItem"><span class="dot" style="background:#B7C0CF"></span><input type="radio" name="mode" /> 闂嗚埖鐨甸崣宥嗙垼</label>
+
+            <label class="modeItem"><span class="dot" style="background:#B7C0CF"></span><input type="radio" name="mode" /> 閺嶅洦鐨甸崣宥嗙垼</label>
+
             <div class="spacer"></div>
-            <div class="kpi"><div class="label">閸︺劎鍤?/div><div id="status" class="mono">閺堫亣绻涢幒?/div></div>
-            <div class="kpi"><div class="label">鐠佹儳顦?/div><select id="device" class="select mono"><option value="">缁涘绶?GC...</option></select></div>
-            <div class="kpi"><div class="label">Channel</div><select id="chn" class="select mono"><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option></select></div>
-            <button class="btn primary" id="start">瀵偓婵?/button>
-            <button class="btn" id="stop">閸嬫粍顒?/button>
-            <button class="btn" id="clear">濞撳懎鐫?/button>
+
+            <span class="label">娑撳妾?</span><input id="ylow" class="input mono" style="width:90px" value="0" />
+
+            <span class="label">娑撳﹪妾?</span><input id="yhigh" class="input mono" style="width:90px" value="40" />
+
+            <span class="label">闁插洭娉﹂弮鍫曟？:</span><input id="acqmin" class="input mono" style="width:50px" value="2" />
+
+            <span class="label">濠娾€崇潌閺冨爼妫?</span><input id="fullmin" class="input mono" style="width:50px" value="2" />
+
+            <span class="label">瀵邦亞骞嗛崨銊︽埂:</span><input id="cyclemin" class="input mono" style="width:50px" value="2" title="娑撳绔撮柦鍫ｅ殰閸斻劏绻橀弽椋庢畱闂傛挳娈ч弮鍫曟？" />
+
+            <span class="label">瀵邦亞骞嗗▎鈩冩殶:</span><input id="cyclemax" class="input mono" style="width:50px" value="9999" title="閺堚偓婢堆冩儕閻滎垵绻橀弽閿嬵偧閺? />
+
           </div>
+
+
+
+          <div class="row" style="margin-bottom:10px">
+
+            <div id="stat" class="mono">闁岸浜?: 0.000 min  0.000 pA  娣団€冲娇1:</div>
+
+            <label class="modeItem"><input id="autoy" type="checkbox" checked /> 瀹勪即鐝懛顏堚偓鍌氱安</label>
+
+            <label class="modeItem"><input id="loop" type="checkbox" checked /> 鏉╃偟鐢婚崚鍡樼€?/label>
+
+            <input id="name" class="input" placeholder="鐠嬪崬娴橀崥宥囆? style="width:200px" />
+
+            <div class="spacer"></div>
+
+            <div class="kpi"><div class="label">閸︺劎鍤?/div><div id="status" class="mono">閺堫亣绻涢幒?/div></div>
+
+            <div class="kpi"><div class="label">鐠佹儳顦?/div><select id="device" class="select mono"><option value="">缁涘绶?GC...</option></select></div>
+
+            <div class="kpi"><div class="label">Channel</div><select id="chn" class="select mono"><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option></select></div>
+
+            <button class="btn primary" id="start">瀵偓婵?/button>
+
+            <button class="btn" id="stop">閸嬫粍顒?/button>
+
+            <button class="btn" id="clear">濞撳懎鐫?/button>
+
+          </div>
+
+
 
           <div id="panel">
+
             <div id="chartWrap" class="card" style="padding:10px">
+
               <canvas id="cv" width="1200" height="440"></canvas>
+
             </div>
+
             <div>
+
               <div id="right">
+
                 <div id="tblTitle">閸氬秶袨 | 閸氼偊鍣?mg/m椴?</div>
+
                 <table>
+
                   <thead><tr><th>閸氬秶袨</th><th>閸氼偊鍣?mg/m椴?</th></tr></thead>
+
                   <tbody id="tbody">
+
                     <tr><td>閹崵鍎?/td><td class="mono">-</td></tr>
+
                     <tr><td>閻㈣尙鍏?/td><td class="mono">-</td></tr>
+
                     <tr><td>闂堢偟鏁抽悜閿嬧偓鑽ゅ剭</td><td class="mono">-</td></tr>
+
                   </tbody>
+
                 </table>
+
               </div>
+
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
+
                 <div class="card" style="border-radius:10px;overflow:hidden">
+
                   <div id="tblTitle">鐎圭偞绁?/div>
+
                   <table>
+
                     <tbody>
+
                       <tr><td>鏉炶姤鐨?/td><td class="mono" id="gas-carrier">-</td></tr>
+
                       <tr><td>濮樸垺鐨?/td><td class="mono" id="gas-h2">-</td></tr>
+
                       <tr><td>缁岀儤鐨?/td><td class="mono" id="gas-air">-</td></tr>
+
                     </tbody>
+
                   </table>
+
                 </div>
+
                 <div class="card" style="border-radius:10px;overflow:hidden">
+
                   <div id="tblTitle">鐎圭偞绁撮埄?/div>
+
                   <table>
+
                     <tbody>
+
                       <tr><td>閺岃京顔?/td><td class="mono" id="temp-col">-</td></tr>
+
                       <tr><td>闂冣偓濞?/td><td class="mono" id="temp-inj1">-</td></tr>
+
                       <tr><td>濡偓濞?</td><td class="mono" id="temp-det1">-</td></tr>
+
                       <tr><td>鏉╂稒鐗?</td><td class="mono" id="temp-inj2">-</td></tr>
+
                     </tbody>
+
                   </table>
+
                 </div>
+
               </div>
+
               <div class="flame" style="margin-top:12px" title="閻樿埖鈧?><div class="flameInner"></div></div>
+
               <div id="dbg" class="mono" style="margin-top:10px;color:var(--muted)"></div>
+
             </div>
+
           </div>
+
         </div>
+
       </section>
+
+
 
       <section id="view-result" class="view">
+
         <div class="card cardPad" style="max-width:1240px">
+
           <div class="row" style="margin-bottom:10px">
+
             <div class="label">NMHC 缂佹挻鐏夐崢鍡楀蕉閿涘牊鈧崵鍎?閻㈣尙鍏?闂堢偟鏁抽悜閿嬧偓鑽ゅ剭閿?/div>
+
             <div class="spacer"></div>
+
             <span class="label">瀵偓婵?/span><input id="res-from" class="input mono" style="width:220px" placeholder="YYYY-MM-DD HH:mm:ss" />
+
             <span class="label">缂佹挻娼?/span><input id="res-to" class="input mono" style="width:220px" placeholder="YYYY-MM-DD HH:mm:ss" />
+
             <button class="btn dark" id="res-export">鐎电厧鍤瑿SV</button>
+
             <button class="btn dark" id="res-delete">閸掔娀娅庨弮鍫曟？濞?/button>
+
           </div>
+
           <div class="card" style="border-radius:10px;overflow:hidden">
+
             <div id="tblTitle">鐠佹澘缍嶉幎銉ㄣ€?/div>
+
             <table>
+
               <thead><tr><th>閺冨爼妫?/th><th>閹崵鍎?/th><th>閻㈣尙鍏?/th><th>闂堢偟鏁抽悜閿嬧偓鑽ゅ剭</th></tr></thead>
+
               <tbody id="res-tbody"><tr><td class="mono" colspan="4" style="color:var(--muted)">閺嗗倹妫ら弫鐗堝祦</td></tr></tbody>
+
             </table>
+
           </div>
+
         </div>
+
       </section>
+
+
 
       <section id="view-events" class="view">
+
         <div class="card cardPad" style="max-width:1240px">
+
           <div class="row" style="margin-bottom:10px">
+
             <label class="modeItem"><input id="evt-only-selected" type="checkbox" checked /> 娴犲懎缍嬮崜宥堫啎婢?/label>
+
             <div class="spacer"></div>
+
             <button class="btn dark" id="evt-clear">濞撳懐鈹?/button>
+
           </div>
+
           <div class="card" style="border-radius:10px;overflow:hidden">
+
             <div id="tblTitle">娴滃娆㈠ù?/div>
+
             <table>
+
               <thead><tr><th>閺冨爼妫?/th><th>鐠佹儳顦?/th><th>缁鐎?/th><th>閹芥顩?/th></tr></thead>
+
               <tbody id="evt-tbody"><tr><td class="mono" colspan="4" style="color:var(--muted)">閺嗗倹妫ら弫鐗堝祦</td></tr></tbody>
+
             </table>
+
           </div>
+
         </div>
+
       </section>
+
+
 
       <section id="view-logs" class="view">
+
         <div class="card cardPad" style="max-width:1240px">
+
           <div id="tblTitle">鐠嬪啳鐦弮銉ョ箶</div>
+
           <pre id="logs-pre" class="mono" style="margin:0;padding:12px;white-space:pre-wrap"></pre>
+
         </div>
+
       </section>
+
+
 
       <section id="view-settings" class="view">
+
         <div class="card cardPad" style="max-width:980px">
+
           <div id="tblTitle">鐠佸墽鐤?/div>
+
           <div class="row" style="margin-top:12px">
+
             <div><div class="label">姒涙顓诲鈥崇潌閺冨爼妫?min)</div><input id="set-fullmin" class="input mono" style="width:120px" value="2" /></div>
+
             <div><div class="label">姒涙顓绘稉瀣</div><input id="set-ylow" class="input mono" style="width:120px" value="0" /></div>
+
             <div><div class="label">姒涙顓绘稉濠囨</div><input id="set-yhigh" class="input mono" style="width:120px" value="40" /></div>
+
             <div><div class="label">姒涙顓诲畡浼寸彯閼奉亪鈧倸绨?/div><label class="modeItem"><input id="set-autoy" type="checkbox" checked /> 閸氼垳鏁?/label></div>
+
             <div><div class="label">姒涙顓婚柌鍥肠閺冨爼妫?min)</div><input id="set-acqmin" class="input mono" style="width:120px" value="2" /></div>
+
             <div class="spacer"></div>
+
             <button class="btn primary" id="set-save">娣囨繂鐡?/button>
+
           </div>
+
           <div class="row" style="margin-top:12px">
+
             <div><div class="label">鏉炶姤鐨?EPC idx</div><select id="set-epc-carrier" class="select mono" style="width:120px"></select></div>
+
             <div><div class="label">濮樸垺鐨?EPC idx</div><select id="set-epc-h2" class="select mono" style="width:120px"></select></div>
+
             <div><div class="label">缁岀儤鐨?EPC idx</div><select id="set-epc-air" class="select mono" style="width:120px"></select></div>
+
             <div class="spacer"></div>
+
             <div class="label">閹绘劗銇氶敍姝ヾx 閺夈儴鍤?Cmd=159 EPC 娑撳﹥濮ら惃鍕蒋閻╊喖绨崣鍑ょ礄娴?0 瀵偓婵绱?/div>
+
           </div>
+
           <div class="row" style="margin-top:12px">
+
             <button class="btn dark" id="set-open-method">閺傝纭?/button>
+
             <button class="btn dark" id="set-open-processing">鐠嬪崬娴樻径鍕倞</button>
+
             <button class="btn dark" id="set-open-reports">妤傛楠囬幎銉ㄣ€?/button>
+
             <div class="spacer"></div>
+
             <div class="label" style="color:var(--muted)">娴滃瞼楠囬崗銉ュ經閸楃姳缍呴敍姘瑝閸楃姷鏁ゆい鑸电埉閺嶅洨顒?/div>
+
           </div>
+
         </div>
+
       </section>
+
     </main>
+
   </div>
 
+
+
   <script>
+
     const tabsEl = document.getElementById('tabs');
+
     const views = {
+
       overview: document.getElementById('view-overview'),
+
       curve: document.getElementById('view-curve'),
+
       result: document.getElementById('view-result'),
+
       events: document.getElementById('view-events'),
+
       logs: document.getElementById('view-logs'),
+
       settings: document.getElementById('view-settings'),
+
     };
 
+
+
     function setActiveTab(tab){
+
       currentTab = tab || 'overview';
+
       for(const b of tabsEl.querySelectorAll('.tab')){
+
         b.classList.toggle('active', b.dataset.tab === tab);
+
       }
+
       for(const k in views){
+
         views[k].classList.toggle('active', k === tab);
+
       }
+
       const sel = selectedDevice();
+
       if(sel) saveUiToBackend(sel);
+
       if(tab === 'curve'){
+
         if(sel && !suppressUiSave){
+
           const ch = Number(chnEl.value || '0');
+
           const s = streams.get(streamKey(sel, ch));
+
           if(!s || !s.pts || s.pts.length === 0){
+
             restoreSessionOnly(sel).finally(()=>{});
+
           }
+
         }
+
         draw();
+
       }
+
       if(tab === 'overview') renderOverview();
+
       if(tab === 'result') renderResults();
+
       if(tab === 'events') renderEvents();
+
       if(tab === 'logs') renderLogs();
+
     }
 
+
+
     tabsEl.addEventListener('click', (e)=>{
+
       const btn = e.target.closest('.tab');
+
       if(!btn) return;
+
       setActiveTab(btn.dataset.tab);
+
     });
 
+
+
     const statusEl = document.getElementById('status');
+
     const deviceEl = document.getElementById('device');
+
     const chnEl = document.getElementById('chn');
+
     const ylowEl = document.getElementById('ylow');
+
     const yhighEl = document.getElementById('yhigh');
+
     const acqminEl = document.getElementById('acqmin');
+
     const fullminEl = document.getElementById('fullmin');
+
     const autoyEl = document.getElementById('autoy');
+
     const loopEl = document.getElementById('loop');
+
     const statEl = document.getElementById('stat');
+
     const cv = document.getElementById('cv');
+
     const ctx = cv.getContext('2d');
+
     const streams = new Map();
+
     const seenDevices = new Set();
+
     let lastActiveDevice = '';
+
     let deviceInfo = new Map();
+
     let serverInfo = null;
+
     const results = new Map();
 
+
+
     const gasCarrierEl = document.getElementById('gas-carrier');
+
     const gasH2El = document.getElementById('gas-h2');
+
     const gasAirEl = document.getElementById('gas-air');
+
     const tempColEl = document.getElementById('temp-col');
+
     const tempInj1El = document.getElementById('temp-inj1');
+
     const tempDet1El = document.getElementById('temp-det1');
+
     const tempInj2El = document.getElementById('temp-inj2');
+
+
 
     const overviewDevicesEl = document.getElementById('overview-devices');
 
+
+
     const resFromEl = document.getElementById('res-from');
+
     const resToEl = document.getElementById('res-to');
+
     const resTbodyEl = document.getElementById('res-tbody');
+
     const resExportEl = document.getElementById('res-export');
+
     const resDeleteEl = document.getElementById('res-delete');
 
+
+
     const evtOnlySelectedEl = document.getElementById('evt-only-selected');
+
     const evtClearEl = document.getElementById('evt-clear');
+
     const evtTbodyEl = document.getElementById('evt-tbody');
+
+
 
     const logsPreEl = document.getElementById('logs-pre');
 
+
+
     const setAcqMinEl = document.getElementById('set-acqmin');
+
     const setEpcCarrierEl = document.getElementById('set-epc-carrier');
+
     const setEpcH2El = document.getElementById('set-epc-h2');
+
     const setEpcAirEl = document.getElementById('set-epc-air');
+
     const setOpenMethodEl = document.getElementById('set-open-method');
+
     const setOpenProcessingEl = document.getElementById('set-open-processing');
+
     const setOpenReportsEl = document.getElementById('set-open-reports');
 
+
+
     const acqMinStorageKey = 'chrom.acqmin';
+
     try {
+
       const v = localStorage.getItem(acqMinStorageKey);
+
       if(v !== null && v !== undefined && acqminEl) {
+
         acqminEl.value = v;
+
       }
+
     } catch {}
+
     if(acqminEl){
+
       const saveAcqMin = ()=>{
+
         try { localStorage.setItem(acqMinStorageKey, String(acqminEl.value || '')); } catch {}
+
       };
+
       acqminEl.addEventListener('input', saveAcqMin);
+
       acqminEl.addEventListener('change', ()=>{
+
         saveAcqMin();
+
         saveUiToBackend(selectedDevice());
+
       });
+
     }
+
+
 
     const loopStorageKey = 'chrom.loop';
+
     const cycleMinStorageKey = 'chrom.cycleMin';
+
     const cycleMaxStorageKey = 'chrom.cycleMax';
+
     try {
+
       const v = localStorage.getItem(loopStorageKey);
+
       if(v !== null && v !== undefined && loopEl) {
+
         loopEl.checked = (v === '1' || v === 'true');
+
       }
+
       if(cycleminEl) {
+
         const cMin = localStorage.getItem(cycleMinStorageKey);
+
         if(cMin !== null) cycleminEl.value = cMin;
+
       }
+
       if(cyclemaxEl) {
+
         const cMax = localStorage.getItem(cycleMaxStorageKey);
+
         if(cMax !== null) cyclemaxEl.value = cMax;
+
       }
+
     } catch {}
+
     if(loopEl){
+
       const saveLoop = ()=>{
+
         try { localStorage.setItem(loopStorageKey, loopEl.checked ? '1' : '0'); } catch {}
+
         saveUiToBackend(selectedDevice());
+
       };
+
       loopEl.addEventListener('change', saveLoop);
+
     }
+
     if(cycleminEl){
+
       cycleminEl.addEventListener('change', () => {
+
         try { localStorage.setItem(cycleMinStorageKey, cycleminEl.value); } catch {}
+
         saveUiToBackend(selectedDevice());
+
       });
+
     }
+
     if(cyclemaxEl){
+
       cyclemaxEl.addEventListener('change', () => {
+
         try { localStorage.setItem(cycleMaxStorageKey, cyclemaxEl.value); } catch {}
+
         saveUiToBackend(selectedDevice());
+
       });
+
     }
+
     
+
     const homeStatusEl = document.getElementById('home-status');
+
     const homeClockEl = document.getElementById('home-clock');
+
     const homeInjectEl = document.getElementById('home-inject');
 
+
+
     const nmhcHistPrefix = 'nmhc_history.';
+
     const nmhcHistByDevice = new Map();
+
     const nmhcFetchByDevice = new Map();
+
     const evtBuf = [];
+
     const evtMax = 400;
 
+
+
     function nowStr(){
+
       const d = new Date();
+
       const yyyy = d.getFullYear();
+
       const mm = String(d.getMonth()+1).padStart(2,'0');
+
       const dd = String(d.getDate()).padStart(2,'0');
+
       const hh = String(d.getHours()).padStart(2,'0');
+
       const mi = String(d.getMinutes()).padStart(2,'0');
+
       const ss = String(d.getSeconds()).padStart(2,'0');
+
       return yyyy + '-' + mm + '-' + dd + ' ' + hh + ':' + mi + ':' + ss;
+
     }
+
+
 
     function parseTimeText(s){
+
       const t = String(s || '').trim();
+
       if(!t) return null;
+
       const t2 = t.replace('T',' ').replace(/\//g,'-');
+
       const parts = t2.split(' ');
+
       if(parts.length < 2) return null;
+
       const d = new Date(parts[0] + 'T' + parts[1]);
+
       if(!isFinite(d.getTime())) return null;
+
       return d;
+
     }
+
+
 
     function nmhcEntryFromResult(deviceId, msg){
+
       const at = (msg && msg.at) ? new Date(msg.at) : new Date();
+
       const res = msg && msg.result ? msg.result : null;
+
       if(!res || !Array.isArray(res.pollutants)) return null;
+
       const by = new Map();
+
       for(const p of res.pollutants){
+
         if(p && (p.code || p.name)) by.set(p.code || p.name, p);
+
       }
+
       const thc = by.get('THC');
+
       const ch4 = by.get('CH4');
+
       const thcV = thc && isFinite(thc.height) ? Number(thc.height) : null;
+
       const ch4V = ch4 && isFinite(ch4.height) ? Number(ch4.height) : null;
+
       const nmhcV = (thcV !== null && ch4V !== null) ? (thcV - ch4V) : null;
+
       return { t: at.toISOString(), deviceId, traceId: (res.traceId || ''), thc: thcV, ch4: ch4V, nmhc: nmhcV };
+
     }
+
+
 
     function loadNmchHistory(deviceId){
+
       if(nmhcHistByDevice.has(deviceId)) return nmhcHistByDevice.get(deviceId);
+
       let arr = [];
+
       try{
+
         const raw = localStorage.getItem(nmhcHistPrefix + deviceId);
+
         if(raw){
+
           const v = JSON.parse(raw);
+
           if(Array.isArray(v)) arr = v;
+
         }
+
       }catch{}
+
       nmhcHistByDevice.set(deviceId, arr);
+
       return arr;
+
     }
+
+
 
     function saveNmchHistory(deviceId){
+
       const arr = nmhcHistByDevice.get(deviceId) || [];
+
       try{ localStorage.setItem(nmhcHistPrefix + deviceId, JSON.stringify(arr.slice(-5000))); } catch {}
+
     }
+
+
 
     function getNmhcFetchState(deviceId){
+
       let st = nmhcFetchByDevice.get(deviceId);
+
       if(!st){
+
         st = { inFlight: false, lastKey: '', lastOkAtMs: 0 };
+
         nmhcFetchByDevice.set(deviceId, st);
+
       }
+
       return st;
+
     }
+
+
 
     function nmhcRangeKey(fromD, toD){
+
       return (fromD ? fromD.toISOString() : '') + '|' + (toD ? toD.toISOString() : '');
+
     }
+
+
 
     async function fetchNmhcHistory(deviceId, fromD, toD){
+
       const qs = new URLSearchParams();
+
       qs.set('deviceId', deviceId);
+
       if(fromD) qs.set('from', fromD.toISOString());
+
       if(toD) qs.set('to', toD.toISOString());
+
       qs.set('limit', '5000');
+
       const res = await fetch('/api/v1/results/nmhc?' + qs.toString(), {method:'GET'});
+
       const j = await res.json().catch(()=>null);
+
       if(!res.ok){
+
         const msg = j && j.error ? String(j.error) : 'request failed';
+
         throw new Error(msg);
+
       }
+
       if(!Array.isArray(j)) return [];
+
       const out = [];
+
       for(const r of j){
+
         if(!r || !r.time) continue;
+
         out.push({
+
           t: String(r.time),
+
           deviceId: r.deviceId ? String(r.deviceId) : deviceId,
+
           traceId: r.traceId ? String(r.traceId) : '',
+
           thc: (r.thc === null || r.thc === undefined) ? null : Number(r.thc),
+
           ch4: (r.ch4 === null || r.ch4 === undefined) ? null : Number(r.ch4),
+
           nmhc: (r.nmhc === null || r.nmhc === undefined) ? null : Number(r.nmhc),
+
         });
+
       }
+
       return out;
+
     }
+
+
 
     function kickFetchNmhcHistory(deviceId, fromD, toD, force){
+
       if(!deviceId) return;
+
       const st = getNmhcFetchState(deviceId);
+
       const key = nmhcRangeKey(fromD, toD);
+
       const now = Date.now();
+
       if(!force){
+
         if(st.inFlight && st.lastKey === key) return;
+
         if(st.lastKey === key && (now - st.lastOkAtMs) < 1500) return;
+
       }
+
       st.inFlight = true;
+
       st.lastKey = key;
+
       fetchNmhcHistory(deviceId, fromD, toD).then(arr=>{
+
         nmhcHistByDevice.set(deviceId, arr);
+
         saveNmchHistory(deviceId);
+
         st.inFlight = false;
+
         st.lastOkAtMs = Date.now();
+
         applyKpiFromLatestNmhc(deviceId);
+
         const sel = selectedDevice();
+
         if(sel === deviceId){
+
           const run = document.getElementById('home-runCountVal');
+
           if(run) run.textContent = String(arr.length);
+
         }
+
         if(views.result && views.result.classList.contains('active') && selectedDevice() === deviceId){
+
           renderResults();
+
         }
+
       }).catch(()=>{
+
         st.inFlight = false;
+
       });
+
     }
+
+
 
     function addNmchHistory(deviceId, entry){
+
       if(!entry) return;
+
       const arr = loadNmchHistory(deviceId);
+
       arr.push(entry);
+
       if(arr.length > 5000) arr.splice(0, arr.length-5000);
+
       saveNmchHistory(deviceId);
+
       const sel = selectedDevice();
+
       if(sel === deviceId){
+
         const run = document.getElementById('home-runCountVal');
+
         if(run) run.textContent = String(arr.length);
+
       }
+
     }
+
+
 
     function applyKpiFromLatestNmhc(deviceId){
+
       const arr = loadNmchHistory(deviceId);
+
       let latest = null;
+
       for(const it of arr){
+
         if(!it || !it.t) continue;
+
         if(!latest){ latest = it; continue; }
+
         if(new Date(it.t).getTime() > new Date(latest.t).getTime()) latest = it;
+
       }
+
       const k1 = document.getElementById('kpi-thc');
+
       const k2 = document.getElementById('kpi-ch4');
+
       const k3 = document.getElementById('kpi-nmhc');
+
       const f4 = (v)=> (v === null || v === undefined || !isFinite(Number(v))) ? '-' : Number(v).toFixed(4);
+
       const thc = latest ? latest.thc : null;
+
       const ch4 = latest ? latest.ch4 : null;
+
       if(k1) k1.textContent = f4(thc);
+
       if(k2) k2.textContent = f4(ch4);
+
       if(k3){
+
         k3.textContent = f4(latest ? latest.nmhc : null);
+
       }
+
+
 
       const table = document.getElementById('tbody');
+
       if(table){
+
         const rows = table.querySelectorAll('tr');
+
         for(const tr of rows){
+
           const tds = tr.querySelectorAll('td');
+
           if(tds.length < 2) continue;
+
           const name = (tds[0].textContent || '').trim();
+
           if(name === '閹崵鍎?) tds[1].textContent = f4(thc);
+
           if(name === '閻㈣尙鍏?) tds[1].textContent = f4(ch4);
+
           if(name === '闂堢偟鏁抽悜閿嬧偓鑽ゅ剭'){
+
             tds[1].textContent = f4(latest ? latest.nmhc : null);
+
           }
+
         }
+
       }
+
     }
+
+
 
     function pushEvtRow(deviceId, type, summary){
+
       evtBuf.push({ t: nowStr(), deviceId: deviceId || '', type, summary: summary || '' });
+
       if(evtBuf.length > evtMax) evtBuf.splice(0, evtBuf.length-evtMax);
+
     }
+
+
 
     function renderOverview(){
+
       if(!overviewDevicesEl) return;
+
       const rows = [];
+
       for(const [id, d] of deviceInfo.entries()){
+
         if(!String(id).startsWith('GC')) continue;
+
         const c143 = d && d.cmdCounts ? (d.cmdCounts['143'] || d.cmdCounts[143] || 0) : 0;
+
         rows.push({id, connected: !!d.connected, lastSeen: d.lastSeen || '', c143, last143: d.last143 || ''});
+
       }
+
       rows.sort((a,b)=> String(a.id).localeCompare(String(b.id)));
+
       if(rows.length === 0){
+
         overviewDevicesEl.innerHTML = '<tr><td class="mono" colspan="5" style="color:var(--muted)">缁涘绶?GC...</td></tr>';
+
         return;
+
       }
+
       overviewDevicesEl.innerHTML = rows.map(r=>{
+
         return '<tr>' +
+
           '<td class="mono">' + r.id + '</td>' +
+
           '<td class="mono">' + (r.connected ? 'Y' : 'N') + '</td>' +
+
           '<td class="mono">' + (r.lastSeen ? String(r.lastSeen).replace('T',' ').replace('Z','') : '-') + '</td>' +
+
           '<td class="mono">' + String(r.c143) + '</td>' +
+
           '<td class="mono">' + (r.last143 ? String(r.last143).replace('T',' ').replace('Z','') : '-') + '</td>' +
+
         '</tr>';
+
       }).join('');
+
     }
+
+
 
     function renderResults(){
+
       if(!resTbodyEl) return;
+
       const sel = selectedDevice();
+
       if(!sel){
+
         resTbodyEl.innerHTML = '<tr><td class="mono" colspan="4" style="color:var(--muted)">閺堫亪鈧瀚ㄧ拋鎯ь槵</td></tr>';
+
         return;
+
       }
+
       const fromD = parseTimeText(resFromEl && resFromEl.value);
+
       const toD = parseTimeText(resToEl && resToEl.value);
+
       kickFetchNmhcHistory(sel, fromD, toD, false);
+
       const arr = loadNmchHistory(sel);
+
       const fetchSt = getNmhcFetchState(sel);
+
       if(arr.length === 0 && fetchSt.inFlight){
+
         resTbodyEl.innerHTML = '<tr><td class="mono" colspan="4" style="color:var(--muted)">閸旂姾娴囨稉?..</td></tr>';
+
         return;
+
       }
+
       const fromT = fromD ? fromD.getTime() : null;
+
       const toT = toD ? toD.getTime() : null;
+
       const f4 = (v)=> (v === null || v === undefined || !isFinite(Number(v))) ? '-' : Number(v).toFixed(4);
+
       const items = [];
+
       for(const it of arr){
+
         const t = new Date(it.t);
+
         const tt = t.getTime();
+
         if(fromT !== null && tt < fromT) continue;
+
         if(toT !== null && tt > toT) continue;
+
         items.push({t, it});
+
       }
+
       items.sort((a,b)=> b.t.getTime() - a.t.getTime());
+
       if(items.length === 0){
+
         resTbodyEl.innerHTML = '<tr><td class="mono" colspan="4" style="color:var(--muted)">閺嗗倹妫ら弫鐗堝祦</td></tr>';
+
         return;
+
       }
+
       resTbodyEl.innerHTML = items.slice(0, 2000).map(x=>{
+
         const t = x.t;
+
         const ts = String(t.getFullYear()) + '-' + String(t.getMonth()+1).padStart(2,'0') + '-' + String(t.getDate()).padStart(2,'0') + ' ' + String(t.getHours()).padStart(2,'0') + ':' + String(t.getMinutes()).padStart(2,'0') + ':' + String(t.getSeconds()).padStart(2,'0');
+
         return '<tr>' +
+
           '<td class="mono">' + ts + '</td>' +
+
           '<td class="mono">' + f4(x.it.thc) + '</td>' +
+
           '<td class="mono">' + f4(x.it.ch4) + '</td>' +
+
           '<td class="mono">' + f4(x.it.nmhc) + '</td>' +
+
         '</tr>';
+
       }).join('');
+
     }
+
+
 
     function renderEvents(){
+
       if(!evtTbodyEl) return;
+
       const onlySel = !!(evtOnlySelectedEl && evtOnlySelectedEl.checked);
+
       const sel = selectedDevice();
+
       const items = onlySel && sel ? evtBuf.filter(e=> e.deviceId === sel) : evtBuf.slice();
+
       if(items.length === 0){
+
         evtTbodyEl.innerHTML = '<tr><td class="mono" colspan="4" style="color:var(--muted)">閺嗗倹妫ら弫鐗堝祦</td></tr>';
+
         return;
+
       }
+
       evtTbodyEl.innerHTML = items.slice(-300).reverse().map(e=>{
+
         return '<tr>' +
+
           '<td class="mono">' + e.t + '</td>' +
+
           '<td class="mono">' + (e.deviceId || '-') + '</td>' +
+
           '<td class="mono">' + e.type + '</td>' +
+
           '<td class="mono">' + String(e.summary || '') + '</td>' +
+
         '</tr>';
+
       }).join('');
+
     }
+
+
 
     function renderLogs(){
+
       if(!logsPreEl) return;
+
       const sel = selectedDevice();
+
       const lines = [];
+
       if(serverInfo){
+
         lines.push('server.pid=' + (serverInfo.pid || ''));
+
         lines.push('server.startedAt=' + (serverInfo.startedAt || ''));
+
         lines.push('server.httpPort=' + (serverInfo.httpPort || ''));
+
         lines.push('server.tcpPorts=' + (serverInfo.tcpPorts ? JSON.stringify(serverInfo.tcpPorts) : ''));
+
       }
+
       if(sel){
+
         const d = deviceInfo.get(sel);
+
         if(d){
+
           const c143 = d && d.cmdCounts ? (d.cmdCounts['143'] || d.cmdCounts[143] || 0) : 0;
+
           lines.push('device=' + sel + ' connected=' + (!!d.connected) + ' lastCmd=' + d.lastCmd + ' 143=' + c143);
+
           lines.push('lastSeen=' + (d.lastSeen || '') + ' last143=' + (d.last143 || ''));
+
         }
+
         const s = streams.get(streamKey(sel, Number(chnEl.value||'0')));
+
         if(s && s.cycleStartedAtMs !== null){
+
           lines.push('elapsed=' + (s.lastElapsedS/60).toFixed(3) + 'min fullWindow=' + (fullWindowS()/60).toFixed(3) + 'min');
+
         }
+
       }
+
       const dbgEl = document.getElementById('dbg');
+
       if(dbgEl && dbgEl.textContent) lines.push('dbg=' + dbgEl.textContent);
+
       logsPreEl.textContent = lines.join('\n');
+
     }
+
+
 
     const epcMapKey = 'online_monitor_epc_map';
+
     function loadEpcMap(){
+
       try{
+
         const raw = localStorage.getItem(epcMapKey);
+
         if(raw){
+
           const v = JSON.parse(raw);
+
           const c = Number(v.carrier);
+
           const h = Number(v.h2);
+
           const a = Number(v.air);
+
           return { carrier: isFinite(c) && c >= 0 ? c : 0, h2: isFinite(h) && h >= 0 ? h : 1, air: isFinite(a) && a >= 0 ? a : 2 };
+
         }
+
       }catch{}
+
       return { carrier: 0, h2: 1, air: 2 };
+
     }
+
+
 
     function saveEpcMap(map){
+
       try{ localStorage.setItem(epcMapKey, JSON.stringify(map)); }catch{}
+
     }
+
+
 
     function fillEpcSelects(maxIdx){
+
       const n = Math.max(3, Math.min(64, Number(maxIdx || 12)));
+
       const opts = [];
+
       for(let i=0;i<n;i++){
+
         opts.push('<option value=\"' + i + '\">' + i + '</option>');
+
       }
+
       if(setEpcCarrierEl) setEpcCarrierEl.innerHTML = opts.join('');
+
       if(setEpcH2El) setEpcH2El.innerHTML = opts.join('');
+
       if(setEpcAirEl) setEpcAirEl.innerHTML = opts.join('');
+
       const m = loadEpcMap();
+
       if(setEpcCarrierEl) setEpcCarrierEl.value = String(m.carrier);
+
       if(setEpcH2El) setEpcH2El.value = String(m.h2);
+
       if(setEpcAirEl) setEpcAirEl.value = String(m.air);
+
     }
+
+
 
     function exportResultsCsv(){
+
       const sel = selectedDevice();
+
       if(!sel) return;
+
       const fromD = parseTimeText(resFromEl && resFromEl.value);
+
       const toD = parseTimeText(resToEl && resToEl.value);
+
       const a = document.createElement('a');
+
       const qs = new URLSearchParams();
+
       qs.set('deviceId', sel);
+
       if(fromD) qs.set('from', fromD.toISOString());
+
       if(toD) qs.set('to', toD.toISOString());
+
       a.href = '/api/v1/results/nmhc/export.csv?' + qs.toString();
+
       a.rel = 'noopener';
+
       document.body.appendChild(a);
+
       a.click();
+
       a.remove();
+
     }
 
+
+
     async function deleteResultsRange(){
+
       const sel = selectedDevice();
+
       if(!sel) return;
+
       const fromD = parseTimeText(resFromEl && resFromEl.value);
+
       const toD = parseTimeText(resToEl && resToEl.value);
+
       if(!fromD || !toD){
+
         alert('鐠囧嘲锝為崘娆忕磻婵绗岀紒鎾存将閺冨爼妫?);
+
         return;
+
       }
+
       const fromT = fromD.getTime();
+
       const toT = toD.getTime();
+
       if(!(toT >= fromT)){
+
         alert('缂佹挻娼弮鍫曟？韫囧懘銆忔径褌绨鈧慨瀣闂?);
+
         return;
+
       }
+
       if(!confirm('绾喛顓婚崚鐘绘珟鐠囥儲妞傞梻瀛橆唽閸愬懐娈戠拋鏉跨秿閿?)) return;
+
       const qs = new URLSearchParams();
+
       qs.set('deviceId', sel);
+
       qs.set('from', fromD.toISOString());
+
       qs.set('to', toD.toISOString());
+
       const res = await fetch('/api/v1/results/nmhc?' + qs.toString(), {method:'DELETE'});
+
       const j = await res.json().catch(()=>({}));
+
       if(!res.ok){
+
         alert(j && j.error ? String(j.error) : '閸掔娀娅庢径杈Е');
+
         return;
+
       }
+
       kickFetchNmhcHistory(sel, null, null, true);
+
     }
+
+
+
 
 
     function fullWindowS(){
+
       const v = Number(fullminEl.value || '2');
+
       if(!isFinite(v) || v <= 0) return 2*60;
+
       return v*60;
+
     }
+
+
 
     function tickClock(){
+
       const d = new Date();
+
       const yyyy = d.getFullYear();
+
       const mm = String(d.getMonth()+1).padStart(2,'0');
+
       const dd = String(d.getDate()).padStart(2,'0');
+
       const hh = String(d.getHours()).padStart(2,'0');
+
       const mi = String(d.getMinutes()).padStart(2,'0');
+
       const ss = String(d.getSeconds()).padStart(2,'0');
+
       homeClockEl.textContent = yyyy + '-' + mm + '-' + dd + ' ' + hh + ':' + mi + ':' + ss;
+
     }
+
+
 
     function drawPlaceholder(canvas){
+
       if(!canvas) return;
+
       const ctx = canvas.getContext('2d');
+
       if(!ctx) return;
+
       const w = canvas.width;
+
       const h = canvas.height;
+
       ctx.clearRect(0,0,w,h);
+
       ctx.fillStyle = '#fff';
+
       ctx.fillRect(0,0,w,h);
+
       ctx.strokeStyle = '#E6EEF8';
+
       ctx.lineWidth = 1;
+
       for(let i=0;i<=10;i++){
+
         const x = 60 + (w-80)*(i/10);
+
         ctx.beginPath();
+
         ctx.moveTo(x, 16);
+
         ctx.lineTo(x, h-44);
+
         ctx.stroke();
+
       }
+
       for(let i=0;i<=7;i++){
+
         const y = 16 + (h-60)*(i/7);
+
         ctx.beginPath();
+
         ctx.moveTo(60, y);
+
         ctx.lineTo(w-18, y);
+
         ctx.stroke();
+
       }
+
       ctx.strokeStyle = '#000';
+
       ctx.lineWidth = 2;
+
       ctx.beginPath();
+
       ctx.moveTo(60, 16);
+
       ctx.lineTo(60, h-44);
+
       ctx.lineTo(w-18, h-44);
+
       ctx.stroke();
+
       ctx.save();
+
       ctx.translate(22, (h-44+16)/2);
+
       ctx.rotate(-Math.PI/2);
+
       ctx.fillStyle = '#2B6DFF';
+
       ctx.font = '14px system-ui';
+
       ctx.fillText('娣団€冲娇(pA)', -28, 0);
+
       ctx.restore();
+
     }
+
+
 
     function streamKey(deviceId, channel){
+
       return deviceId + '|' + String(channel);
+
     }
+
+
 
     function getStream(deviceId, channel){
+
       const k = streamKey(deviceId, channel);
+
       let s = streams.get(k);
+
       if(!s){
+
         s = { deviceId, channel, sessionToken: '', cycleStartS: null, dtS: null, winS: null, pts: [], lastMin: null, lastMax: null, lastElapsedS: 0, lastValue: null, stopped: false, targetStopS: null, stopRequested: false, resultRequested: false, loopActive: false, autoTimer: null, cycleStartedAtMs: null };
+
         streams.set(k, s);
+
       }
+
       s.deviceId = deviceId;
+
       s.channel = channel;
+
       const win = fullWindowS();
+
       if(s.winS !== win){
+
         s.winS = win;
+
       }
+
       return s;
+
     }
+
+
 
     function trimPointsToWindow(s){
+
       const win = s.winS || fullWindowS();
+
       let i = 0;
+
       while(i < s.pts.length && s.pts[i][0] < -0.5) i++;
+
       if(i > 0) s.pts = s.pts.slice(i);
+
       let j = s.pts.length - 1;
+
       while(j >= 0 && s.pts[j][0] > win+0.5) j--;
+
       if(j < s.pts.length - 1) s.pts = s.pts.slice(0, j+1);
+
       if(s.pts.length > 200000) s.pts = s.pts.slice(s.pts.length - 200000);
+
     }
+
+
 
     function resetStream(deviceId, channel){
+
       const s = getStream(deviceId, channel);
+
       if(s.autoTimer){
+
         try { clearTimeout(s.autoTimer); } catch {}
+
       }
+
       s.autoTimer = null;
+
       s.cycleStartedAtMs = null;
+
       s.sessionToken = '';
+
       s.cycleStartS = null;
+
       s.dtS = null;
+
       s.pts = [];
+
       s.lastMin = null;
+
       s.lastMax = null;
+
       s.lastElapsedS = 0;
+
       s.lastValue = null;
+
       s.stopped = false;
+
       s.targetStopS = null;
+
       s.stopRequested = false;
+
       s.resultRequested = false;
+
       s.loopActive = false;
+
     }
+
+
 
     function resetStreamForNewCycle(deviceId, channel){
+
       const s = getStream(deviceId, channel);
+
       if(s.autoTimer){
+
         try { clearTimeout(s.autoTimer); } catch {}
+
       }
+
       s.autoTimer = null;
+
       s.cycleStartedAtMs = null;
+
       s.sessionToken = '';
+
       s.cycleStartS = null;
+
       s.dtS = null;
+
       s.pts = [];
+
       s.lastMin = null;
+
       s.lastMax = null;
+
       s.lastElapsedS = 0;
+
       s.lastValue = null;
+
       s.stopped = false;
+
       s.stopRequested = false;
+
       s.resultRequested = false;
+
       return s;
+
     }
+
+
 
     async function localActionFor(deviceId, channel, action){
+
       if(!deviceId) return {ok:false, error:'no device'};
+
       const url = '/api/v1/devices/' + encodeURIComponent(deviceId) + '/' + action + '?channel=' + Number(channel || 0);
+
       const res = await fetch(url, {method:'POST'});
+
       const j = await res.json().catch(()=>({}));
+
       if(!res.ok){
+
         return {ok:false, error: j.error || 'request failed'};
+
       }
+
       return {ok:true};
+
     }
+
+
 
     async function localAction(action){
+
       const sel = selectedDevice();
+
       const channel = Number(chnEl.value || '0');
+
       return localActionFor(sel, channel, action);
+
     }
+
+
 
     function draw(){
+
       ctx.clearRect(0,0,cv.width,cv.height);
+
       const sel = selectedDevice();
+
       const ch = Number(chnEl.value || '0');
+
       if(!sel){
+
         ctx.fillStyle = '#777';
+
         ctx.font = '14px system-ui';
+
         ctx.fillText('缁涘绶熼柅澶嬪鐠佹儳顦?, 12, 22);
+
         return;
+
       }
+
+
 
       const s = getStream(sel, ch);
+
       if(!s.pts || s.pts.length < 2){
+
         ctx.fillStyle = '#777';
+
         ctx.font = '14px system-ui';
+
         ctx.fillText('閺嗗倹妫ょ€圭偞妞傞弫鐗堝祦閿涘牏鐡戝鍛瘜閺夊灝褰傞柅?143 閺佺増宓佸ù渚婄礆', 12, 22);
+
         return;
+
       }
+
+
 
       const win = s.winS || fullWindowS();
+
       const viewStartS = 0;
+
       const viewEndS = win;
 
+
+
       let yBeg = Number(ylowEl.value || '0');
+
       let yEnd = Number(yhighEl.value || '40');
+
       if(!isFinite(yBeg)) yBeg = 0;
+
       if(!isFinite(yEnd)) yEnd = 40;
+
       if(yEnd <= yBeg) yEnd = yBeg + 1;
 
+
+
       if(autoyEl.checked){
+
         let yMin = Infinity, yMax = -Infinity;
+
         for(const p of s.pts){
+
           const t = p[0];
+
           if(t < viewStartS || t > viewEndS) continue;
+
           const y = p[1];
+
           if(!isFinite(y)) continue;
+
           if(y < yMin) yMin = y;
+
           if(y > yMax) yMax = y;
+
         }
+
         if(!isFinite(yMin) || !isFinite(yMax)){
+
           yMin = 0;
+
           yMax = 1;
+
         }
+
         const span0 = yMax - yMin;
+
         const minSpan = 0.5;
+
         if(span0 < minSpan){
+
           const c0 = (yMin + yMax) * 0.5;
+
           yMin = c0 - minSpan/2;
+
           yMax = c0 + minSpan/2;
+
         }
+
         const c = (yMin + yMax) * 0.5;
+
         const half = (yMax - yMin) * 0.5;
+
         const padHalf = half * 1.02;
+
         yBeg = c - padHalf;
+
         yEnd = c + padHalf;
+
       }
+
+
 
       if(s.lastMin !== null && s.lastMax !== null){
+
         const a = 0.2;
+
         yBeg = s.lastMin + (yBeg - s.lastMin) * a;
+
         yEnd = s.lastMax + (yEnd - s.lastMax) * a;
+
       }
+
       s.lastMin = yBeg;
+
       s.lastMax = yEnd;
 
+
+
       const padL = 60;
+
       const padR = 18;
+
       const padT = 16;
+
       const padB = 44;
+
       const w = cv.width - padL - padR;
+
       const h = cv.height - padT - padB;
 
+
+
       const curveTopReserve = h * 0.40;
+
       const curveBottomReserve = h * 0.05;
+
       const curveH = Math.max(1, h - curveTopReserve - curveBottomReserve);
 
+
+
       const xBegMin = 0;
+
       const xEndMin = viewEndS / 60;
+
       const xSpanMin = xEndMin - xBegMin;
 
+
+
       function niceStep(range, targetTicks){
+
         const raw = range / targetTicks;
+
         const pow = Math.pow(10, Math.floor(Math.log10(raw)));
+
         const n = raw / pow;
+
         let step;
+
         if(n <= 1) step = 1;
+
         else if(n <= 2) step = 2;
+
         else if(n <= 3) step = 3;
+
         else if(n <= 5) step = 5;
+
         else step = 10;
+
         return step * pow;
+
       }
+
+
 
       const xStep = niceStep(xSpanMin, 7);
+
       const yStep = niceStep(yEnd - yBeg, 5);
 
+
+
       ctx.strokeStyle = '#E6EEF8';
+
       ctx.lineWidth = 1;
+
       for(let x = Math.ceil(xBegMin / xStep) * xStep; x <= xEndMin + 1e-9; x += xStep){
+
         const sx = padL + ((x - xBegMin) / xSpanMin) * w;
+
         ctx.beginPath();
+
         ctx.moveTo(sx, padT);
+
         ctx.lineTo(sx, padT + h);
+
         ctx.stroke();
+
       }
+
       for(let y = Math.ceil(yBeg / yStep) * yStep; y <= yEnd + 1e-9; y += yStep){
+
         const sy = padT + (1 - (y - yBeg) / (yEnd - yBeg)) * h;
+
         ctx.beginPath();
+
         ctx.moveTo(padL, sy);
+
         ctx.lineTo(padL + w, sy);
+
         ctx.stroke();
+
       }
+
+
 
       ctx.strokeStyle = '#000';
+
       ctx.lineWidth = 2;
+
       ctx.beginPath();
+
       ctx.moveTo(padL, padT);
+
       ctx.lineTo(padL, padT + h);
+
       ctx.lineTo(padL + w, padT + h);
+
       ctx.stroke();
+
+
 
       ctx.fillStyle = '#000';
+
       ctx.font = '12px system-ui';
+
       for(let x = Math.ceil(xBegMin / xStep) * xStep; x <= xEndMin + 1e-9; x += xStep){
+
         const sx = padL + ((x - xBegMin) / xSpanMin) * w;
+
         const label = (Math.round(x * 1000) / 1000).toString();
+
         ctx.fillText(label, sx - 6, padT + h + 18);
+
       }
 
+
+
       ctx.fillStyle = '#1F5CFF';
+
       ctx.font = '700 14px system-ui';
+
       for(let y = Math.ceil(yBeg / yStep) * yStep; y <= yEnd + 1e-9; y += yStep){
+
         const sy = padT + (1 - (y - yBeg) / (yEnd - yBeg)) * h;
+
         ctx.fillText(y.toFixed(0), 10, sy + 5);
+
       }
+
+
 
       ctx.save();
+
       ctx.translate(26, padT + h/2);
+
       ctx.rotate(-Math.PI/2);
+
       ctx.fillStyle = '#1F5CFF';
+
       ctx.font = '700 14px system-ui';
+
       ctx.fillText('娣団€冲娇(pA)', -32, 0);
+
       ctx.restore();
 
+
+
       ctx.strokeStyle = '#1F5CFF';
+
       ctx.lineWidth = 1;
+
       ctx.beginPath();
+
       let started = false;
+
       const maxDraw = Math.max(2000, Math.floor(w*3));
+
       const stride = Math.max(1, Math.floor(s.pts.length / maxDraw));
+
       for(let i=0;i<s.pts.length;i+=stride){
+
         const tS = s.pts[i][0];
+
         if(tS < viewStartS || tS > viewEndS) continue;
+
         const v = s.pts[i][1];
+
         if(!isFinite(v)){
+
           started = false;
+
           continue;
+
         }
+
         const tMin = tS / 60;
+
         const x = padL + ((tMin - xBegMin) / xSpanMin) * w;
+
         const yn = (v-yBeg)/(yEnd-yBeg);
+
         const y = padT + curveTopReserve + (1-yn)*curveH;
+
         if(!started){
+
           ctx.moveTo(x,y);
+
           started = true;
+
         } else {
+
           ctx.lineTo(x,y);
+
         }
+
       }
+
       ctx.stroke();
 
+
+
       const rk = streamKey(sel, ch);
+
       const rr = results.get(rk);
+
       const r = rr && rr.result ? rr.result : null;
+
       const rTok = rr && rr.sessionToken ? rr.sessionToken : '';
+
       if(r && r.pollutants && Array.isArray(r.pollutants) && rTok && s.sessionToken && rTok === s.sessionToken){
+
         ctx.save();
+
         ctx.fillStyle = '#1F5CFF';
+
         ctx.font = '700 13px system-ui';
+
         for(const p of r.pollutants){
+
           if(!p || p.status !== 'detected') continue;
+
           const rtS = Number(p.rtS);
+
           if(!isFinite(rtS)) continue;
+
           const xMin = rtS/60;
+
           if(xMin < xBegMin || xMin > xEndMin) continue;
+
           const x = padL + ((xMin - xBegMin) / xSpanMin) * w;
+
           const y = padT + curveTopReserve * 0.9;
+
           ctx.save();
+
           ctx.translate(x, y);
+
           ctx.rotate(-Math.PI/2);
+
           const t = (p.name || p.code || '') + '  ' + (xMin.toFixed(4));
+
           ctx.fillText(t, 0, 0);
+
           ctx.restore();
+
         }
+
         ctx.restore();
+
       }
+
     }
+
+
 
     document.getElementById('clear').addEventListener('click', ()=>{
+
       const sel = selectedDevice();
+
       if(!sel) return;
+
       resetStream(sel, Number(chnEl.value || '0'));
+
       draw();
+
     });
+
+
 
     function setButtonsEnabled(enabled){
+
       document.getElementById('start').disabled = !enabled;
+
       document.getElementById('stop').disabled = !enabled;
+
     }
+
+
 
     async function refreshDevices(){
+
       try{
+
         const res = await fetch('/api/v1/devices');
+
         if(!res.ok) return;
+
         const arr = await res.json();
+
         deviceInfo = new Map();
+
         for(const d of arr){
+
           deviceInfo.set(d.deviceId, d);
+
           ensureDeviceOption(d.deviceId);
+
         }
+
+
 
         if(selectedDevice() === ''){
+
           let prefer = '';
+
           if(backendLastDeviceId && deviceInfo.has(backendLastDeviceId)){
+
             prefer = backendLastDeviceId;
+
           }
+
           for(const d of arr){
+
             if(!prefer && String(d.deviceId || '').startsWith('GC')){ prefer = d.deviceId; break; }
+
           }
+
           if(prefer){
+
             deviceEl.value = prefer;
+
             statusEl.textContent = '閸︺劎鍤? ' + prefer;
+
             const run = document.getElementById('home-runCountVal');
+
             if(run) run.textContent = String(loadNmchHistory(prefer).length);
+
           }
+
         }
+
+
 
         if(!didInitialRestore){
+
           const sel0 = selectedDevice();
+
           if(sel0){
+
             didInitialRestore = true;
+
             restoreFromBackend(sel0);
+
           }
+
         }
+
         renderDebug();
+
         if(views.overview && views.overview.classList.contains('active')) renderOverview();
+
         if(views.logs && views.logs.classList.contains('active')) renderLogs();
+
       }catch{}
+
     }
+
+
 
     async function refreshServer(){
+
       try{
+
         const res = await fetch('/api/v1/server');
+
         if(!res.ok) return;
+
         serverInfo = await res.json();
+
         renderDebug();
+
       }catch{}
+
     }
+
+
 
     function renderDebug(){
+
       const dbg = document.getElementById('dbg');
+
       const sel = selectedDevice();
+
       const cur = sel || lastActiveDevice;
+
       if(!cur){
+
         dbg.textContent = '';
+
         setButtonsEnabled(false);
+
         return;
+
       }
+
       const d = deviceInfo.get(cur);
+
       if(!d){
+
         dbg.textContent = '鐠佹儳顦? ' + cur + '閿涘牊婀懢宄板絿閸掓壆绮虹拋鈥蹭繆閹垽绱?;
+
         setButtonsEnabled(false);
+
         return;
+
       }
+
       const c143 = (d.cmdCounts && d.cmdCounts['143']) ? d.cmdCounts['143'] : 0;
+
       const lastSeen = d.lastSeen ? new Date(d.lastSeen) : null;
+
       const last143 = d.last143 ? new Date(d.last143) : null;
+
       const now = new Date();
+
       const seenAgo = lastSeen ? Math.max(0, Math.round((now - lastSeen)/1000)) : -1;
+
       const d143Ago = last143 && last143.getTime() > 0 ? Math.max(0, Math.round((now - last143)/1000)) : -1;
+
       let extra = '';
+
       const s = streams.get(streamKey(cur, Number(chnEl.value||'0')));
+
       if(s && s.cycleStartS !== null){
+
         extra = ' | elapsed=' + (s.lastElapsedS/60).toFixed(2) + 'min/' + (fullWindowS()/60).toFixed(2) + 'min';
+
       }
+
       let sinfo = '';
+
       if(serverInfo && serverInfo.pid){
+
         sinfo = ' | pid=' + serverInfo.pid;
+
       }
+
       dbg.textContent = '鐠佹儳顦? ' + cur + ' | lastCmd=' + d.lastCmd + ' | 143=' + c143 + ' | lastSeen=' + (seenAgo>=0 ? (seenAgo+'s') : '-') + ' | last143=' + (d143Ago>=0 ? (d143Ago+'s') : '-') + ' | control=' + (d.allowControl ? 'on' : 'off') + extra + sinfo;
+
 	  setButtonsEnabled(!!d.connected);
+
     }
+
+
 
     async function sendCmd(name){
+
       const sel = selectedDevice();
+
       if(!sel){
+
         alert('鐠囩兘鈧瀚ㄧ拋鎯ь槵');
+
         return;
+
       }
+
       const channel = Number(chnEl.value || '0');
+
       const url = '/api/v1/devices/' + encodeURIComponent(sel) + '/cmd?name=' + encodeURIComponent(name) + '&channel=' + channel;
+
       const res = await fetch(url, {method:'POST'});
+
       const j = await res.json().catch(()=>({}));
+
       if(!res.ok){
+
         alert(j.error || '閸欐垿鈧礁銇戠拹?);
+
         return;
+
       }
+
       await refreshDevices();
+
     }
+
+
 
     document.getElementById('start').addEventListener('click', ()=>{
+
       const sel = selectedDevice();
+
       saveUiToBackend(sel);
+
       if(sel){
+
         resetStream(sel, Number(chnEl.value || '0'));
+
         const s = getStream(sel, Number(chnEl.value || '0'));
+
         s.loopActive = true;
+
         draw();
+
       }
+
 	  localAction('localStart').finally(()=>{});
+
 	  const di = deviceInfo.get(sel);
+
 	  if(di && di.canStart22){
+
 	    sendCmd('start');
+
 	  }
+
     });
+
 	  document.getElementById('stop').addEventListener('click', ()=>{
+
 	    const sel = selectedDevice();
+
 	    if(sel){
+
 	      const s = getStream(sel, Number(chnEl.value || '0'));
+
 	      s.loopActive = false;
+
 	      if(s.autoTimer){
+
 	        try { clearTimeout(s.autoTimer); } catch {}
+
 	      }
+
 	      s.autoTimer = null;
+
 	      s.stopRequested = true;
+
 	      s.stopped = true;
+
 	    }
+
 	    localAction('localStop').finally(()=>{});
+
 	  });
 
+
+
     homeInjectEl.addEventListener('click', ()=>{
+
       setActiveTab('chrom');
+
       const sel = selectedDevice();
+
       if(sel){
+
         resetStream(sel, Number(chnEl.value || '0'));
+
 	    const s = getStream(sel, Number(chnEl.value || '0'));
+
 	    s.loopActive = true;
+
         draw();
+
       }
+
 	  localAction('localStart').finally(()=>{});
+
 	  const di = deviceInfo.get(sel);
+
 	  if(di && di.canStart22){
+
 	    sendCmd('start');
+
 	  }
+
     });
 
+
+
     function ensureDeviceOption(id){
+
       if(!String(id).startsWith('GC')) return;
+
       if(seenDevices.has(id)) return;
+
       seenDevices.add(id);
+
       const opt = document.createElement('option');
+
       opt.value = id;
+
       opt.textContent = id;
+
       if(deviceEl.options.length === 1 && deviceEl.options[0].value === ''){
+
         deviceEl.remove(0);
+
       }
+
       deviceEl.appendChild(opt);
+
     }
+
+
 
     function selectedDevice(){
+
       return deviceEl.value || '';
+
     }
 
+
+
     const es = new EventSource('/events');
+
     es.onmessage = (e)=>{
+
       let msg;
+
       try{ msg = JSON.parse(e.data); }catch{ return; }
+
 	  if(msg.type === 'telemetry'){
+
 	    if(!String(msg.deviceId).startsWith('GC')) return;
+
 	    const sel = selectedDevice();
+
 	    if(sel && msg.deviceId !== sel) return;
+
 	    pushEvtRow(msg.deviceId, 'telemetry', 'temps=' + [msg.tempCol,msg.tempInj1,msg.tempDet1,msg.tempInj2].filter(v=>v!==undefined).length + ' epc=' + (msg.epc ? msg.epc.length : 0));
+
 	    const f2 = (v)=> {
+
 	      if(v === undefined || v === null) return '-';
+
 	      const n = Number(v);
+
 	      if(!isFinite(n)) return '-';
+
 	      if(n >= 655.35 - 1e-9) return '-';
+
 	      return n.toFixed(2);
+
 	    };
+
 	    const f1 = (v)=> (v === undefined || v === null || !isFinite(Number(v))) ? '-' : Number(v).toFixed(1);
+
 	    const gasText = (psi, sccm)=>{
+
 	      const p = f2(psi);
+
 	      const f = f2(sccm);
+
 	      if(p === '-' && f === '-') return '-';
+
 	      if(p === '-') return f + ' sccm';
+
 	      if(f === '-') return p + ' psi';
+
 	      return p + ' psi / ' + f + ' sccm';
+
 	    };
+
 	    const epcMap = loadEpcMap();
+
 	    if(msg.epc && Array.isArray(msg.epc)){
+
 	      const g0 = msg.epc[epcMap.carrier] || null;
+
 	      const g1 = msg.epc[epcMap.h2] || null;
+
 	      const g2 = msg.epc[epcMap.air] || null;
+
 	      if(gasCarrierEl) gasCarrierEl.textContent = gasText(g0 && g0.psi, g0 && g0.sccm);
+
 	      if(gasH2El) gasH2El.textContent = gasText(g1 && g1.psi, g1 && g1.sccm);
+
 	      if(gasAirEl) gasAirEl.textContent = gasText(g2 && g2.psi, g2 && g2.sccm);
+
 	    }
+
 	    if(tempColEl && msg.tempCol !== undefined) tempColEl.textContent = f1(msg.tempCol);
+
 	    if(tempInj1El && msg.tempInj1 !== undefined) tempInj1El.textContent = f1(msg.tempInj1);
+
 	    if(tempDet1El && msg.tempDet1 !== undefined) tempDet1El.textContent = f1(msg.tempDet1);
+
 	    if(tempInj2El && msg.tempInj2 !== undefined) tempInj2El.textContent = f1(msg.tempInj2);
+
 	    if(views.events && views.events.classList.contains('active')) renderEvents();
+
 	    return;
+
 	  }
+
       if(msg.type === 'result'){
+
         if(!String(msg.deviceId).startsWith('GC')) return;
+
         const ch = (msg.channel === undefined || msg.channel === null) ? 0 : msg.channel;
+
         const sel = selectedDevice();
+
         if(sel && msg.deviceId !== sel) return;
+
         const rk = streamKey(msg.deviceId, ch);
+
         if(msg.result && msg.result.pollutants){
+
           const entry = nmhcEntryFromResult(msg.deviceId, msg);
+
           addNmchHistory(msg.deviceId, entry);
+
           pushEvtRow(msg.deviceId, 'result', 'pollutants=' + msg.result.pollutants.length);
+
           const s = getStream(msg.deviceId, ch);
+
           const tok = (msg.sessionToken !== undefined && msg.sessionToken !== null) ? String(msg.sessionToken) : (s.sessionToken || '');
+
           results.set(rk, { result: msg.result, sessionToken: tok });
+
           const table = document.getElementById('tbody');
+
           if(table){
+
             const rows = table.querySelectorAll('tr');
+
             const byName = new Map();
+
             for(const p of msg.result.pollutants){
+
               if(p && (p.name || p.code)) byName.set(p.code || p.name, p);
+
             }
+
             let thc = byName.get('THC');
+
             let ch4 = byName.get('CH4');
+
 			const k1 = document.getElementById('kpi-thc');
+
 			const k2 = document.getElementById('kpi-ch4');
+
 			const k3 = document.getElementById('kpi-nmhc');
+
 			if(k1) k1.textContent = thc && isFinite(thc.height) ? Number(thc.height).toFixed(4) : '-';
+
 			if(k2) k2.textContent = ch4 && isFinite(ch4.height) ? Number(ch4.height).toFixed(4) : '-';
+
 			if(k3) {
+
 				if(thc && ch4 && isFinite(thc.height) && isFinite(ch4.height)){
+
 					k3.textContent = (Number(thc.height) - Number(ch4.height)).toFixed(4);
+
 				} else {
+
 					k3.textContent = '-';
+
 				}
+
 			}
+
             for(const tr of rows){
+
               const tds = tr.querySelectorAll('td');
+
               if(tds.length < 2) continue;
+
               const name = (tds[0].textContent || '').trim();
+
               if(name === '閹崵鍎?){
+
                 tds[1].textContent = thc && isFinite(thc.height) ? Number(thc.height).toFixed(4) : '-';
+
               }
+
               if(name === '閻㈣尙鍏?){
+
                 tds[1].textContent = ch4 && isFinite(ch4.height) ? Number(ch4.height).toFixed(4) : '-';
+
               }
+
               if(name === '闂堢偟鏁抽悜閿嬧偓鑽ゅ剭'){
+
                 if(thc && ch4 && isFinite(thc.height) && isFinite(ch4.height)){
+
                   tds[1].textContent = (Number(thc.height) - Number(ch4.height)).toFixed(4);
+
                 } else {
+
                   tds[1].textContent = '-';
+
                 }
+
               }
+
             }
+
           }
+
         }
+
         draw();
+
         if(views.result && views.result.classList.contains('active')) renderResults();
+
         if(views.overview && views.overview.classList.contains('active')) renderOverview();
+
         if(views.events && views.events.classList.contains('active')) renderEvents();
+
         if(views.logs && views.logs.classList.contains('active')) renderLogs();
+
         return;
+
       }
 
+
+
       if(msg.type === 'device'){
+
         if(String(msg.deviceId).startsWith('GC')){
+
           ensureDeviceOption(msg.deviceId);
+
           lastActiveDevice = msg.deviceId;
+
         }
+
         pushEvtRow(msg.deviceId, 'device', 'online');
+
         const sel = selectedDevice();
+
         if(sel === ''){
+
           if(String(msg.deviceId).startsWith('GC')){
+
             statusEl.textContent = '閸︺劎鍤? ' + msg.deviceId + '閿涘牐鍤滈崝顭掔礆';
+
           }
+
         } else if(sel === msg.deviceId){
+
           statusEl.textContent = '閸︺劎鍤? ' + msg.deviceId;
+
         }
+
         if(views.events && views.events.classList.contains('active')) renderEvents();
+
         return;
+
       }
+
+
 
       if(msg.type !== 'samples') return;
 
+
+
       if(!String(msg.deviceId).startsWith('GC')) return;
+
       ensureDeviceOption(msg.deviceId);
+
       const sel = selectedDevice();
+
       if(sel && msg.deviceId !== sel) return;
 
+
+
       const msgChannel = (msg.channel === undefined || msg.channel === null) ? 0 : msg.channel;
+
       if(String(msgChannel) !== chnEl.value) return;
 
+
+
       if(!sel){
+
         deviceEl.value = msg.deviceId;
+
         statusEl.textContent = '閸︺劎鍤? ' + msg.deviceId;
+
       }
+
+
 
       let s = getStream(msg.deviceId, msgChannel);
+
       if(s.stopped) return;
+
       const msgTok = (msg.sessionToken !== undefined && msg.sessionToken !== null) ? String(msg.sessionToken) : '';
+
       if(msgTok && s.sessionToken && msgTok !== s.sessionToken){
+
         resetStreamForNewCycle(msg.deviceId, msgChannel);
+
         s = getStream(msg.deviceId, msgChannel);
+
       }
+
       if(msgTok) s.sessionToken = msgTok;
+
       const dt = Number(msg.dtS);
+
       if(!isFinite(dt) || dt <= 0) return;
+
       pushEvtRow(msg.deviceId, 'samples', 'ch=' + msgChannel + ' n=' + (msg.values ? msg.values.length : 0) + ' dt=' + dt.toFixed(4));
+
       if(s.dtS !== dt){
+
         s.dtS = dt;
+
       }
+
       if(s.cycleStartS === null){
+
         s.cycleStartS = Number(msg.t0S) || 0;
+
       }
+
       const base = (Number(msg.t0S) || 0) - s.cycleStartS;
 
+
+
       if(base < -1 || (s.lastElapsedS > 0 && base+msg.values.length*dt < s.lastElapsedS-5)){
+
         resetStreamForNewCycle(msg.deviceId, msgChannel);
+
         s = getStream(msg.deviceId, msgChannel);
+
         s.dtS = dt;
+
         s.cycleStartS = Number(msg.t0S) || 0;
+
         processSamples(s, 0, dt, msg.values);
+
       } else {
+
         processSamples(s, base, dt, msg.values);
+
       }
 
+
+
       const minText = (s.lastElapsedS/60).toFixed(3);
+
       const vText = (s.lastValue === null ? '0.000' : Number(s.lastValue).toFixed(3));
+
       statEl.textContent = '闁岸浜? + (Number(chnEl.value||'0')+1) + ': ' + minText + ' min   ' + vText + ' pA';
+
       homeStatusEl.textContent = '閺冨爼妫? ' + minText + ' min   娣団€冲娇: ' + vText + ' pA';
+
       draw();
+
       renderDebug();
+
     };
+
+
 
     function processSamples(s, base, dt, values){
+
       const win = s.winS || fullWindowS();
+
       for(let i=0;i<values.length;i++){
+
         const t = base + i*dt;
+
         if(t < -0.5) continue;
+
         if(t > win+0.5) continue;
+
         const vv = Number(values[i]);
+
         s.pts.push([t, vv]);
+
         s.lastValue = vv;
+
       }
+
       const end = base + values.length*dt;
+
       if(end > s.lastElapsedS) s.lastElapsedS = end;
+
       trimPointsToWindow(s);
+
     }
+
     es.onerror = ()=>{
+
       const sel = selectedDevice();
+
       if(sel){
+
         statusEl.textContent = '鏉╃偞甯撮弬顓炵磻: ' + sel;
+
       } else if(lastActiveDevice){
+
         statusEl.textContent = '鏉╃偞甯撮弬顓炵磻: ' + lastActiveDevice;
+
       } else {
+
         statusEl.textContent = '鏉╃偞甯撮弬顓炵磻';
+
       }
+
     };
+
+
 
     deviceEl.addEventListener('change', ()=>{
+
       const sel = selectedDevice();
+
       if(sel){
+
         statusEl.textContent = '閸︺劎鍤? ' + sel;
+
         const run = document.getElementById('home-runCountVal');
+
         if(run) run.textContent = String(loadNmchHistory(sel).length);
+
         kickFetchNmhcHistory(sel, null, null, true);
+
         restoreFromBackend(sel);
+
       } else {
+
         statusEl.textContent = '閺堫亪鈧瀚ㄧ拋鎯ь槵閿涘牐鍤滈崝顭掔礆';
+
       }
+
       draw();
+
       renderDebug();
+
       if(views.overview && views.overview.classList.contains('active')) renderOverview();
+
       if(views.result && views.result.classList.contains('active')) renderResults();
+
       if(views.logs && views.logs.classList.contains('active')) renderLogs();
+
     });
+
+
 
     chnEl.addEventListener('change', ()=>{
+
       const sel = selectedDevice();
+
       saveUiToBackend(sel);
+
       if(sel){
+
         restoreSessionOnly(sel);
+
       }
+
       draw();
+
       renderDebug();
+
     });
+
+
 
     fullminEl.addEventListener('change', ()=>{
+
       const sel = selectedDevice();
+
       saveUiToBackend(sel);
+
       if(sel){
+
         resetStream(sel, Number(chnEl.value || '0'));
+
       }
+
       draw();
+
       renderDebug();
+
     });
+
+
 
     ylowEl.addEventListener('change', ()=>{ saveUiToBackend(selectedDevice()); draw(); });
+
     yhighEl.addEventListener('change', ()=>{ saveUiToBackend(selectedDevice()); draw(); });
+
     autoyEl.addEventListener('change', ()=>{ saveUiToBackend(selectedDevice()); draw(); });
 
+
+
     const cycleminEl = document.getElementById('cyclemin');
+
     const cyclemaxEl = document.getElementById('cyclemax');
 
+
+
     if(cycleminEl){
+
       // Handled above in localStorage init
+
     }
+
     if(cyclemaxEl){
+
       // Handled above in localStorage init
+
     }
+
+
 
     let backendLastDeviceId = '';
+
     let didInitialRestore = false;
+
     let suppressUiSave = false;
+
     let currentTab = 'overview';
 
+
+
     function uiPayloadFor(deviceId){
+
       const ch = Number(chnEl.value || '0');
+
       const fullMin = Number(fullminEl.value || '2');
+
       const yLow = Number(ylowEl.value || '0');
+
       const yHigh = Number(yhighEl.value || '40');
+
       const autoY = !!autoyEl.checked;
+
       const acqMin = Number(acqminEl.value || '0');
+
       const loop = !!(loopEl && loopEl.checked);
+
       const cycleMin = Number(cycleminEl ? cycleminEl.value : '2');
+
       const cycleMax = Number(cyclemaxEl ? cyclemaxEl.value : '9999');
+
       const epcMap = loadEpcMap();
+
       return {
+
         deviceId,
+
         activeTab: currentTab,
+
         selectedChannel: isFinite(ch) ? ch : 0,
+
         fullMin: isFinite(fullMin) ? fullMin : 2,
+
         yLow: isFinite(yLow) ? yLow : 0,
+
         yHigh: isFinite(yHigh) ? yHigh : 40,
+
         autoY,
+
         acqMin: isFinite(acqMin) ? acqMin : 0,
+
         loop,
+
         cycleMin: isFinite(cycleMin) ? cycleMin : 2,
+
         cycleMax: isFinite(cycleMax) ? cycleMax : 9999,
+
         epcCarrier: Number(epcMap.carrier || 0),
+
         epcH2: Number(epcMap.h2 || 1),
+
         epcAir: Number(epcMap.air || 2),
+
       };
+
     }
+
+
 
     async function saveUiToBackend(deviceId){
+
       if(suppressUiSave) return;
+
       if(!deviceId) return;
+
       const payload = uiPayloadFor(deviceId);
+
       try{
+
         await fetch('/api/v1/ui', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+
       }catch{}
+
     }
+
+
 
     function applyUiState(u){
+
       if(!u) return;
+
       if(u.activeTab){
+
         currentTab = String(u.activeTab);
+
       }
+
       if(u.fullMin !== undefined) fullminEl.value = String(u.fullMin);
+
       if(u.yLow !== undefined) ylowEl.value = String(u.yLow);
+
       if(u.yHigh !== undefined) yhighEl.value = String(u.yHigh);
+
       if(u.autoY !== undefined) autoyEl.checked = !!u.autoY;
+
       if(u.acqMin !== undefined) acqminEl.value = String(u.acqMin);
+
       if(u.loop !== undefined && loopEl) loopEl.checked = !!u.loop;
+
       if(u.cycleMin !== undefined && cycleminEl) cycleminEl.value = String(u.cycleMin);
+
       if(u.cycleMax !== undefined && cyclemaxEl) cyclemaxEl.value = String(u.cycleMax);
+
       if(u.selectedChannel !== undefined) chnEl.value = String(u.selectedChannel);
 
+
+
       document.getElementById('set-fullmin').value = fullminEl.value;
+
       document.getElementById('set-ylow').value = ylowEl.value;
+
       document.getElementById('set-yhigh').value = yhighEl.value;
+
       document.getElementById('set-autoy').checked = autoyEl.checked;
+
       if(setAcqMinEl) setAcqMinEl.value = acqminEl.value;
 
+
+
       const epcMap = { carrier: Number(u.epcCarrier || 0), h2: Number(u.epcH2 || 1), air: Number(u.epcAir || 2) };
+
       saveEpcMap(epcMap);
+
       if(setEpcCarrierEl) setEpcCarrierEl.value = String(epcMap.carrier);
+
       if(setEpcH2El) setEpcH2El.value = String(epcMap.h2);
+
       if(setEpcAirEl) setEpcAirEl.value = String(epcMap.air);
+
     }
+
+
 
     function hydrateStreamFromSession(deviceId, channel, sess){
+
       if(!sess) return;
+
       const dt = Number(sess.dtS);
+
       const values = sess.values;
+
       if(!isFinite(dt) || dt <= 0) return;
+
       if(!Array.isArray(values) || values.length < 2) return;
+
       resetStream(deviceId, channel);
+
       const s = getStream(deviceId, channel);
+
       s.dtS = dt;
+
       s.sessionToken = sess.sessionToken ? String(sess.sessionToken) : '';
+
       s.cycleStartS = 0;
+
       const win = fullWindowS();
+
       s.winS = win;
+
       const maxPts = 200000;
+
       const maxSpanPts = Math.max(2, Math.floor((win + 2) / dt));
+
       const keep = Math.min(values.length, Math.max(maxSpanPts, Math.min(maxPts, values.length)));
+
       const valuesCount = values.length;
+
       const totalCount = (sess.totalCount !== undefined && sess.totalCount !== null) ? Number(sess.totalCount) : valuesCount;
+
       const baseIdx = Math.max(0, totalCount - valuesCount);
+
       const startLocalIdx = Math.max(0, valuesCount - keep);
+
       for(let i=startLocalIdx;i<valuesCount;i++){
+
         const t = (baseIdx + i) * dt;
+
         const v = Number(values[i]);
+
         s.pts.push([t, v]);
+
         s.lastValue = v;
+
       }
+
       s.lastElapsedS = (totalCount - 1) * dt;
+
       trimPointsToWindow(s);
+
       const minText = (s.lastElapsedS/60).toFixed(3);
+
       const vText = (s.lastValue === null ? '0.000' : Number(s.lastValue).toFixed(3));
+
       statEl.textContent = '闁岸浜? + (Number(chnEl.value||'0')+1) + ': ' + minText + ' min   ' + vText + ' pA';
+
       homeStatusEl.textContent = '閺冨爼妫? ' + minText + ' min   娣団€冲娇: ' + vText + ' pA';
+
     }
+
+
 
     async function restoreFromBackend(deviceId){
+
       if(!deviceId) return;
+
       suppressUiSave = true;
+
       try{
+
         const uRes = await fetch('/api/v1/ui?deviceId=' + encodeURIComponent(deviceId));
+
         if(uRes.ok){
+
           const u = await uRes.json();
+
           applyUiState(u);
+
           if(u && u.activeTab){
+
             setActiveTab(String(u.activeTab));
+
           }
+
         }
+
       }catch{}
+
       suppressUiSave = false;
+
       kickFetchNmhcHistory(deviceId, null, null, true);
+
       applyKpiFromLatestNmhc(deviceId);
+
       try{
+
         const ch = Number(chnEl.value || '0');
+
         const sRes = await fetch('/api/v1/session/active?deviceId=' + encodeURIComponent(deviceId) + '&channel=' + ch);
+
         if(sRes.ok){
+
           const sess = await sRes.json();
+
           if(sess && sess.channel !== undefined) chnEl.value = String(sess.channel);
+
           hydrateStreamFromSession(deviceId, Number(chnEl.value||'0'), sess);
+
           if(sess && sess.result && sess.sessionToken){
+
             const rk = streamKey(deviceId, Number(chnEl.value||'0'));
+
             results.set(rk, { result: sess.result, sessionToken: String(sess.sessionToken) });
+
           }
+
         }
+
       }catch{}
+
       draw();
+
       renderDebug();
+
     }
+
+
 
     async function restoreSessionOnly(deviceId){
+
       if(!deviceId) return;
+
       try{
+
         const ch = Number(chnEl.value || '0');
+
         const sRes = await fetch('/api/v1/session/active?deviceId=' + encodeURIComponent(deviceId) + '&channel=' + ch);
+
         if(sRes.ok){
+
           const sess = await sRes.json();
+
           if(sess && sess.channel !== undefined) chnEl.value = String(sess.channel);
+
           hydrateStreamFromSession(deviceId, Number(chnEl.value||'0'), sess);
+
           if(sess && sess.result && sess.sessionToken){
+
             const rk = streamKey(deviceId, Number(chnEl.value||'0'));
+
             results.set(rk, { result: sess.result, sessionToken: String(sess.sessionToken) });
+
           }
+
         }
+
       }catch{}
+
       draw();
+
       renderDebug();
+
     }
+
+
 
     async function fetchLastDeviceId(){
+
       try{
+
         const r = await fetch('/api/v1/ui');
+
         if(!r.ok) return;
+
         const j = await r.json();
+
         if(j && j.lastDeviceId) backendLastDeviceId = String(j.lastDeviceId);
+
       }catch{}
+
     }
+
+
 
     function loadSettings(){
+
       try{
+
         const raw = localStorage.getItem('online_monitor_settings');
+
         if(!raw) return;
+
         const v = JSON.parse(raw);
+
         if(v.fullmin !== undefined) fullminEl.value = String(v.fullmin);
+
         if(v.ylow !== undefined) ylowEl.value = String(v.ylow);
+
         if(v.yhigh !== undefined) yhighEl.value = String(v.yhigh);
+
         if(v.autoy !== undefined) autoyEl.checked = !!v.autoy;
+
         if(v.acqmin !== undefined) acqminEl.value = String(v.acqmin);
+
         document.getElementById('set-fullmin').value = fullminEl.value;
+
         document.getElementById('set-ylow').value = ylowEl.value;
+
         document.getElementById('set-yhigh').value = yhighEl.value;
+
         document.getElementById('set-autoy').checked = autoyEl.checked;
+
         if(setAcqMinEl) setAcqMinEl.value = acqminEl.value;
+
       }catch{}
+
     }
+
+
 
     document.getElementById('set-save').addEventListener('click', ()=>{
+
       const fullmin = Number(document.getElementById('set-fullmin').value || '2');
+
       const ylow = Number(document.getElementById('set-ylow').value || '0');
+
       const yhigh = Number(document.getElementById('set-yhigh').value || '40');
+
       const autoy = !!document.getElementById('set-autoy').checked;
+
       const acqmin = Number((setAcqMinEl && setAcqMinEl.value) ? setAcqMinEl.value : (acqminEl.value || '2'));
+
       localStorage.setItem('online_monitor_settings', JSON.stringify({fullmin, ylow, yhigh, autoy, acqmin}));
+
       fullminEl.value = String(isFinite(fullmin) ? fullmin : 2);
+
       ylowEl.value = String(isFinite(ylow) ? ylow : 0);
+
       yhighEl.value = String(isFinite(yhigh) ? yhigh : 40);
+
       autoyEl.checked = autoy;
+
       if(isFinite(acqmin) && acqmin > 0){
+
         acqminEl.value = String(acqmin);
+
         try{ localStorage.setItem(acqMinStorageKey, String(acqmin)); }catch{}
+
       }
+
       const m = { carrier: Number(setEpcCarrierEl && setEpcCarrierEl.value || '0'), h2: Number(setEpcH2El && setEpcH2El.value || '1'), air: Number(setEpcAirEl && setEpcAirEl.value || '2') };
+
       saveEpcMap(m);
+
       const sel = selectedDevice();
+
       saveUiToBackend(sel);
+
       draw();
+
     });
 
+
+
     setButtonsEnabled(false);
+
     loadSettings();
+
     fillEpcSelects(12);
+
     const initActiveBtn = tabsEl.querySelector('.tab.active');
+
     if(initActiveBtn && initActiveBtn.dataset && initActiveBtn.dataset.tab){
+
       currentTab = initActiveBtn.dataset.tab;
+
     }
+
     fetchLastDeviceId().finally(()=>{});
+
     tickClock();
+
     setInterval(tickClock, 250);
+
     refreshDevices();
+
     setInterval(refreshDevices, 1000);
+
     refreshServer();
+
     setInterval(refreshServer, 2000);
 
+
+
     if(resExportEl) resExportEl.addEventListener('click', exportResultsCsv);
+
     if(resDeleteEl) resDeleteEl.addEventListener('click', deleteResultsRange);
+
     if(resFromEl) resFromEl.addEventListener('change', renderResults);
+
     if(resToEl) resToEl.addEventListener('change', renderResults);
 
+
+
     if(evtClearEl) evtClearEl.addEventListener('click', ()=>{ evtBuf.splice(0, evtBuf.length); renderEvents(); });
+
     if(evtOnlySelectedEl) evtOnlySelectedEl.addEventListener('change', renderEvents);
 
+
+
     if(setEpcCarrierEl) setEpcCarrierEl.addEventListener('change', ()=>{ saveEpcMap({ carrier: Number(setEpcCarrierEl.value||'0'), h2: Number(setEpcH2El && setEpcH2El.value || '1'), air: Number(setEpcAirEl && setEpcAirEl.value || '2') }); const sel = selectedDevice(); saveUiToBackend(sel); });
+
     if(setEpcH2El) setEpcH2El.addEventListener('change', ()=>{ saveEpcMap({ carrier: Number(setEpcCarrierEl && setEpcCarrierEl.value || '0'), h2: Number(setEpcH2El.value||'1'), air: Number(setEpcAirEl && setEpcAirEl.value || '2') }); const sel = selectedDevice(); saveUiToBackend(sel); });
+
     if(setEpcAirEl) setEpcAirEl.addEventListener('change', ()=>{ saveEpcMap({ carrier: Number(setEpcCarrierEl && setEpcCarrierEl.value || '0'), h2: Number(setEpcH2El && setEpcH2El.value || '1'), air: Number(setEpcAirEl.value||'2') }); const sel = selectedDevice(); saveUiToBackend(sel); });
 
+
+
     const openPlaceholder = (title)=>{
+
       alert(title + '閿涙艾绶熺€圭偟骞?);
+
     };
+
     if(setOpenMethodEl) setOpenMethodEl.addEventListener('click', ()=>openPlaceholder('閺傝纭?));
+
     if(setOpenProcessingEl) setOpenProcessingEl.addEventListener('click', ()=>openPlaceholder('鐠嬪崬娴樻径鍕倞'));
+
     if(setOpenReportsEl) setOpenReportsEl.addEventListener('click', ()=>openPlaceholder('妤傛楠囬幎銉ㄣ€?));
+
   </script>
+
 </body>
+
 </html>`
+

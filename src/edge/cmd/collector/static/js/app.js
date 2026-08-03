@@ -1,12 +1,12 @@
-import { initDashboard } from './views/dashboard.js?v=0.3.21';
-import { initLiveChromatogram } from './views/live.js?v=0.3.21';
-import { initMethod } from './views/method.js?v=0.3.21';
-import { initSettings } from './views/settings.js?v=0.3.21';
-import { initProcess } from './views/process.js?v=0.3.21';
-import { initReport } from './views/report.js?v=0.3.21';
-import { initDebug } from './views/debug.js?v=0.3.42';
-import { initTCD } from './views/tcd.js?v=0.3.42';
-import { initEPC } from './views/epc.js?v=0.3.42';
+import { initDashboard } from './views/dashboard.js?v=0.3.27';
+import { initLiveChromatogram } from './views/live.js?v=0.3.27';
+import { initMethod } from './views/method.js?v=0.3.27';
+import { initSettings } from './views/settings.js?v=0.3.27';
+import { initProcess } from './views/process.js?v=0.3.27';
+import { initReport } from './views/report.js?v=0.3.27';
+import { initDebug } from './views/debug.js?v=0.3.48';
+import { initTCD } from './views/tcd.js?v=0.3.48';
+import { initEPC } from './views/epc.js?v=0.3.48';
 
 document.addEventListener('DOMContentLoaded', () => {
     const navItems = document.querySelectorAll('.nav-item');
@@ -89,8 +89,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
 
+            // 如果是开始分析，提示输入审计备注
+            let remarkParam = '';
+            if (cmdName === 'startAll' || cmdName === 'start') {
+                const remark = window.prompt("请输入审计备注（例如：标气类型、操作说明等），可留空：", "");
+                if (remark === null) {
+                    // 用户点击取消，中止发送指令
+                    return;
+                }
+                remarkParam = `&remark=${encodeURIComponent(remark)}`;
+            }
+
             // 2. 发送指令
-            const cmdRes = await fetch(`/api/v1/devices/${deviceId}/cmd?name=${cmdName}`, {
+            const cmdRes = await fetch(`/api/v1/devices/${deviceId}/cmd?name=${cmdName}${remarkParam}`, {
                 method: 'POST'
             });
             const cmdData = await cmdRes.json();

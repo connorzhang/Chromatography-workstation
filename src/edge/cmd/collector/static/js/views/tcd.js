@@ -42,7 +42,7 @@ export function initTCD() {
                 </div>
             </div>
 
-            <div style="display: flex; gap: 20px; margin-top: 20px; height: 350px;">
+            <div style="display: flex; gap: 20px; margin-top: 20px; height: 500px;">
                 <div style="flex: 1; display: flex; flex-direction: column;">
                     <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 8px; background: rgba(0,0,0,0.15); border-radius: 4px; margin-bottom: 5px;">
                         <label style="color: #94a3b8; font-size: 12px;">
@@ -62,8 +62,12 @@ export function initTCD() {
                         </select>
                         <span style="color: #64748b; font-size: 11px; margin-left: auto;">双击重置 | 滚轮缩放 | 拖放选区放大</span>
                     </div>
-                    <div style="flex: 1; border: 1px solid #334155; border-radius: 6px; position: relative; background: #0f172a;">
+                    <div style="flex: 3; border: 1px solid #334155; border-radius: 6px; position: relative; background: #0f172a; margin-bottom: 10px;">
                         <canvas id="tcd-canvas" style="position: absolute; top:0; left:0; width:100%; height:100%;"></canvas>
+                    </div>
+                    <div style="flex: 1; border: 1px solid #334155; border-radius: 6px; position: relative; background: #0f172a;">
+                        <div style="position: absolute; top: 10px; right: 10px; color: #94a3b8; font-size: 12px; font-weight: bold; z-index: 10;">同步 EPC 流量 (实时: <span id="tcd-epc-val-flow" style="color: #facc15;">0.0000</span>)</div>
+                        <canvas id="tcd-epc-canvas" style="position: absolute; top:0; left:0; width:100%; height:100%;"></canvas>
                     </div>
                 </div>
                 <div style="flex: 0 0 220px; border: 1px solid #334155; border-radius: 6px; background: #0f172a; padding: 10px; overflow-y: auto;">
@@ -78,6 +82,8 @@ export function initTCD() {
 
     let tcdPollInterval = null;
     let tcdDataPoints = []; // sliding window
+    let tcdEpcFlowDataPoints = []; // sliding window for synchronized EPC flow
+    let currentEpcFlow = 0; // 最新缓存的EPC流量
 
     // 节流绘图控制
     let isDrawing = false;
@@ -91,8 +97,8 @@ export function initTCD() {
         }
     }
 
-    // 最大存储点数：4分钟数据，每秒40个点 = 9600
-    const maxPoints = 9600;
+    // 最大存储点数：扩大到50000000000以支持超过40分钟的出峰测试
+    const maxPoints = 50000000000;
 
     // Savitzky-Golay 滤波系数（窗口5，2阶多项式）
     const SG_COEFFS = [-0.08571429, 0.34285714, 0.48571429, 0.34285714, -0.08571429];
@@ -292,9 +298,9 @@ export function initTCD() {
             startIdx = zoomState.minIdx;
             endIdx = zoomState.maxIdx;
         } else {
-            // 根据 fullScreenSec 计算可见点数 N = fullScreenSec * 40 (每秒40个点)
+            // 根据 fullScreenSec 计算可见点数 N = fullScreenSec * 20 (每秒20个点)
             const fsSec = parseFloat(fullScreenSecInput.value);
-            const N = Math.max(1, Math.floor((isNaN(fsSec) ? 120 : fsSec) * 40));
+            const N = Math.max(1, Math.floor((isNaN(fsSec) ? 120 : fsSec) * 20));
             endIdx = total - 1;
             startIdx = Math.max(0, endIdx - N + 1);
         }
@@ -329,6 +335,24 @@ export function initTCD() {
     // 自动开始轮询状态
     if (window.tcdPollTimer) clearTimeout(window.tcdPollTimer);
     if (window.voltPollTimer) clearTimeout(window.voltPollTimer);
+    if (window.tcdEpcPollTimer) clearTimeout(window.tcdEpcPollTimer);
+
+    async function pollTCDEpcState() {
+        if (!document.getElementById('tcd-status')) return;
+        try {
+            const res = await fetch('/api/v1/epc/state');
+            if (res.ok) {
+                const data = await res.json();
+                if (data.connected) {
+                    currentEpcFlow = data.real_flow;
+                    const valFlowElem = document.getElementById('tcd-epc-val-flow');
+                    if (valFlowElem) valFlowElem.innerText = currentEpcFlow.toFixed(4);
+                }
+            }
+        } catch (e) {}
+        window.tcdEpcPollTimer = setTimeout(pollTCDEpcState, 500);
+    }
+    window.tcdEpcPollTimer = setTimeout(pollTCDEpcState, 100);
 
     async function pollVoltage() {
         if (!document.getElementById('tcd-voltage')) return; // DOM销毁时自动停止轮询
@@ -338,8 +362,9 @@ export function initTCD() {
                 const data = await res.json();
                 if (!data.connected) {
                     document.getElementById('tcd-voltage').innerText = '-- V';
-                    document.getElementById('tcd-resistance').innerText = '-- kΩ';
+                    document.getElementById('tcd-resistance').innerText = '-- Ω';
                     document.getElementById('tcd-filament-temp').innerText = '-- ℃';
+                    window.voltPollTimer = setTimeout(pollVoltage, 1000);
                     return;
                 }
                 const voltage = data.voltage; // 浮点电压值 (V)
@@ -414,6 +439,8 @@ export function initTCD() {
         } catch (e) {}
     });
 
+    let lastFrameCount = -1;
+
     async function pollTCDState() {
         if (!document.getElementById('tcd-status')) return; // DOM销毁时自动停止轮询
         try {
@@ -423,6 +450,7 @@ export function initTCD() {
                 if (!data.connected) {
                     document.getElementById('tcd-status').innerText = '连接已断开';
                     document.getElementById('tcd-status').style.color = 'var(--danger)';
+                    window.tcdPollTimer = setTimeout(pollTCDState, 500);
                     return;
                 }
                 document.getElementById('tcd-status').innerText = '已连接 (通信中)';
@@ -436,48 +464,57 @@ export function initTCD() {
                 }
                 document.getElementById('tcd-values-list').innerHTML = html;
 
-                // 将20个原始数据点按顺序一次性全部推入（40Hz 采样率）
-                tcdDataPoints.push(...data.values);
-                // 最大存储 maxPoints = 9600（4分钟数据）
-                if(tcdDataPoints.length > maxPoints) {
-                    const overLimit = tcdDataPoints.length - maxPoints;
-                    tcdDataPoints = tcdDataPoints.slice(overLimit);
-                    if (zoomState) {
-                        zoomState.minIdx -= overLimit;
-                        zoomState.maxIdx -= overLimit;
-                        if (zoomState.maxIdx < 0) {
-                            zoomState = null;
-                        } else {
-                            if (zoomState.minIdx < 0) zoomState.minIdx = 0;
+                // 利用 frame_count 去重，防止同一帧被多次 push 导致锯齿回跳
+                if (data.frame_count !== undefined && data.frame_count !== lastFrameCount) {
+                    lastFrameCount = data.frame_count;
+                    // 将20个原始数据点按顺序一次性全部推入（20Hz 采样率）
+                    tcdDataPoints.push(...data.values);
+                    for (let i = 0; i < data.values.length; i++) {
+                        tcdEpcFlowDataPoints.push(currentEpcFlow);
+                    }
+                    // 最大存储 maxPoints = 9600（4分钟数据）
+                    if(tcdDataPoints.length > maxPoints) {
+                        const overLimit = tcdDataPoints.length - maxPoints;
+                        tcdDataPoints = tcdDataPoints.slice(overLimit);
+                        tcdEpcFlowDataPoints = tcdEpcFlowDataPoints.slice(overLimit);
+                        if (zoomState) {
+                            zoomState.minIdx -= overLimit;
+                            zoomState.maxIdx -= overLimit;
+                            if (zoomState.maxIdx < 0) {
+                                zoomState = null;
+                            } else {
+                                if (zoomState.minIdx < 0) zoomState.minIdx = 0;
+                            }
                         }
                     }
-                }
-                
-                // Calculate Baseline Noise & Drift (基于全量窗口数据)
-                if (tcdDataPoints.length > 0) {
-                    let minVal = Infinity, maxVal = -Infinity;
-                    let sum = 0;
-                    for (let v of tcdDataPoints) {
-                        if (v < minVal) minVal = v;
-                        if (v > maxVal) maxVal = v;
-                        sum += v;
-                    }
-                    const noise = maxVal - minVal;
-                    const mean = sum / tcdDataPoints.length;
                     
-                    document.getElementById('tcd-stat-noise').innerText = noise.toFixed(2);
-                    if (mean === 0) {
-                        document.getElementById('tcd-stat-drift').innerText = '0.0000';
-                    } else {
-                        const driftRatio = noise / Math.abs(mean);
-                        document.getElementById('tcd-stat-drift').innerText = driftRatio.toFixed(4);
+                    // Calculate Baseline Noise & Drift (基于全量窗口数据)
+                    if (tcdDataPoints.length > 0) {
+                        let minVal = Infinity, maxVal = -Infinity;
+                        let sum = 0;
+                        for (let v of tcdDataPoints) {
+                            if (v < minVal) minVal = v;
+                            if (v > maxVal) maxVal = v;
+                            sum += v;
+                        }
+                        const noise = maxVal - minVal;
+                        const mean = sum / tcdDataPoints.length;
+                        
+                        document.getElementById('tcd-stat-noise').innerText = noise.toFixed(2);
+                        if (mean === 0) {
+                            document.getElementById('tcd-stat-drift').innerText = '0.0000';
+                        } else {
+                            const driftRatio = noise / Math.abs(mean);
+                            document.getElementById('tcd-stat-drift').innerText = driftRatio.toFixed(4);
+                        }
                     }
-                }
 
-                scheduleDraw();
+                    scheduleDraw();
+                }
             }
         } catch (e) {}
-        window.tcdPollTimer = setTimeout(pollTCDState, 500);
+        // 加快轮询频率到200ms，配合去重机制，确保不漏帧
+        window.tcdPollTimer = setTimeout(pollTCDState, 200);
     }
     window.tcdPollTimer = setTimeout(pollTCDState, 100);
 
@@ -551,7 +588,7 @@ export function initTCD() {
         for(let i=0; i<=10; i++) {
             const x = padLeft + (i/10) * plotW;
             const idx = startIdx + (i/10) * (endIdx - startIdx);
-            const timeSec = idx / 40; // 每个点代表 1/40 秒 (0.025s)
+            const timeSec = idx / 20; // 每个点代表 1/20 秒 (0.05s)
             
             ctx.moveTo(x, padTop);
             ctx.lineTo(x, canvas.height - padBottom);
@@ -626,7 +663,7 @@ export function initTCD() {
             const dx = Math.abs(dx2 - dx1);
             const dy = Math.abs(dy2 - dy1);
             const valSpan = max - min;
-            const timeSpan = (endIdx - startIdx) / 40;
+            const timeSpan = (endIdx - startIdx) / 20;
             const dVal = (dy / plotH) * valSpan;
             const dTime = (dx / plotW) * timeSpan;
             
@@ -640,5 +677,92 @@ export function initTCD() {
             ctx.textBaseline = 'top';
             ctx.fillText('🔍 已放大 (双击还原)', canvas.width - 10, 20);
         }
+        
+        drawTCDEpcCanvas(startIdx, endIdx, padLeft, padRight, plotW);
+    }
+
+    function drawTCDEpcCanvas(startIdx, endIdx, padLeft, padRight, plotW) {
+        const canvas = document.getElementById('tcd-epc-canvas');
+        if(!canvas) return;
+        const rect = canvas.parentElement.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return;
+
+        if (canvas.width !== rect.width || canvas.height !== rect.height) {
+            canvas.width = rect.width;
+            canvas.height = rect.height;
+        }
+
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        if(tcdEpcFlowDataPoints.length === 0 || startIdx > endIdx) return;
+
+        const padBottom = 20;
+        const padTop = 30;
+        const plotH = canvas.height - padTop - padBottom;
+        if (plotW <= 0 || plotH <= 0) return;
+
+        // 获取可视范围内的数据
+        const visibleEpc = tcdEpcFlowDataPoints.slice(startIdx, endIdx + 1);
+        if (visibleEpc.length === 0) return;
+
+        let min = Infinity, max = -Infinity;
+        for(let v of visibleEpc) {
+            if(v < min) min = v;
+            if(v > max) max = v;
+        }
+        if(min === Infinity) { min = 0; max = 1; }
+        if(min === max) { min -= 1; max += 1; }
+        const span = max - min;
+        min -= span * 0.2;
+        max += span * 0.2;
+
+        // Y轴网格和刻度 (3等分)
+        ctx.fillStyle = '#94a3b8';
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'middle';
+        ctx.strokeStyle = '#1e293b';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        for(let i=0; i<=3; i++) {
+            const y = padTop + (i/3) * plotH;
+            const val = max - (i/3) * (max - min);
+            ctx.moveTo(padLeft, y);
+            ctx.lineTo(canvas.width - padRight, y);
+            ctx.fillText(val.toFixed(3), padLeft - 5, y);
+        }
+        ctx.stroke();
+
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'bottom';
+        ctx.fillStyle = '#94a3b8';
+        ctx.fillText('mL/min', 10, padTop - 5);
+
+        // 绘制X轴网格(对齐上方)
+        ctx.beginPath();
+        for(let i=0; i<=10; i++) {
+            const x = padLeft + (i/10) * plotW;
+            ctx.moveTo(x, padTop);
+            ctx.lineTo(x, canvas.height - padBottom);
+        }
+        ctx.stroke();
+
+        // 绘制 EPC 流量曲线
+        ctx.strokeStyle = '#facc15'; 
+        ctx.lineWidth = 2;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        const visibleCount = visibleEpc.length;
+        for(let i = 0; i < visibleCount; i++) {
+            const x = padLeft + (i / (visibleCount - 1 || 1)) * plotW;
+            let y = padTop + plotH - ((visibleEpc[i] - min) / (max - min)) * plotH;
+            if(y < padTop) y = padTop;
+            if(y > padTop + plotH) y = padTop + plotH;
+
+            if(i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
     }
 }

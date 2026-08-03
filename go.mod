@@ -1,4 +1,4 @@
-﻿module deploy
+module chromatography-workstation
 
 go 1.26.2
 

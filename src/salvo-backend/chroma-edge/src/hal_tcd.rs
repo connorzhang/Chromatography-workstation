@@ -1,4 +1,4 @@
-﻿use std::sync::Arc;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -10,6 +10,7 @@ pub struct TcdState {
     pub connected: bool,
     pub bridge_current: u8,
     pub values: [f64; 20],
+    pub frame_count: u64,
     #[serde(skip, default = "std::time::Instant::now")]
     pub last_update: std::time::Instant,
 }
@@ -20,6 +21,7 @@ impl Default for TcdState {
             connected: false,
             bridge_current: 0,
             values: [0.0; 20],
+            frame_count: 0,
             last_update: std::time::Instant::now(),
         }
     }
@@ -46,61 +48,64 @@ impl TcdController {
         };
 
         let state_clone = state.clone();
-        tokio::spawn(async move {
-            let mut port = match tokio_serial::new(port_name, 38400)
-                .data_bits(tokio_serial::DataBits::Eight)
-                .stop_bits(tokio_serial::StopBits::One)
-                .parity(tokio_serial::Parity::None)
-                .open_native_async()
-            {
-                Ok(p) => p,
-                Err(e) => {
-                    eprintln!("Failed to open TCD port: {}", e);
-                    return;
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+            rt.block_on(async move {
+                let mut port = match tokio_serial::new(port_name, 38400)
+                    .data_bits(tokio_serial::DataBits::Eight)
+                    .stop_bits(tokio_serial::StopBits::One)
+                    .parity(tokio_serial::Parity::None)
+                    .open_native_async()
+                {
+                    Ok(p) => p,
+                    Err(e) => {
+                        eprintln!("Failed to open TCD port: {}", e);
+                        return;
+                    }
+                };
+
+                {
+                    let mut st = state_clone.lock().await;
+                    st.connected = true;
+                    st.last_update = std::time::Instant::now();
                 }
-            };
 
-            {
-                let mut st = state_clone.lock().await;
-                st.connected = true;
-                st.last_update = std::time::Instant::now();
-            }
+                let mut buf = vec![0u8; 1024];
+                let mut frame_buf = Vec::new();
+                let mut rx_cmd = rx_cmd;
 
-            let mut buf = vec![0u8; 1024];
-            let mut frame_buf = Vec::new();
-            let mut rx_cmd = rx_cmd;
-
-            loop {
-                tokio::select! {
-                    _ = rx_stop.recv() => {
-                        break;
-                    }
-                    cmd = rx_cmd.recv() => {
-                        if let Some(c) = cmd {
-                            let _ = port.write_all(&c).await;
+                loop {
+                    tokio::select! {
+                        _ = rx_stop.recv() => {
+                            break;
                         }
-                    }
-                    res = port.read(&mut buf) => {
-                        match res {
-                            Ok(0) => {
-                                break;
-                            }
-                            Ok(n) => {
-                                frame_buf.extend_from_slice(&buf[..n]);
-                                Self::process_frames(&mut frame_buf, &state_clone).await;
-                            }
-                            Err(_) => {
-                                tokio::time::sleep(Duration::from_millis(100)).await;
+                        cmd = rx_cmd.recv() => {
+                            if let Some(c) = cmd {
+                                let _ = port.write_all(&c).await;
                             }
                         }
+                        res = port.read(&mut buf) => {
+                            match res {
+                                Ok(0) => {
+                                    break;
+                                }
+                                Ok(n) => {
+                                    frame_buf.extend_from_slice(&buf[..n]);
+                                    Self::process_frames(&mut frame_buf, &state_clone).await;
+                                }
+                                Err(_) => {
+                                    tokio::time::sleep(Duration::from_millis(100)).await;
+                                }
+                            }
+                        }
                     }
                 }
-            }
 
-            {
-                let mut st = state_clone.lock().await;
-                st.connected = false;
-            }
+                {
+                    let mut st = state_clone.lock().await;
+                    st.connected = false;
+                }
+            });
         });
 
         controller
@@ -162,6 +167,7 @@ impl TcdController {
         let mut st = state.lock().await;
         st.bridge_current = bridge_current;
         st.values = values;
+        st.frame_count += 1;
         st.last_update = std::time::Instant::now();
     }
 

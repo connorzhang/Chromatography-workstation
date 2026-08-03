@@ -1,4 +1,4 @@
-﻿[package]
+[package]
 name = "chroma-edge"
 version = "0.1.0"
 edition = "2024"
@@ -10,7 +10,7 @@ tokio-stream = "0.1"
 
 chroma-core = { version = "0.1.0", path = "../chroma-core" }
 lazy_static = "1.5.0"
-salvo = { version = "0.93.0", features = ["cors", "websocket", "oapi", "serve-static"] }
+salvo = { version = "0.93.0", features = ["cors", "websocket", "oapi", "serve-static", "affix-state"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 tokio = { workspace = true, features = ["full"] }

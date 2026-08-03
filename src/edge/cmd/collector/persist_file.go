@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -308,6 +309,34 @@ func (s *persistStore) LoadResultsFromDB(deviceID string, from time.Time, to tim
 		}
 	}
 	return results
+}
+
+func (s *persistStore) UpdateResultRemark(traceID string, remark string) error {
+	if s.db == nil {
+		return fmt.Errorf("db not initialized")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var resJSON string
+	err := s.db.QueryRow("SELECT result_json FROM results WHERE trace_id = ?", traceID).Scan(&resJSON)
+	if err != nil {
+		return err
+	}
+
+	var inner map[string]interface{}
+	if err := json.Unmarshal([]byte(resJSON), &inner); err != nil {
+		return err
+	}
+
+	inner["audit_remark"] = remark
+	newJSON, err := json.Marshal(inner)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.db.Exec("UPDATE results SET result_json = ? WHERE trace_id = ?", string(newJSON), traceID)
+	return err
 }
 
 func (s *persistStore) LoadResult(deviceID string, ch int) (map[string]any, bool) {

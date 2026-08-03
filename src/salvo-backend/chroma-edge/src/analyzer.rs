@@ -1,7 +1,9 @@
-﻿use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use crate::hal_tcd::{TcdController, TcdState};
 use crate::hal_temp::{TempController, TempState};
 use crate::hal_voltage::{VoltageController, VoltageState};
+use crate::hal_epc::{EpcController, EpcState};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TempZoneInfo {
@@ -63,9 +65,10 @@ pub struct UnifiedState {
 
 pub struct AnalyzerController {
     pub capabilities: AnalyzerCapabilities,
-    pub tcd: Option<TcdController>,
-    pub temp: Option<TempController>,
-    pub voltage: Option<VoltageController>,
+    pub tcd: Option<Arc<TcdController>>,
+    pub temp: Option<Arc<TempController>>,
+    pub voltage: Option<Arc<VoltageController>>,
+    pub epc: Option<Arc<EpcController>>,
 }
 
 impl AnalyzerController {
@@ -96,6 +99,7 @@ impl AnalyzerController {
             tcd: None,
             temp: None,
             voltage: None,
+            epc: None,
         }
     }
 
@@ -103,16 +107,24 @@ impl AnalyzerController {
         if let Some(c) = self.tcd.take() { tokio::spawn(async move { c.close().await; }); }
         if let Some(c) = self.temp.take() { tokio::spawn(async move { c.close().await; }); }
         if let Some(c) = self.voltage.take() { tokio::spawn(async move { c.close().await; }); }
+        if let Some(c) = self.epc.take() { tokio::spawn(async move { c.close().await; }); }
 
-        self.tcd = Some(TcdController::new(tcd_port));
-        self.temp = Some(TempController::new(temp_port));
-        self.voltage = Some(VoltageController::new(voltage_port));
+        self.tcd = Some(Arc::new(TcdController::new(tcd_port)));
+        
+        let vc = Arc::new(VoltageController::new());
+        let (epc_req_tx, epc_req_rx) = tokio::sync::mpsc::channel(10);
+        let epc_ctrl = Arc::new(EpcController::new(epc_req_tx));
+        
+        self.temp = Some(Arc::new(TempController::new(temp_port, vc.state.clone(), epc_ctrl.state.clone(), epc_req_rx)));
+        self.voltage = Some(vc);
+        self.epc = Some(epc_ctrl);
     }
 
     pub fn disconnect_hardware(&mut self) {
         if let Some(c) = self.tcd.take() { tokio::spawn(async move { c.close().await; }); }
         if let Some(c) = self.temp.take() { tokio::spawn(async move { c.close().await; }); }
         if let Some(c) = self.voltage.take() { tokio::spawn(async move { c.close().await; }); }
+        if let Some(c) = self.epc.take() { tokio::spawn(async move { c.close().await; }); }
     }
 
     pub async fn get_state(&self) -> UnifiedState {

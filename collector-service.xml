@@ -1,0 +1,9 @@
+<service>
+  <id>EdgeCollector</id>
+  <name>Edge Collector Service</name>
+  <description>Chromatography Edge Collector Background Service</description>
+  <executable>C:\Users\trae\Desktop\edge\collector.exe</executable>
+  <workingdirectory>C:\Users\trae\Desktop\edge</workingdirectory>
+  <log mode="roll"></log>
+  <logpath>C:\Users\trae\Desktop\edge</logpath>
+</service>

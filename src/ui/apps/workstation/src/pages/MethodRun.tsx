@@ -1,6 +1,36 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer } from 'recharts';
+
+const TraceChart1 = memo(({ traceData }: { traceData: any[] }) => {
+  const { t } = useTranslation();
+  return (
+  <ResponsiveContainer width="100%" height="100%">
+    <LineChart data={traceData}>
+      <CartesianGrid strokeDasharray="3 3" vertical={true} horizontal={true} stroke="#e0e0e0" />
+      <XAxis dataKey="time" type="number" domain={['dataMin', 'dataMax']} tickFormatter={(v)=>v.toFixed(1)} tick={{fontSize: 10}} tickCount={10} axisLine={{stroke: 'black'}} tickLine={{stroke: 'black'}} />
+      <YAxis domain={['auto', 'auto']} tick={{fontSize: 10}} axisLine={{stroke: 'black'}} tickLine={{stroke: 'black'}} />
+      <Line type="monotone" dataKey="value" stroke="#000000" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+    </LineChart>
+  </ResponsiveContainer>
+  );
+});
+
+const TraceChart2 = memo(({ traceData }: { traceData: any[] }) => {
+  const { t } = useTranslation();
+  return (
+  <ResponsiveContainer width="100%" height="100%">
+    <LineChart data={traceData}>
+      <CartesianGrid strokeDasharray="3 3" vertical={true} horizontal={true} stroke="#e0e0e0" />
+      <XAxis dataKey="time" type="number" domain={['dataMin', 'dataMax']} tickFormatter={(v)=>v.toFixed(1)} tick={{fontSize: 10}} tickCount={10} axisLine={{stroke: 'black'}} tickLine={{stroke: 'black'}} />
+      <YAxis yAxisId="temp" orientation="left" domain={['auto', 'auto']} tick={{fontSize: 10}} axisLine={{stroke: 'red'}} tickLine={{stroke: 'red'}} />
+      <YAxis yAxisId="press" orientation="right" domain={['auto', 'auto']} tick={{fontSize: 10}} axisLine={{stroke: 'blue'}} tickLine={{stroke: 'blue'}} />
+      <Line yAxisId="temp" type="stepAfter" dataKey="oven_temp" stroke="red" strokeWidth={1.5} dot={false} isAnimationActive={false} name={t('Oven Temp')} />
+      <Line yAxisId="press" type="stepAfter" dataKey="pressure" stroke="blue" strokeWidth={1.5} dot={false} isAnimationActive={false} name={t('Pressure')} />
+    </LineChart>
+  </ResponsiveContainer>
+  );
+});
 
 export default function MethodRun() {
   const { t } = useTranslation();
@@ -9,12 +39,15 @@ export default function MethodRun() {
   const [runTime, setRunTime] = useState("00:00:00.000");
   const [hardwareData, setHardwareData] = useState({
     pressure: 0,
-    temperature: 0,
+    oven_temp: 0,
+    inlet_temp: 0,
+    tcd_block_temp: 0,
+    aux_temp: 0,
     tcd_bridge_current: 'OFF',
-    tcd_temp: 0,
+    tcd_voltage: 0,
+    tcd_resistance: 0,
+    tcd_filament_temp: 0,
     tcd_polarity: 'Unknown',
-    fid_flame: 'OFF',
-    fid_temp: 0,
     ms_vacuum: 'Offline',
     prep_valve: 'WASTE',
   });
@@ -22,6 +55,7 @@ export default function MethodRun() {
   const wsRef = useRef<WebSocket | null>(null);
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const [activeModal, setActiveModal] = useState<string | null>(null);
+  const [methodTab, setMethodTab] = useState<string>('Pump');
 
   const [showRTL, setShowRTL] = useState(false);
   const [showMethodTranslator, setShowMethodTranslator] = useState(false);
@@ -48,14 +82,103 @@ export default function MethodRun() {
 
   const closeModal = () => setActiveModal(null);
 
+  const handleZeroing = async () => {
+    try {
+      const baseUrl = window.location.port === '5173' ? `http://${window.location.hostname}:8082` : '';
+      await fetch(baseUrl + '/api/v1/tcd/zeroing', { method: 'POST' });
+    } catch (e) {
+      console.error('Zeroing failed', e);
+    }
+  };
+
+  const handleSetBridge = async (val: number) => {
+    try {
+      const baseUrl = window.location.port === '5173' ? `http://${window.location.hostname}:8082` : '';
+      await fetch(baseUrl + '/api/v1/tcd/set_bridge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ val })
+      });
+    } catch (e) {
+      console.error('Set bridge failed', e);
+    }
+  };
+
+  const handleSetTemp = async (channel: number, target_temp: number) => {
+    try {
+      const baseUrl = window.location.port === '5173' ? `http://${window.location.hostname}:8082` : '';
+      await fetch(baseUrl + '/api/v1/modbus_temp/set', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel, target_temp })
+      });
+    } catch (e) {
+      console.error('Set temp failed', e);
+    }
+  };
+
+  const handleSetHeater = async (channel: number, state: boolean) => {
+    try {
+      const baseUrl = window.location.port === '5173' ? `http://${window.location.hostname}:8082` : '';
+      await fetch(baseUrl + '/api/v1/modbus_temp/set_io', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel, state })
+      });
+    } catch (e) {
+      console.error('Set heater failed', e);
+    }
+  };
+
+  const handleSetEventSwitch = async (eventIdx: number, state: boolean) => {
+    try {
+      const baseUrl = window.location.port === '5173' ? `http://${window.location.hostname}:8082` : '';
+      await fetch(baseUrl + '/api/v1/modbus_temp/set_io', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel: eventIdx + 4, state })
+      });
+    } catch (e) {
+      console.error('Set event switch failed', e);
+    }
+  };
+
+  const [valveProgram, setValveProgram] = useState<any[]>([]);
+
+  useEffect(() => {
+    const fetchValveProgram = async () => {
+      try {
+        const baseUrl = window.location.port === '5173' ? `http://${window.location.hostname}:8082` : '';
+        const res = await fetch(baseUrl + '/api/v1/valve/program');
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setValveProgram(data);
+        }
+      } catch (e) {
+        console.error('Failed to fetch valve program', e);
+      }
+    };
+    fetchValveProgram();
+  }, []);
+
+  const saveValveProgram = async (prog: any[]) => {
+    try {
+      const baseUrl = window.location.port === '5173' ? `http://${window.location.hostname}:8082` : '';
+      await fetch(baseUrl + '/api/v1/valve/program', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(prog)
+      });
+      setValveProgram(prog);
+    } catch (e) {
+      console.error('Failed to save valve program', e);
+    }
+  };
+
   const toggleRun = async () => {
-    const hostname = window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname;
-    
     if (isRunning) {
-      if (wsRef.current) wsRef.current.close();
       setIsRunning(false);
       setStatus("Offline");
-      
       try {
         await fetch((window.location.port === '5173' ? `http://${window.location.hostname}:8082` : '') + `/api/v1/sequence/stop`, { method: 'POST' });
       } catch (e) {
@@ -65,7 +188,7 @@ export default function MethodRun() {
       setTraceData([]);
       setRunTime("00:00:00.000");
       setIsRunning(true);
-      setStatus("Connecting...");
+      setStatus("Running");
       
       try {
         await fetch((window.location.port === '5173' ? `http://${window.location.hostname}:8082` : '') + `/api/v1/sequence/start`, {
@@ -89,81 +212,111 @@ export default function MethodRun() {
       } catch (e) {
         console.error(e);
       }
-      
-      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsHost = window.location.port === '5173' ? `${window.location.hostname}:8082` : window.location.host;
-      const wsUrl = `${wsProtocol}//${wsHost}/ws/v1/realtime`;
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          
-          if (data.msg_type === "STATE") {
-            setStatus(data.state === "RUNNING" ? "Connected" : data.state);
-          } else if (data.msg_type === "ERROR") {
-            setStatus("Error");
-            setIsRunning(false);
-            ws.close();
-          } else if (data.msg_type === "DATA") {
-            if (data.state === "IDLE") {
-              setStatus("READY");
-              setIsRunning(false);
-              ws.close();
-              return;
-            }
-
-            setStatus((prev) => {
-              if (prev === "Connecting..." || prev === "Offline" || prev === "READY") {
-                return "Running";
-              }
-              return prev;
-            });
-            
-            setHardwareData({
-              pressure: data.pressure,
-              temperature: data.temperature,
-              tcd_bridge_current: data.tcd_bridge_current || 'OFF',
-              tcd_temp: data.tcd_temp || 0,
-              tcd_polarity: data.tcd_polarity || 'Unknown',
-              fid_flame: data.fid_flame || 'OFF',
-              fid_temp: data.fid_temp || 0,
-              ms_vacuum: data.ms_vacuum || 'Offline',
-              prep_valve: data.prep_valve || 'WASTE',
-            });
-            
-            // Calculate runtime
-            const totalSeconds = data.time;
-            const mm = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
-            const ss = Math.floor(totalSeconds % 60).toString().padStart(2, '0');
-            const ms = Math.floor((totalSeconds % 1) * 1000).toString().padStart(3, '0');
-            setRunTime(`00:${mm}:${ss}.${ms}`);
-            
-            setTraceData(prev => {
-              // Mocking a second signal for FID based on TCD signal
-              const newTrace = [...prev, { time: Number(data.time.toFixed(1)), value: data.signal, fid_value: data.signal * 0.6 + 20 }];
-              if (newTrace.length > 200) newTrace.shift();
-              return newTrace;
-            });
-          }
-        } catch (e) {
-          console.error("Parse error", e);
-        }
-      };
-
-      ws.onclose = () => {
-        setIsRunning(false);
-        setStatus(prev => prev.includes("Error") ? prev : "Offline");
-      };
     }
   };
 
   useEffect(() => {
-    return () => {
-      if (wsRef.current) wsRef.current.close();
+    let isMounted = true;
+    let timeoutId: any;
+    let startTime = Date.now();
+    
+    const pollData = async () => {
+      try {
+        const baseUrl = window.location.port === '5173' ? `http://${window.location.hostname}:8082` : '';
+        const [tcdRes, tempRes, epcRes, voltRes] = await Promise.all([
+          fetch(baseUrl + '/api/v1/tcd/state'),
+          fetch(baseUrl + '/api/v1/modbus_temp/state'),
+          fetch(baseUrl + '/api/v1/epc/state'),
+          fetch(baseUrl + '/api/v1/voltage/state')
+        ]);
+        
+        const tcdData = await tcdRes.json();
+        const tempData = await tempRes.json();
+        const epcData = await epcRes.json();
+        const voltData = await voltRes.json();
+
+        if (!isMounted) return;
+
+          let tcdVoltage = voltData.connected ? voltData.voltage : 0;
+          tcdVoltage = Math.round(tcdVoltage * 1000) / 1000;
+          let tcdBridgeCurrentNum = tcdData.connected ? tcdData.bridge_current : 0;
+          let tcdResistance = 0;
+          let tcdFilamentTemp = 0;
+
+          if (tcdVoltage > 0 && tcdBridgeCurrentNum > 0) {
+             tcdResistance = (tcdVoltage / tcdBridgeCurrentNum) * 1000;
+             tcdResistance = Math.round(tcdResistance * 100) / 100;
+             tcdFilamentTemp = 2.5458 * tcdResistance - 285.5878;
+             tcdFilamentTemp = Math.round(tcdFilamentTemp * 10) / 10;
+          }
+          
+          setHardwareData(prev => {
+            const newData = {
+              pressure: Math.round((epcData.real_pressure || 0) * 100) / 100,
+              oven_temp: Math.round((tempData.temperatures ? tempData.temperatures[0] : 0) * 10) / 10,
+              inlet_temp: Math.round((tempData.temperatures ? tempData.temperatures[1] : 0) * 10) / 10,
+              tcd_block_temp: Math.round((tempData.temperatures ? tempData.temperatures[2] : 0) * 10) / 10,
+              aux_temp: Math.round((tempData.temperatures ? tempData.temperatures[3] : 0) * 10) / 10,
+              tcd_bridge_current: tcdData.connected ? (tcdData.bridge_current > 0 ? `${tcdData.bridge_current} mA` : 'OFF') : 'Offline',
+              tcd_voltage: tcdVoltage,
+              tcd_resistance: tcdResistance,
+              tcd_filament_temp: tcdFilamentTemp,
+              tcd_polarity: tcdData.connected ? 'Positive' : 'Unknown',
+              ms_vacuum: 'Offline',
+              prep_valve: 'WASTE',
+            };
+          
+          let changed = false;
+          for (const key in newData) {
+            if ((prev as any)[key] !== (newData as any)[key]) {
+              changed = true;
+              break;
+            }
+          }
+          
+          if (changed) {
+            return { ...prev, ...newData };
+          }
+          return prev;
+        });
+
+        if (isRunning) {
+          const totalSeconds = (Date.now() - startTime) / 1000.0;
+          const mm = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
+          const ss = Math.floor(totalSeconds % 60).toString().padStart(2, '0');
+          setRunTime(`00:${mm}:${ss}.000`);
+          
+          if (tcdData.connected && tcdData.values && tcdData.values.length > 0) {
+            setTraceData(prev => {
+              const newTrace = [...prev];
+              const val = tcdData.values[tcdData.values.length - 1];
+              newTrace.push({ 
+                time: (Date.now() - startTime) / 60000.0, // Convert ms to minutes
+                value: val,
+                oven_temp: tempData.temperatures ? tempData.temperatures[0] : 0,
+                pressure: epcData.real_pressure || 0
+              });
+              if (newTrace.length > 50000000000) newTrace.shift(); // Extended to support 40+ minutes tests
+              return newTrace;
+            });
+          }
+        }
+      } catch (e) {
+        // Ignore polling errors
+      } finally {
+        if (isMounted) {
+          timeoutId = setTimeout(pollData, 500); // 500ms = 2 times per second
+        }
+      }
     };
-  }, []);
+
+    pollData();
+
+    return () => {
+      isMounted = false;
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [isRunning]);
 
   return (
     <div className="h-full flex flex-col bg-[#f0f0f0] text-sm font-sans select-none border border-gray-400" onContextMenu={(e) => e.preventDefault()}>
@@ -215,7 +368,7 @@ export default function MethodRun() {
             <div className="absolute top-full left-0 mt-0 w-64 bg-[#f0f0f0] border border-gray-400 shadow-lg z-50 py-1 flex flex-col">
               <div className="px-4 py-1 hover:bg-blue-500 hover:text-white cursor-pointer" onClick={() => openModal('instrumentConfig')}>{t('Instrument Configuration...')}</div>
               <div className="h-px bg-gray-400 my-1"></div>
-              <div className="px-4 py-1 hover:bg-blue-500 hover:text-white cursor-pointer" onClick={() => openModal('instrumentMethod')}>{t('Setup Instrument Method...')}</div>
+              <div className="px-4 py-1 hover:bg-blue-500 hover:text-white cursor-pointer" onClick={() => openModal('setupMethod')}>{t('Setup Instrument Method...')}</div>
               <div className="px-4 py-1 hover:bg-blue-500 hover:text-white cursor-pointer" onClick={() => openModal('moreSettings')}>{t('More Injector Settings...')}</div>
               <div className="h-px bg-gray-400 my-1"></div>
               <div className="px-4 py-1 hover:bg-blue-500 hover:text-white cursor-pointer" onClick={() => openModal('2dlcControl')}>{t('2D-LC Heart-Cutting...')}</div>
@@ -335,42 +488,60 @@ export default function MethodRun() {
               <div className="w-1/2 p-1">localhost</div>
             </div>
 
-            {/* TCD Detector Section */}
+            {/* Temperatures Section */}
             <div className="bg-[#f5f5f5] font-bold p-1 border-b border-gray-300 flex items-center gap-1">
               <span className="w-3 h-3 border border-gray-400 flex items-center justify-center bg-white text-[8px]">-</span>
-              {t('TCD Signal 1')}
+              {t('Thermal Zones (4-Ch)')}
+            </div>
+            <div className="flex border-b border-gray-200">
+              <div className="w-1/2 p-1 border-r border-gray-300 pl-6">{t('Oven Temp:')}</div>
+              <div className="w-1/2 p-1 font-bold">{hardwareData.oven_temp.toFixed(1)} °C</div>
+            </div>
+            <div className="flex border-b border-gray-200">
+              <div className="w-1/2 p-1 border-r border-gray-300 pl-6">{t('Inlet Temp:')}</div>
+              <div className="w-1/2 p-1 font-bold">{hardwareData.inlet_temp.toFixed(1)} °C</div>
+            </div>
+            <div className="flex border-b border-gray-200">
+              <div className="w-1/2 p-1 border-r border-gray-300 pl-6">{t('TCD Block Temp:')}</div>
+              <div className="w-1/2 p-1 font-bold">{hardwareData.tcd_block_temp.toFixed(1)} °C</div>
+            </div>
+            <div className="flex border-b border-gray-200">
+              <div className="w-1/2 p-1 border-r border-gray-300 pl-6">{t('AUX Temp:')}</div>
+              <div className="w-1/2 p-1 font-bold">{hardwareData.aux_temp.toFixed(1)} °C</div>
+            </div>
+
+            {/* TCD Detector Section */}
+            <div className="bg-[#f5f5f5] font-bold p-1 border-b border-gray-300 flex items-center justify-between">
+              <div className="flex items-center gap-1">
+                <span className="w-3 h-3 border border-gray-400 flex items-center justify-center bg-white text-[8px]">-</span>
+                {t('TCD Signal 1')}
+              </div>
+              <button 
+                onClick={handleZeroing}
+                className="bg-white border border-gray-400 px-2 py-0.5 text-[10px] hover:bg-gray-100 active:bg-gray-200"
+              >
+                {t('Auto Zero')}
+              </button>
             </div>
             <div className="flex border-b border-gray-200">
               <div className="w-1/2 p-1 border-r border-gray-300 pl-6">{t('Bridge Current:')}</div>
-              <div className={`w-1/2 p-1 font-bold ${hardwareData.tcd_bridge_current.includes('ON') ? 'bg-[#00ff00] text-black' : ''}`}>{t(hardwareData.tcd_bridge_current)}</div>
+              <div className={`w-1/2 p-1 font-bold ${hardwareData.tcd_bridge_current.includes('mA') ? 'bg-[#00ff00] text-black' : ''}`}>{t(hardwareData.tcd_bridge_current)}</div>
             </div>
             <div className="flex border-b border-gray-200">
-              <div className="w-1/2 p-1 border-r border-gray-300 pl-6">{t('Temp:')}</div>
-              <div className="w-1/2 p-1 font-bold">{hardwareData.tcd_temp.toFixed(1)} °C</div>
+              <div className="w-1/2 p-1 border-r border-gray-300 pl-6">{t('Voltage:')}</div>
+              <div className="w-1/2 p-1 font-bold text-yellow-600">{hardwareData.tcd_voltage > 0 ? hardwareData.tcd_voltage.toFixed(4) + ' V' : '-- V'}</div>
+            </div>
+            <div className="flex border-b border-gray-200">
+              <div className="w-1/2 p-1 border-r border-gray-300 pl-6">{t('Resistance:')}</div>
+              <div className="w-1/2 p-1 font-bold">{hardwareData.tcd_resistance > 0 ? hardwareData.tcd_resistance.toFixed(2) + ' Ω' : '-- Ω'}</div>
+            </div>
+            <div className="flex border-b border-gray-200">
+              <div className="w-1/2 p-1 border-r border-gray-300 pl-6">{t('Filament Temp:')}</div>
+              <div className="w-1/2 p-1 font-bold text-red-600">{hardwareData.tcd_filament_temp > 0 ? hardwareData.tcd_filament_temp.toFixed(2) + ' °C' : '-- °C'}</div>
             </div>
             <div className="flex border-b border-gray-200">
               <div className="w-1/2 p-1 border-r border-gray-300 pl-6">{t('Polarity:')}</div>
               <div className="w-1/2 p-1 font-bold">{t(hardwareData.tcd_polarity)}</div>
-            </div>
-
-            {/* FID Detector Section */}
-            <div className="bg-[#f5f5f5] font-bold p-1 border-b border-gray-300 flex items-center gap-1">
-              <span className="w-3 h-3 border border-gray-400 flex items-center justify-center bg-white text-[8px]">-</span>
-              {t('Detector (FID)')}
-            </div>
-            <div className="flex border-b border-gray-200">
-              <div className="w-1/2 p-1 border-r border-gray-300 pl-6 flex items-center justify-between">
-                <span>{t('Flame:')}</span>
-                <button className="text-xs bg-[#e0e0e0] border border-gray-500 px-2 py-0.5 rounded shadow-sm hover:bg-gray-200 active:bg-gray-300">{t('Ignite')}</button>
-              </div>
-              <div className={`w-1/2 p-1 font-bold flex items-center ${hardwareData.fid_flame === 'ON' ? 'bg-[#00ff00] text-black' : 'text-gray-500'}`}>
-                {hardwareData.fid_flame === 'ON' && <div className="w-2 h-2 rounded-full bg-orange-500 mr-1 animate-pulse"></div>}
-                {t(hardwareData.fid_flame)}
-              </div>
-            </div>
-            <div className="flex border-b border-gray-200">
-              <div className="w-1/2 p-1 border-r border-gray-300 pl-6">{t('Temp:')}</div>
-              <div className="w-1/2 p-1 font-bold">{hardwareData.fid_temp.toFixed(1)} °C</div>
             </div>
 
             {/* MS & Prep-LC Section */}
@@ -396,30 +567,16 @@ export default function MethodRun() {
             <div className="flex-1 p-2 pb-6 relative">
               <div className="absolute left-2 top-4 text-xs font-bold rotate-90 origin-left translate-y-8">{t('Intensity (mAU)')}</div>
               <div className="absolute bottom-1 w-full text-center text-xs">{t('Time (min)')}</div>
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={traceData}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={true} horizontal={true} stroke="#e0e0e0" />
-                  <XAxis dataKey="time" type="number" domain={['dataMin', 'dataMax']} tickFormatter={(v)=>v.toFixed(1)} tick={{fontSize: 10}} tickCount={10} axisLine={{stroke: 'black'}} tickLine={{stroke: 'black'}} />
-                  <YAxis domain={['auto', 'auto']} tick={{fontSize: 10}} axisLine={{stroke: 'black'}} tickLine={{stroke: 'black'}} />
-                  <Line type="monotone" dataKey="value" stroke="#000000" strokeWidth={1.5} dot={false} isAnimationActive={false} />
-                </LineChart>
-              </ResponsiveContainer>
+              <TraceChart1 traceData={traceData} />
             </div>
           </div>
 
-          {/* FID Chart */}
+          {/* EPC / Temperature Chart */}
           <div className="flex-1 bg-white border border-gray-600 flex flex-col min-h-[200px]">
             <div className="flex-1 p-2 pb-6 relative">
-              <div className="absolute left-2 top-4 text-xs font-bold rotate-90 origin-left translate-y-8">{t('Intensity (mAU)')}</div>
+              <div className="absolute left-2 top-4 text-xs font-bold rotate-90 origin-left translate-y-16">{t('Temperature (°C) / Pressure (bar)')}</div>
               <div className="absolute bottom-1 w-full text-center text-xs">{t('Time (min)')}</div>
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={traceData}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={true} horizontal={true} stroke="#e0e0e0" />
-                  <XAxis dataKey="time" type="number" domain={['dataMin', 'dataMax']} tickFormatter={(v)=>v.toFixed(1)} tick={{fontSize: 10}} tickCount={10} axisLine={{stroke: 'black'}} tickLine={{stroke: 'black'}} />
-                  <YAxis domain={['auto', 'auto']} tick={{fontSize: 10}} axisLine={{stroke: 'black'}} tickLine={{stroke: 'black'}} />
-                  <Line type="monotone" dataKey="fid_value" stroke="#000000" strokeWidth={1.5} dot={false} isAnimationActive={false} />
-                </LineChart>
-              </ResponsiveContainer>
+              <TraceChart2 traceData={traceData} />
             </div>
           </div>
         </div>
@@ -552,25 +709,208 @@ export default function MethodRun() {
             <div className="flex flex-1 p-2 gap-2 h-80">
               <div className="w-1/3 border border-gray-400 bg-white">
                 <ul className="text-sm">
-                  <li className="px-2 py-1 bg-blue-200 cursor-pointer">{t('Pump')}</li>
-                  <li className="px-2 py-1 hover:bg-gray-100 cursor-pointer">{t('Injector')}</li>
-                  <li className="px-2 py-1 hover:bg-gray-100 cursor-pointer">{t('Column Comp.')}</li>
-                  <li className="px-2 py-1 hover:bg-gray-100 cursor-pointer">{t('Detector (DAD)')}</li>
-                  <li className="px-2 py-1 hover:bg-gray-100 cursor-pointer">{t('Detector (TCD)')}</li>
+                  {['Pump', 'Injector', 'Thermal (4-Ch)', 'Detector (TCD)', 'Valves/Events'].map(tab => (
+                    <li 
+                      key={tab}
+                      className={`px-2 py-1 cursor-pointer ${methodTab === tab ? 'bg-blue-200 font-bold' : 'hover:bg-gray-100'}`}
+                      onClick={() => setMethodTab(tab)}
+                    >
+                      {t(tab)}
+                    </li>
+                  ))}
                 </ul>
               </div>
-              <div className="w-2/3 border border-gray-400 bg-white p-4">
-                <h3 className="font-bold border-b border-gray-300 pb-1 mb-2">{t('Pump Settings')}</h3>
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  <label>{t('Flow:')}</label>
-                  <input type="text" className="border border-gray-400 px-1" defaultValue="1.000" />
-                  <label>{t('Stop Time (min):')}</label>
-                  <input type="text" className="border border-gray-400 px-1" defaultValue="35.0" />
-                  <label>{t('Solvent A (%):')}</label>
-                  <input type="text" className="border border-gray-400 px-1" defaultValue="100.0" />
-                  <label>{t('Solvent B (%):')}</label>
-                  <input type="text" className="border border-gray-400 px-1" defaultValue="0.0" />
-                </div>
+              <div className="w-2/3 border border-gray-400 bg-white p-4 overflow-y-auto">
+                {methodTab === 'Pump' && (
+                  <>
+                    <h3 className="font-bold border-b border-gray-300 pb-1 mb-2">{t('Pump Settings')}</h3>
+                    <div className="grid grid-cols-2 gap-2 text-sm">
+                      <label>{t('Flow:')}</label>
+                      <input type="text" className="border border-gray-400 px-1" defaultValue="1.000" />
+                      <label>{t('Stop Time (min):')}</label>
+                      <input type="text" className="border border-gray-400 px-1" defaultValue="35.0" />
+                      <label>{t('Solvent A (%):')}</label>
+                      <input type="text" className="border border-gray-400 px-1" defaultValue="100.0" />
+                      <label>{t('Solvent B (%):')}</label>
+                      <input type="text" className="border border-gray-400 px-1" defaultValue="0.0" />
+                    </div>
+                  </>
+                )}
+                {methodTab === 'Thermal (4-Ch)' && (
+                  <>
+                    <h3 className="font-bold border-b border-gray-300 pb-1 mb-2">{t('Thermal Zones Setup')}</h3>
+                    <div className="flex flex-col gap-4 text-sm mt-4">
+                      {['Oven (Ch 1)', 'Inlet (Ch 2)', 'TCD Block (Ch 3)', 'AUX (Ch 4)'].map((zone, idx) => (
+                        <div key={idx} className="flex items-center justify-between border-b border-gray-200 pb-2">
+                          <span className="font-semibold w-1/3">{t(zone)}</span>
+                          <div className="flex items-center gap-2">
+                            <label>{t('Set Point:')}</label>
+                            <input 
+                              type="number" 
+                              className="border border-gray-400 px-1 py-1 w-20 text-right"
+                              placeholder="°C"
+                              defaultValue="0"
+                              onBlur={(e) => handleSetTemp(idx, parseInt(e.target.value) || 0)}
+                            />
+                            <span className="text-gray-500">°C</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <input 
+                              type="checkbox" 
+                              className="w-4 h-4" 
+                              defaultChecked 
+                              onChange={(e) => handleSetHeater(idx, e.target.checked)}
+                            />
+                            <label>{t('Heater On')}</label>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+                {methodTab === 'Detector (TCD)' && (
+                  <>
+                    <h3 className="font-bold border-b border-gray-300 pb-1 mb-2">{t('TCD Settings')}</h3>
+                    <div className="grid grid-cols-2 gap-4 text-sm mt-4">
+                      <label className="flex items-center">{t('Bridge Current (mA):')}</label>
+                      <div className="flex items-center gap-2">
+                        <input 
+                          type="number" 
+                          className="border border-gray-400 px-1 py-1 w-20 text-right"
+                          defaultValue={hardwareData.tcd_bridge_current.replace(' mA', '')}
+                          onBlur={(e) => handleSetBridge(parseInt(e.target.value) || 0)}
+                          min="0"
+                          max="255"
+                          step="1"
+                        />
+                        <span className="text-gray-500 text-xs">mA (0 = {t('Off')})</span>
+                      </div>
+
+                      <label className="flex items-center">{t('Polarity:')}</label>
+                      <select className="border border-gray-400 px-1 py-1">
+                        <option value="Positive">{t('Positive')}</option>
+                        <option value="Negative">{t('Negative')}</option>
+                      </select>
+                      
+                      <label className="flex items-center">{t('Auto Zero before run:')}</label>
+                      <input type="checkbox" className="w-4 h-4" defaultChecked />
+                    </div>
+                  </>
+                )}
+                {methodTab === 'Valves/Events' && (
+                  <>
+                    <h3 className="font-bold border-b border-gray-300 pb-1 mb-2">{t('Valves / Events Control')}</h3>
+                    
+                    <div className="mb-4">
+                      <h4 className="font-semibold text-gray-700 mb-2">{t('Immediate Control')}</h4>
+                      <div className="grid grid-cols-2 gap-4">
+                        {[1, 2, 3, 4].map(eventNum => (
+                          <div key={eventNum} className="flex items-center justify-between border border-gray-300 p-2 bg-gray-50">
+                            <span>{t(`Event ${eventNum}`)}</span>
+                            <div className="flex items-center gap-2">
+                              <button 
+                                className="px-2 py-1 bg-white border border-gray-400 hover:bg-gray-100 text-xs"
+                                onClick={() => handleSetEventSwitch(eventNum - 1, true)}
+                              >{t('ON')}</button>
+                              <button 
+                                className="px-2 py-1 bg-white border border-gray-400 hover:bg-gray-100 text-xs"
+                                onClick={() => handleSetEventSwitch(eventNum - 1, false)}
+                              >{t('OFF')}</button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <h4 className="font-semibold text-gray-700 mb-2">{t('Time Program')}</h4>
+                      <table className="w-full text-xs text-left border-collapse border border-gray-300">
+                        <thead className="bg-[#e0e0e0]">
+                          <tr>
+                            <th className="border border-gray-400 p-1">{t('Time (min)')}</th>
+                            <th className="border border-gray-400 p-1">{t('Event')}</th>
+                            <th className="border border-gray-400 p-1">{t('State')}</th>
+                            <th className="border border-gray-400 p-1 w-10"></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {valveProgram.map((row, idx) => (
+                            <tr key={idx}>
+                              <td className="border border-gray-300 p-1">
+                                <input 
+                                  type="number" 
+                                  className="w-full text-right border border-gray-300 px-1" 
+                                  value={row.time} 
+                                  onChange={(e) => {
+                                    const newProg = [...valveProgram];
+                                    newProg[idx].time = parseFloat(e.target.value) || 0;
+                                    setValveProgram(newProg);
+                                  }}
+                                />
+                              </td>
+                              <td className="border border-gray-300 p-1">
+                                <select 
+                                  className="w-full border border-gray-300 px-1"
+                                  value={row.event_id}
+                                  onChange={(e) => {
+                                    const newProg = [...valveProgram];
+                                    newProg[idx].event_id = parseInt(e.target.value) || 1;
+                                    setValveProgram(newProg);
+                                  }}
+                                >
+                                  <option value={1}>{t('Event 1')}</option>
+                                  <option value={2}>{t('Event 2')}</option>
+                                  <option value={3}>{t('Event 3')}</option>
+                                  <option value={4}>{t('Event 4')}</option>
+                                </select>
+                              </td>
+                              <td className="border border-gray-300 p-1">
+                                <select 
+                                  className="w-full border border-gray-300 px-1"
+                                  value={row.state ? 'ON' : 'OFF'}
+                                  onChange={(e) => {
+                                    const newProg = [...valveProgram];
+                                    newProg[idx].state = e.target.value === 'ON';
+                                    setValveProgram(newProg);
+                                  }}
+                                >
+                                  <option value="ON">{t('ON')}</option>
+                                  <option value="OFF">{t('OFF')}</option>
+                                </select>
+                              </td>
+                              <td className="border border-gray-300 p-1 text-center">
+                                <button 
+                                  className="text-red-600 font-bold hover:bg-gray-200 px-1"
+                                  onClick={() => {
+                                    const newProg = valveProgram.filter((_, i) => i !== idx);
+                                    setValveProgram(newProg);
+                                  }}
+                                >✕</button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      <div className="flex justify-between mt-2">
+                        <button 
+                          className="text-xs px-2 py-1 bg-gray-200 border border-gray-400 hover:bg-gray-300"
+                          onClick={() => {
+                            setValveProgram([...valveProgram, { time: 0, event_id: 1, state: true }]);
+                          }}
+                        >+ {t('Add Event')}</button>
+                        <button 
+                          className="text-xs px-2 py-1 bg-blue-100 border border-blue-400 hover:bg-blue-200 text-blue-800"
+                          onClick={() => saveValveProgram(valveProgram)}
+                        >{t('Save Program')}</button>
+                      </div>
+                    </div>
+                  </>
+                )}
+                {['Injector', 'Detector (DAD)'].includes(methodTab) && (
+                  <div className="text-gray-500 italic text-sm mt-4">
+                    {t('Settings for')} {t(methodTab)} {t('are not available in this demo.')}
+                  </div>
+                )}
               </div>
             </div>
             <div className="p-2 bg-[#e0e0e0] flex justify-end gap-2 border-t border-gray-400">
@@ -739,7 +1079,7 @@ export default function MethodRun() {
               <div className="flex justify-between border-b border-gray-300 py-1"><span>{t('State')}</span><span className="font-bold">{t(status)}</span></div>
               <div className="flex justify-between border-b border-gray-300 py-1"><span>{t('Pressure:')}</span><span className="font-bold text-blue-600">{hardwareData.pressure.toFixed(1)} bar</span></div>
               <div className="flex justify-between border-b border-gray-300 py-1"><span>{t('Flow:')}</span><span className="font-bold">1.000 mL/min</span></div>
-              <div className="flex justify-between border-b border-gray-300 py-1"><span>{t('Column Comp.')} {t('Temp:')}</span><span className="font-bold">{hardwareData.temperature.toFixed(1)} °C</span></div>
+              <div className="flex justify-between border-b border-gray-300 py-1"><span>{t('Column Comp.')} {t('Temp:')}</span><span className="font-bold">{hardwareData.oven_temp.toFixed(1)} °C</span></div>
             </div>
           </div>
         </div>

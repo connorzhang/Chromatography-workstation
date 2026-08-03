@@ -84,7 +84,7 @@ export function initEPC() {
     const maxPoints = 240; // 2分钟的数据，假设500ms一轮
 
     // 自动开始轮询状态
-    epcPollInterval = setInterval(pollEPCState, 500);
+    if (window.epcPollTimer) clearTimeout(window.epcPollTimer);
 
     document.getElementById('btn-epc-apply').addEventListener('click', async () => {
         const mode = parseInt(document.getElementById('epc-set-mode').value);
@@ -125,6 +125,7 @@ export function initEPC() {
     };
 
     async function pollEPCState() {
+        if (!document.getElementById('epc-status')) return; // DOM销毁时自动停止轮询
         try {
             const res = await fetch('/api/v1/epc/state');
             if (res.ok) {
@@ -132,6 +133,7 @@ export function initEPC() {
                 if (!data.connected) {
                     document.getElementById('epc-status').innerText = '连接已断开/超时';
                     document.getElementById('epc-status').style.color = 'var(--danger)';
+                    window.epcPollTimer = setTimeout(pollEPCState, 500);
                     return;
                 }
                 document.getElementById('epc-status').innerText = '已连接 (通信中)';
@@ -158,7 +160,10 @@ export function initEPC() {
                 requestAnimationFrame(drawEPCCanvas);
             }
         } catch (e) {}
+        window.epcPollTimer = setTimeout(pollEPCState, 500);
     }
+
+    window.epcPollTimer = setTimeout(pollEPCState, 100);
 
     function drawEPCCanvas() {
         drawCanvas('epc-canvas-press', pressDataPoints, '#38bdf8');

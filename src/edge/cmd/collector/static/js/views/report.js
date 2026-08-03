@@ -80,15 +80,18 @@ export function initReport() {
                 
                 const compArray = Array.from(compSet);
                 if (compArray.length > 0) {
-                    let headHtml = '<tr><th>时间</th><th>设备 ID</th><th>Trace ID</th>';
+                    let headHtml = '<tr><th>时间</th><th>设备 ID</th><th>Trace ID</th><th>审计备注</th>';
                     compArray.forEach(c => { headHtml += `<th>${c}</th>`; });
-                    headHtml += '</tr>';
+                    headHtml += '<th>操作</th></tr>';
                     thead.innerHTML = headHtml;
+                } else {
+                    thead.innerHTML = '<tr><th>时间</th><th>设备 ID</th><th>Trace ID</th><th>审计备注</th><th>操作</th></tr>';
                 }
 
                 tbody.innerHTML = '';
                 data.forEach(row => {
                     const resObj = (row.result && row.result.result) ? row.result.result : (row.result || row);
+                    const remark = (row.result && row.result.audit_remark) ? row.result.audit_remark : '';
                     const valMap = {};
                     
                     if(resObj.pollutants) {
@@ -105,7 +108,8 @@ export function initReport() {
                     let trHtml = `<tr>
                         <td>${new Date(row.created_at).toLocaleString()}</td>
                         <td>${row.device_id}</td>
-                        <td>${row.trace_id.substring(0, 8)}...</td>`;
+                        <td>${row.trace_id.substring(0, 8)}...</td>
+                        <td id="remark-${row.trace_id}">${remark}</td>`;
                     
                     if (compArray.length > 0) {
                         compArray.forEach(c => {
@@ -115,7 +119,7 @@ export function initReport() {
                     } else {
                         trHtml += `<td>(无分析组分)</td>`;
                     }
-                    trHtml += `</tr>`;
+                    trHtml += `<td><button class="btn" style="padding:2px 8px; font-size:12px;" onclick="window.editRemark('${row.trace_id}', '${remark.replace(/'/g, "\\'")}')">编辑备注</button></td></tr>`;
                     tbody.innerHTML += trHtml;
                 });
             } catch(e) {
@@ -123,6 +127,26 @@ export function initReport() {
                 document.getElementById('tbody-report').innerHTML = '<tr><td colspan="6" style="text-align:center; color: var(--danger)">查询失败</td></tr>';
             }
         });
+
+        window.editRemark = async (traceId, currentRemark) => {
+            const remark = prompt('编辑备注:', currentRemark);
+            if (remark !== null && remark !== currentRemark) {
+                try {
+                    const res = await fetch(`/api/history/remark`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ trace_id: traceId, remark })
+                    });
+                    if (res.ok) {
+                        document.getElementById(`remark-${traceId}`).innerText = remark;
+                    } else {
+                        window.showToast && window.showToast('保存备注失败', true);
+                    }
+                } catch (e) {
+                    window.showToast && window.showToast('保存备注失败: ' + e.message, true);
+                }
+            }
+        };
 
         document.getElementById('btn-export-report').addEventListener('click', async () => {
             try {

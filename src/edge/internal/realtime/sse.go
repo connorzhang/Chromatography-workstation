@@ -17,7 +17,7 @@ type client struct {
 	ctx    context.Context
 	w      http.ResponseWriter
 	filter string
-	mu     sync.Mutex
+	ch     chan []byte
 }
 
 func NewHub() *Hub {
@@ -35,7 +35,12 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 
 	ctx := r.Context()
-	c := &client{ctx: ctx, w: w, filter: r.URL.Query().Get("deviceId")}
+	c := &client{
+		ctx:    ctx,
+		w:      w,
+		filter: r.URL.Query().Get("deviceId"),
+		ch:     make(chan []byte, 256), // Buffered channel to prevent blocking
+	}
 	h.add(c)
 	defer h.remove(c)
 
@@ -51,6 +56,11 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-ticker.C:
 			writeLine(w, ": ping\n\n")
+			flusher.Flush()
+		case msg := <-c.ch:
+			writeLine(w, "data: ")
+			w.Write(msg)
+			writeLine(w, "\n\n")
 			flusher.Flush()
 		}
 	}
@@ -68,14 +78,11 @@ func (h *Hub) Publish(deviceID string, v any) {
 		if c.filter != "" && c.filter != deviceID {
 			continue
 		}
-		c.mu.Lock()
-		writeLine(c.w, "data: ")
-		writeLine(c.w, string(b))
-		writeLine(c.w, "\n\n")
-		if f, ok := c.w.(http.Flusher); ok {
-			f.Flush()
+		select {
+		case c.ch <- b:
+		default:
+			// Drop message if client is too slow to prevent global deadlock
 		}
-		c.mu.Unlock()
 	}
 }
 

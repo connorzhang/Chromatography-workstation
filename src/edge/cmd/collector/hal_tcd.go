@@ -20,6 +20,7 @@ type TCDState struct {
 	Connected     bool        `json:"connected"`
 	BridgeCurrent uint8       `json:"bridge_current"`
 	Values        [20]float64 `json:"values"`
+	FrameCount    uint64      `json:"frame_count"`
 	LastUpdate    time.Time   `json:"-"`
 }
 
@@ -113,9 +114,9 @@ func (c *TCDController) readLoop() {
 		}
 		if n > 0 {
 			// [DEBUG] 打印收到的原始数据，看看到底是什么！
-			if len(frame) < 100 {
-				fmt.Printf("[TCD DEBUG] Read %d bytes: %X\n", n, buf[:n])
-			}
+			// if len(frame) < 100 {
+			// 	fmt.Printf("[TCD DEBUG] Read %d bytes: %X\n", n, buf[:n])
+			// }
 
 			frame = append(frame, buf[:n]...)
 
@@ -139,8 +140,8 @@ func (c *TCDController) readLoop() {
 				if validFrame[85] == 0x0D && validFrame[86] == 0x0A {
 					c.parseFrame(validFrame)
 				} else {
-					fmt.Printf("[TCD DEBUG] Header found, but ending is %02X %02X instead of 0D 0A!\n", validFrame[85], validFrame[86])
 					// 容错处理：即使结尾不对，也尝试解析
+					// fmt.Printf("[TCD DEBUG] Header found, but ending is %02X %02X instead of 0D 0A!\n", validFrame[85], validFrame[86])
 					c.parseFrame(validFrame)
 				}
 				frame = frame[idx+87:]
@@ -152,11 +153,11 @@ func (c *TCDController) readLoop() {
 func (c *TCDController) mockLoop() {
 	defer c.wg.Done()
 
-	ticker := time.NewTicker(500 * time.Millisecond)
+	ticker := time.NewTicker(1000 * time.Millisecond)
 	defer ticker.Stop()
 
 	var t float64 = 0.0
-	dt := 0.025 // 25ms per point (40Hz)
+	dt := 0.05 // 50ms per point (20Hz)
 
 	for {
 		select {
@@ -181,6 +182,7 @@ func (c *TCDController) mockLoop() {
 				c.state.Values[i] = base + peak + noise
 				t += dt
 			}
+			c.state.FrameCount++
 			c.state.LastUpdate = time.Now()
 
 			pts := make([]float64, 20)
@@ -228,9 +230,10 @@ func (c *TCDController) parseFrame(frame []byte) {
 			uvValue = uvValue*10 + int64(nibbles[j])
 		}
 
-		// µV → mV，保留小数点后3位精度
+		// µV → mV，保留小数点后3位精度。刚才逆序反而加剧了锯齿，说明原先0就是最老数据，这里恢复顺序存放。
 		c.state.Values[i] = sign * float64(uvValue) / 1000.0
 	}
+	c.state.FrameCount++
 	c.state.LastUpdate = time.Now()
 	pts := make([]float64, 20)
 	copy(pts, c.state.Values[:])

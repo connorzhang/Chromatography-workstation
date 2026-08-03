@@ -212,8 +212,8 @@ export default function ValveControl() {
             <div className="flex-1">
               <label className="block text-xs font-semibold text-slate-500 mb-1">{t('Select Valve')}</label>
               <select id="valveName" className="border border-slate-300 rounded p-1.5 text-sm w-full">     
-                {[1,2,3,4,5,6,7,8].map(v => (
-                  <option key={v} value={`Valve ${v}`}>{t(`Valve ${v}`)}</option>
+                {[1,2,3,4].map(v => (
+                  <option key={v} value={`Event ${v}`}>{t(`Event Switch ${v}`)}</option>
                 ))}
               </select>
             </div>
@@ -238,7 +238,7 @@ export default function ValveControl() {
               <thead className="bg-slate-100 border-b border-slate-200 sticky top-0">
                 <tr>
                   <th className="p-2 font-semibold text-slate-700">{t('Time (min)')}</th>
-                  <th className="p-2 font-semibold text-slate-700">{t('Valve Name')}</th>
+                  <th className="p-2 font-semibold text-slate-700">{t('Event Switch')}</th>
                   <th className="p-2 font-semibold text-slate-700">{t('Position')}</th>
                   <th className="p-2 w-10"></th>
                 </tr>

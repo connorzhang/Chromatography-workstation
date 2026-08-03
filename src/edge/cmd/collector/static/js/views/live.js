@@ -556,11 +556,11 @@ function setupCanvas() {
                     });
             }
 
-            if (parsed.type === 'samples' && parsed.values) {
+            if (parsed.type === 'samples' && parsed.values && (parsed.channel === 0 || parsed.channel === undefined)) {
                 const baseT = parsed.t0S || 0;
                 const dtS = parsed.dtS || 0.05;
 
-                if (baseT === 0 || dataPoints.length > 50000) {
+                if (baseT === 0 || dataPoints.length > 50000000000) {
                     dataPoints = [];
                     latestPollutants = null;
                     lastCycleResetTime = Date.now();

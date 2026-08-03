@@ -25,6 +25,10 @@ type ModbusTempController struct {
 	portMu  *SharedPortLock // Mutex for sharing COM port across slaves
 	port    string
 	address byte
+
+	// 缓存字段
+	cachedMu    sync.RWMutex
+	cachedState TempModuleState
 }
 
 type TempModuleState struct {
@@ -115,7 +119,7 @@ func (m *ModbusTempController) unlockPort() {
 	}
 }
 
-func (m *ModbusTempController) ReadState() (TempModuleState, error) {
+func (m *ModbusTempController) ReadStateOnce() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -123,11 +127,17 @@ func (m *ModbusTempController) ReadState() (TempModuleState, error) {
 	if m.client == nil {
 		if h, ok := m.handler.(*modbus.RTUClientHandler); ok {
 			if err := h.Connect(); err != nil {
-				return state, fmt.Errorf("failed to connect: %v", err)
+				m.cachedMu.Lock()
+				m.cachedState.Connected = false
+				m.cachedMu.Unlock()
+				return
 			}
 		} else if h, ok := m.handler.(*modbus.TCPClientHandler); ok {
 			if err := h.Connect(); err != nil {
-				return state, fmt.Errorf("failed to connect: %v", err)
+				m.cachedMu.Lock()
+				m.cachedState.Connected = false
+				m.cachedMu.Unlock()
+				return
 			}
 		}
 		m.client = modbus.NewClient(m.handler)
@@ -139,7 +149,10 @@ func (m *ModbusTempController) ReadState() (TempModuleState, error) {
 	// Read Set Temps (Address 42, 8 registers)
 	setResults, err := m.client.ReadHoldingRegisters(42, 8)
 	if err != nil {
-		return state, fmt.Errorf("read set temps failed: %v", err)
+		m.cachedMu.Lock()
+		m.cachedState.Connected = false
+		m.cachedMu.Unlock()
+		return
 	}
 	for i := 0; i < 8; i++ {
 		state.SetTemps[i] = int16(binary.BigEndian.Uint16(setResults[i*2 : i*2+2]))
@@ -153,13 +166,16 @@ func (m *ModbusTempController) ReadState() (TempModuleState, error) {
 		}
 	} else {
 		// Ignore error for modes if hardware doesn't support it or timeouts, just print a warning internally
-		fmt.Printf("Warning: read modes failed: %v\n", err)
+		// fmt.Printf("Warning: read modes failed: %v\n", err)
 	}
 
 	// Read RealTime Temps (Address 360, 16 registers)
 	rtResults, err := m.client.ReadHoldingRegisters(360, 16)
 	if err != nil {
-		return state, fmt.Errorf("read real-time temps failed: %v", err)
+		m.cachedMu.Lock()
+		m.cachedState.Connected = false
+		m.cachedMu.Unlock()
+		return
 	}
 	for i := 0; i < 8; i++ {
 		// CDAB Byte order
@@ -178,7 +194,16 @@ func (m *ModbusTempController) ReadState() (TempModuleState, error) {
 	}
 
 	state.Connected = true
-	return state, nil
+
+	m.cachedMu.Lock()
+	m.cachedState = state
+	m.cachedMu.Unlock()
+}
+
+func (m *ModbusTempController) GetCachedState() TempModuleState {
+	m.cachedMu.RLock()
+	defer m.cachedMu.RUnlock()
+	return m.cachedState
 }
 
 func (m *ModbusTempController) SetTemperature(channel int, targetTemp int16) error {
@@ -308,12 +333,7 @@ func handleModbusTempState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	state, err := ctrl.ReadState()
-	if err != nil {
-		// Log error, but still return connected=false or something
-		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error(), "connected": false})
-		return
-	}
+	state := ctrl.GetCachedState()
 
 	writeJSON(w, http.StatusOK, state)
 }

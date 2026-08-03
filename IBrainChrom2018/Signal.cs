@@ -309,7 +309,14 @@ public class Signal : AiaShell
 	public ArrayList AddDots(float[] values, int freq, out PointF newDot, bool bAnlyse, byte dataMark)
 	{
 		ArrayList arrayList = new ArrayList();
-		freq *= 10;
+		if (dataMark == 80 || dataMark == 81 || dataMark == 82)
+		{
+			freq *= 5;
+		}
+		else
+		{
+			freq *= 10;
+		}
 		float num = 1f / (float)freq;
 		if (ZeroUYCan)
 		{
@@ -392,11 +399,18 @@ public class Signal : AiaShell
 		return Smooth2(dataMark);
 	}
 
-	public bool AddDots(float[] values, int freq, out PointF newDot, bool bAnlyse)
+	public bool AddDots(float[] values, int freq, out PointF newDot, bool bAnlyse, byte dataMark = 0)
 	{
 		try
 		{
-			freq *= 10;
+			if (dataMark == 80 || dataMark == 81 || dataMark == 82)
+			{
+				freq *= 5;
+			}
+			else
+			{
+				freq *= 10;
+			}
 			float num = 1f / (float)freq;
 			if (ZeroUYCan)
 			{
@@ -497,11 +511,18 @@ public class Signal : AiaShell
 		return true;
 	}
 
-	public bool AddDots(float[] values, int freq, out PointF newDot, bool bAnlyse, int iSmooth)
+	public bool AddDots(float[] values, int freq, out PointF newDot, bool bAnlyse, int iSmooth, byte dataMark = 0)
 	{
 		try
 		{
-			freq *= 10;
+			if (dataMark == 80 || dataMark == 81 || dataMark == 82)
+			{
+				freq *= 5;
+			}
+			else
+			{
+				freq *= 10;
+			}
 			float num = 1f / (float)freq;
 			if (ZeroUYCan)
 			{

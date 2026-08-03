@@ -248,7 +248,7 @@ func startAutoConnect(states *sync.Map, hub *realtime.Hub) {
 				st.mu.Lock()
 				st.synced = true
 				st.lastSeen = time.Now()
-				dtS := 0.02 // Default to 50Hz (0.02s interval)
+				dtS := 0.05 // Actual TCD hardware runs at 20Hz (0.05s interval)
 				if st.lastTS == nil {
 					st.lastTS = map[int]float64{}
 				}

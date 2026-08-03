@@ -98,7 +98,7 @@ export function initDebug() {
         `;
     }
 
-    let pollInterval = setInterval(pollModbusState, 1000);
+    if (window.debugPollTimer) clearTimeout(window.debugPollTimer);
 
     document.getElementById('btn-modbus-set').addEventListener('click', async () => {
         const ch = parseInt(document.getElementById('modbus-set-channel').value);
@@ -169,6 +169,7 @@ export function initDebug() {
     });
 
     async function pollModbusState() {
+        if (!document.getElementById('modbus-status')) return;
         try {
             const res = await fetch('/api/v1/modbus_temp/state');
             if (res.ok) {
@@ -177,6 +178,7 @@ export function initDebug() {
                     document.getElementById('modbus-status').innerText = '连接已断开';
                     document.getElementById('modbus-status').style.color = 'var(--danger)';
                     resetChannels();
+                    window.debugPollTimer = setTimeout(pollModbusState, 1000);
                     return;
                 }
                 document.getElementById('modbus-status').innerText = '已连接 (通信中)';
@@ -215,7 +217,10 @@ export function initDebug() {
         } catch (e) {
             console.error('Poll modbus error', e);
         }
+        window.debugPollTimer = setTimeout(pollModbusState, 1000);
     }
+    
+    window.debugPollTimer = setTimeout(pollModbusState, 100);
 
     function resetChannels() {
         for (let i = 1; i <= 8; i++) {

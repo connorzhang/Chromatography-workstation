@@ -25,6 +25,10 @@ type ModbusEPCController struct {
 	portMu  *SharedPortLock // Mutex for sharing COM port across slaves
 	port    string
 	address byte
+
+	// 缓存字段
+	cachedMu    sync.RWMutex
+	cachedState EPCState
 }
 
 type EPCState struct {
@@ -94,7 +98,7 @@ func (m *ModbusEPCController) Close() {
 	m.client = nil
 }
 
-func (m *ModbusEPCController) ReadState() (EPCState, error) {
+func (m *ModbusEPCController) ReadStateOnce() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -102,7 +106,10 @@ func (m *ModbusEPCController) ReadState() (EPCState, error) {
 	if m.client == nil {
 		if h, ok := m.handler.(*modbus.RTUClientHandler); ok {
 			if err := h.Connect(); err != nil {
-				return state, fmt.Errorf("failed to connect: %v", err)
+				m.cachedMu.Lock()
+				m.cachedState.Connected = false
+				m.cachedMu.Unlock()
+				return
 			}
 		}
 		m.client = modbus.NewClient(m.handler)
@@ -119,7 +126,10 @@ func (m *ModbusEPCController) ReadState() (EPCState, error) {
 	// 0x03 read holding registers. Address 0x0000, 7 registers.
 	results, err := m.client.ReadHoldingRegisters(0, 7)
 	if err != nil {
-		return state, fmt.Errorf("read epc state failed: %v", err)
+		m.cachedMu.Lock()
+		m.cachedState.Connected = false
+		m.cachedMu.Unlock()
+		return
 	}
 
 	if len(results) >= 14 {
@@ -146,7 +156,16 @@ func (m *ModbusEPCController) ReadState() (EPCState, error) {
 	}
 
 	state.Connected = true
-	return state, nil
+
+	m.cachedMu.Lock()
+	m.cachedState = state
+	m.cachedMu.Unlock()
+}
+
+func (m *ModbusEPCController) GetCachedState() EPCState {
+	m.cachedMu.RLock()
+	defer m.cachedMu.RUnlock()
+	return m.cachedState
 }
 
 func (m *ModbusEPCController) ensureClient() error {
@@ -239,11 +258,7 @@ func handleEPCState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	state, err := ctrl.ReadState()
-	if err != nil {
-		writeJSON(w, http.StatusOK, EPCState{Connected: false})
-		return
-	}
+	state := ctrl.GetCachedState()
 	writeJSON(w, http.StatusOK, state)
 }
 
