@@ -252,10 +252,10 @@ func startAutoConnect(states *sync.Map, hub *realtime.Hub) {
 				if st.lastTS == nil {
 					st.lastTS = map[int]float64{}
 				}
-				t0 := st.lastTS[0]
-				st.lastTS[0] = t0 + float64(len(pts))*dtS
+				t0 := st.lastTS[1]
+				st.lastTS[1] = t0 + float64(len(pts))*dtS
 				st.last143 = time.Now()
-				tok, _ := appendSessionSamplesLocked(st, 0, dtS, t0, pts)
+				tok, _ := appendSessionSamplesLocked(st, 1, dtS, t0, pts)
 				st.mu.Unlock()
 
 				// Publish to realtime hub for UI plotting
@@ -263,7 +263,7 @@ func startAutoConnect(states *sync.Map, hub *realtime.Hub) {
 					Type:         "samples",
 					DeviceID:     currentDevID,
 					At:           time.Now(),
-					Channel:      0,
+					Channel:      1,
 					SessionToken: tok,
 					DTs:          dtS,
 					T0s:          t0,
