@@ -1,12 +1,12 @@
-import { initDashboard } from './views/dashboard.js?v=0.3.137';
-import { initLiveChromatogram } from './views/live.js?v=0.3.137';
-import { initMethod } from './views/method.js?v=0.3.137';
-import { initSettings } from './views/settings.js?v=0.3.137';
-import { initProcess } from './views/process.js?v=0.3.137';
-import { initReport } from './views/report.js?v=0.3.137';
-import { initDebug } from './views/debug.js?v=0.3.137';
-import { initTCD } from './views/tcd.js?v=0.3.137';
-import { initEPC } from './views/epc.js?v=0.3.137';
+import { initDashboard } from './views/dashboard.js?v=0.3.139';
+import { initLiveChromatogram } from './views/live.js?v=0.3.139';
+import { initMethod } from './views/method.js?v=0.3.139';
+import { initSettings } from './views/settings.js?v=0.3.139';
+import { initProcess } from './views/process.js?v=0.3.139';
+import { initReport } from './views/report.js?v=0.3.139';
+import { initDebug } from './views/debug.js?v=0.3.139';
+import { initTCD } from './views/tcd.js?v=0.3.139';
+import { initEPC } from './views/epc.js?v=0.3.139';
 
 document.addEventListener('DOMContentLoaded', () => {
     const navItems = document.querySelectorAll('.nav-item');

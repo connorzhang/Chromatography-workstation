@@ -66,7 +66,7 @@ var staticFS embed.FS
 
 
 
-const AppVersion = "v0.3.138"
+const AppVersion = "v0.3.139"
 
 
 
@@ -4064,6 +4064,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 				err = driver.StartAnalysis(byte(ch))
 
 				mappedCmd = 22
+				resetSession(st, ch)
 
 			case "stop":
 
@@ -4082,6 +4083,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 				err = driver.StartAnalysis(0xFF) // 0xFF denotes start all
 
 				mappedCmd = 18
+				resetAllSessions(st)
 
 			case "stopAll":
 
