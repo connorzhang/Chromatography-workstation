@@ -87,16 +87,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 gcDevices = [devices[0]];
             }
 
-            // 如果是开始分析，提示输入审计备注
+            // 移除了 prompt 弹窗，防止阻塞浏览器主线程导致 SSE 和自动刷新机制失效
             let remarkParam = '';
-            if (cmdName === 'startAll' || cmdName === 'start') {
-                const remark = window.prompt("请输入审计备注（例如：标气类型、操作说明等），可留空：", "");
-                if (remark === null) {
-                    // 用户点击取消，中止发送指令
-                    return;
-                }
-                remarkParam = `&remark=${encodeURIComponent(remark)}`;
-            }
+            // if (cmdName === 'startAll' || cmdName === 'start') {
+            //     const remark = window.prompt("请输入审计备注（例如：标气类型、操作说明等），可留空：", "");
+            //     if (remark === null) {
+            //         // 用户点击取消，中止发送指令
+            //         return;
+            //     }
+            //     remarkParam = `&remark=${encodeURIComponent(remark)}`;
+            // }
 
             // 2. 广播指令到所有相关的设备
             let successCount = 0;
