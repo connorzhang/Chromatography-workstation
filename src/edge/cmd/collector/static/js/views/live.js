@@ -122,6 +122,7 @@ function setupCanvas() {
     
     const ctx = canvas.getContext('2d');
     let dataPoints = [];
+    let dataPoints1 = [];
     let latestPollutants = null;
     let sessionRestored = false;
     let lastCycleResetTime = 0;
