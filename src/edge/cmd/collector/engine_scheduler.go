@@ -1,6 +1,7 @@
 package main
 
 import (
+
 	"log"
 	"sync"
 	"time"
@@ -104,8 +105,10 @@ func schedulerTick(hub *realtime.Hub, states *sync.Map, method v1.Method) {
 			if !snapshotDone && timeSinceStart >= acqDur {
 				// AcqMin reached: perform snapshot and result calculation
 				finalizeSession(hub, st, deviceID, ch, method)
-				if !ui.Loop {
-					// Send Stop command to hardware ONLY if not looping
+				hw, _ := pstore.LoadHardwareConfig(deviceID)
+						isLooping := ui.Loop || hw.CycleCount > 1
+						if !isLooping {
+							// Send Stop command to hardware ONLY if not looping
 					_ = sendCmd(st, deviceID, 23, []byte{byte(ch)})
 				}
 			}
@@ -115,9 +118,11 @@ func schedulerTick(hub *realtime.Hub, states *sync.Map, method v1.Method) {
 			// When the hardware starts the next cycle, it will send Cmd 150 (Start Ack),
 			// which will trigger resetSession() in main.go.
 
-			// HOWEVER, if we are in Modular Driver mode, there is NO MAINBOARD!
+			// HOWEVER, if we are in Modular Driver mode OR this is a modular device, there is NO MAINBOARD!
 			// We MUST handle the loop/cycle interval locally.
-			if pstore != nil && pstore.LoadSysConfig().DriverMode == "modular" && ui.Loop {
+			hw2, _ := pstore.LoadHardwareConfig(deviceID)
+			isLooping2 := ui.Loop || hw2.CycleCount > 1
+						if isLooping2 {
 				hw, _ := pstore.LoadHardwareConfig(deviceID)
 				cycleInterval := hw.CycleInterval
 				if cycleInterval <= 0 {

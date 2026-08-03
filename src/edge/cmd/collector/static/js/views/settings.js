@@ -649,9 +649,13 @@
                                 inputs.forEach(e => e.style.display = 'none');
                             }
                             // 更新标题说明
-                            const h3 = eventsBlock.querySelector('h3');
-                            if (h3) h3.innerText = '外部事件 (CH5-8 开关量)';
-                        }
+                            const eventsBlock = document.getElementById('settings-events-block');
+                            if (eventsBlock) {
+                                const h3 = eventsBlock.querySelector('h3');
+                                if (h3) h3.innerText = '外部事件 (CH5-8 开关量)';
+                            }
+
+                            }
                     }
                 }
             }

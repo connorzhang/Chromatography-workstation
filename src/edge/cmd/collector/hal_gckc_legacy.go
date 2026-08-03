@@ -201,6 +201,9 @@ func (d *LegacyGCKCDriver) SetCycleParams(count int, intervalMin float64) error 
 	b0 := (text[0]-'0')<<4 + (text[1] - '0')
 	b1 := (text[2]-'0')<<4 + (text[3] - '0')
 
+	if count > 9999 {
+		count = 9999
+	}
 	c1 := byte(count / 100)
 	c2 := byte(count % 100)
 	c1Hex, _ := strconv.ParseUint(fmt.Sprintf("%d", c1), 16, 8)

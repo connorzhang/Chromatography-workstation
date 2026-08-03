@@ -560,7 +560,15 @@ function setupCanvas() {
                 const baseT = parsed.t0S || 0;
                 const dtS = parsed.dtS || 0.05;
 
-                if (baseT === 0 || dataPoints.length > 50000000000) {
+                let sessionChanged = false;
+                if (parsed.sessionToken) {
+                    if (window.currentSessionToken !== undefined && window.currentSessionToken !== parsed.sessionToken) {
+                        sessionChanged = true;
+                    }
+                    window.currentSessionToken = parsed.sessionToken;
+                }
+
+                if (baseT === 0 || sessionChanged || dataPoints.length > 50000000000) {
                     dataPoints = [];
                     latestPollutants = null;
                     lastCycleResetTime = Date.now();
