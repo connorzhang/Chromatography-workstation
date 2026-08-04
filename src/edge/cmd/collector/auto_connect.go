@@ -126,7 +126,28 @@ func startAutoConnect(states *sync.Map, hub *realtime.Hub) {
 				}
 				hub.Publish(modDevID, te)
 
-				// Update hardware config for UI to query
+			// Update LastTelemetry for audit snapshot
+			st := getState(states, modDevID)
+			st.mu.Lock()
+			if st.LastTelemetry == nil {
+				st.LastTelemetry = &telemetryEvent{Type: "telemetry", DeviceID: modDevID}
+			}
+			st.LastTelemetry.At = time.Now().UTC()
+			if te.TempInj1 != nil {
+				st.LastTelemetry.TempInj1 = te.TempInj1
+				st.LastTelemetry.SetTempInj1 = te.SetTempInj1
+			}
+			if te.TempCol != nil {
+				st.LastTelemetry.TempCol = te.TempCol
+				st.LastTelemetry.SetTempCol = te.SetTempCol
+			}
+			if te.TempDet1 != nil {
+				st.LastTelemetry.TempDet1 = te.TempDet1
+				st.LastTelemetry.SetTempDet1 = te.SetTempDet1
+			}
+			st.mu.Unlock()
+
+			// Update hardware config for UI to query
 				hwCfg, _ := pstore.LoadHardwareConfig(modDevID)
 				if hwCfg.Temperatures == nil {
 					hwCfg.Temperatures = make(map[string]float64)
@@ -207,8 +228,19 @@ func startAutoConnect(states *sync.Map, hub *realtime.Hub) {
 				
 				te.CarrierPsi = &vPress
 				te.CarrierSccm = &vFlow
-				
-				hub.Publish(modDevID, te)
+			
+			hub.Publish(modDevID, te)
+
+			// Update LastTelemetry for audit snapshot
+			est := getState(states, modDevID)
+			est.mu.Lock()
+			if est.LastTelemetry == nil {
+				est.LastTelemetry = &telemetryEvent{Type: "telemetry", DeviceID: modDevID}
+			}
+			est.LastTelemetry.At = time.Now().UTC()
+			est.LastTelemetry.CarrierPsi = &vPress
+			est.LastTelemetry.CarrierSccm = &vFlow
+			est.mu.Unlock()
 			}
 
 			// --- Handle TCD Auto-Connect ---
