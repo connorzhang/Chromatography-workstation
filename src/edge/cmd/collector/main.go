@@ -66,7 +66,7 @@ var staticFS embed.FS
 
 
 
-const AppVersion = "v0.3.139"
+const AppVersion = "v0.3.140"
 
 
 
@@ -4971,12 +4971,13 @@ func processFrame(c net.Conn, f gckc.Frame, hub *realtime.Hub, states *sync.Map,
 
 		st.last143 = time.Now()
 
-		tok, _ := appendSessionSamplesLocked(st, parsed.Channel, dtS, t0, parsed.Values)
-
+		tok, active := appendSessionSamplesLocked(st, parsed.Channel, dtS, t0, parsed.Values)
 		st.mu.Unlock()
 
-		hub.Publish(f.DeviceID, event{Type: "samples", DeviceID: f.DeviceID, At: time.Now(), Channel: parsed.Channel, SessionToken: tok, DTs: dtS, T0s: t0, Values: parsed.Values})
+		if active {
+			hub.Publish(f.DeviceID, event{Type: "samples", DeviceID: f.DeviceID, At: time.Now(), Channel: parsed.Channel, SessionToken: tok, DTs: dtS, T0s: t0, Values: parsed.Values})
 
+			}
 	}
 
 }

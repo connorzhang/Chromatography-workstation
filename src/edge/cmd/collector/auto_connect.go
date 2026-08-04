@@ -255,20 +255,20 @@ func startAutoConnect(states *sync.Map, hub *realtime.Hub) {
 				t0 := st.lastTS[1]
 				st.lastTS[1] = t0 + float64(len(pts))*dtS
 				st.last143 = time.Now()
-				tok, _ := appendSessionSamplesLocked(st, 1, dtS, t0, pts)
-				st.mu.Unlock()
-
-				// Publish to realtime hub for UI plotting
-				hub.Publish(currentDevID, event{
-					Type:         "samples",
-					DeviceID:     currentDevID,
-					At:           time.Now(),
-					Channel:      1,
-					SessionToken: tok,
-					DTs:          dtS,
-					T0s:          t0,
-					Values:       pts,
-				})
+				tok, active := appendSessionSamplesLocked(st, 1, dtS, t0, pts)
+								st.mu.Unlock()
+								if active {
+									hub.Publish(currentDevID, event{
+										Type:         "samples",
+										DeviceID:     currentDevID,
+										At:           time.Now(),
+										Channel:      1,
+										SessionToken: tok,
+										DTs:          dtS,
+										T0s:          t0,
+										Values:       pts,
+									})
+								}
 			}
 				tcdCtrlMu.Unlock()
 

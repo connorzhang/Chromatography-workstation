@@ -37,12 +37,13 @@ func schedulerTick(hub *realtime.Hub, states *sync.Map, method v1.Method) {
 		for ch := 0; ch < 8; ch++ {
 			st.mu.Lock()
 			s := st.sessions[ch]
-			if s == nil || !s.active {
+			if s == nil {
 				st.mu.Unlock()
 				continue
 			}
 			started := s.startedAt
 			snapshotDone := s.snapshotDone
+			isActive := s.active
 			st.mu.Unlock()
 
 			timeSinceStart := time.Since(started)
@@ -102,7 +103,7 @@ func schedulerTick(hub *realtime.Hub, states *sync.Map, method v1.Method) {
 			}
 
 			// 1. Check if we need to stop acquisition / generate results
-			if !snapshotDone && timeSinceStart >= acqDur {
+			if isActive && !snapshotDone && timeSinceStart >= acqDur {
 				// AcqMin reached: perform snapshot and result calculation
 				finalizeSession(hub, st, deviceID, ch, method)
 				hw, _ := pstore.LoadHardwareConfig(deviceID)
