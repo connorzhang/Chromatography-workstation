@@ -66,7 +66,7 @@ var staticFS embed.FS
 
 
 
-const AppVersion = "v0.3.140"
+const AppVersion = "v0.3.141"
 
 
 
@@ -109,8 +109,8 @@ type deviceState struct {
 	lastResultByCh map[int]lastResult
 
 	synced         bool
-
 	nextAuditRemark string
+	LastTelemetry   *telemetryEvent
 }
 
 
@@ -1184,6 +1184,8 @@ func main() {
 
 	states := &sync.Map{}
 
+	initAuditSnapshot(states)
+
 	cfg := chromsend143.Config{ShuaiJian1: 1, ShuaiJian2: 1, ShuaiJian3: 1}
 
 	method := loadMethod()
@@ -1389,6 +1391,8 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 	mux := http.NewServeMux()
 
 	mux.Handle("/events", hub)
+
+	mux.HandleFunc("/api/v1/audit", handleAuditAPI(states))
 
 	mux.HandleFunc("/api/v1/server", func(w http.ResponseWriter, r *http.Request) {
 
@@ -4581,6 +4585,7 @@ func processFrame(c net.Conn, f gckc.Frame, hub *realtime.Hub, states *sync.Map,
 
 			te.DeviceID = f.DeviceID
 
+			st.LastTelemetry = &te
 			hub.Publish(f.DeviceID, te)
 
 
@@ -4889,7 +4894,8 @@ func processFrame(c net.Conn, f gckc.Frame, hub *realtime.Hub, states *sync.Map,
 
 		te.DeviceID = f.DeviceID
 
-		hub.Publish(f.DeviceID, te)
+		st.LastTelemetry = &te
+			hub.Publish(f.DeviceID, te)
 
 
 

@@ -1,8 +1,11 @@
-import os, re
+import os
 audit_file = r'i:\GIT\VS2022\Chromatography-workstation\src\edge\cmd\collector\audit_snapshot.go'
 with open(audit_file, 'r', encoding='utf-8') as f:
     content = f.read()
-content = re.sub(r'BridgeCurrent uint8\s+json:"bridgeCurrent"c[\s\S]*?\}', 'BridgeCurrent uint8     json:"bridgeCurrent"\n}', content)
+
+content = content.replace('http.BadRequest', 'http.StatusBadRequest')
+content = content.replace('\"status\":\"ek\"', '\"status\":\"ok\"')
+
 with open(audit_file, 'w', encoding='utf-8') as f:
     f.write(content)
 print('Regex replace done.')

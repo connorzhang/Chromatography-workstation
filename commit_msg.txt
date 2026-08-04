@@ -1,15 +1,6 @@
-[IChanged] Bump version to v0.3.135
+[default][clusterhmi][IChanged]-[]
 
-[Description]
-Bumped application version to v0.3.135 following the channel isolation fix for the TCD/FID live chart zigzag issue.
-
-[Root Cause]
-Forgot to increment the version number in the previous commit per project constraints.
-
-[Solution]
-Incremented AppVersion in main.go from v0.3.134 to v0.3.135.
-
-[Test Plan]
-Verify the new version number is displayed in the UI after deployment.
-
-Change-Id: Ic4902e91162f4e519417901249488020
+- 修复 audit.js 中的语法错误和导入错误（移除了不存在的 utils.js 导入）
+- 修复 audit.js 导致整个噍端 ES Module 崨溃，进而导致主页面空��的问阘
+- 修改 index.html 添加审计功能的入口，并将版本号卄级至 v0.3.142 以强制刷新浏览器缓存
+- 同步修改 Makefile 和 bump.py 中的版本号

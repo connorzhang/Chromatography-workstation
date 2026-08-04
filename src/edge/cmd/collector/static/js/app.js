@@ -1,12 +1,13 @@
-import { initDashboard } from './views/dashboard.js?v=0.3.140';
-import { initLiveChromatogram } from './views/live.js?v=0.3.140';
-import { initMethod } from './views/method.js?v=0.3.140';
-import { initSettings } from './views/settings.js?v=0.3.140';
-import { initProcess } from './views/process.js?v=0.3.140';
-import { initReport } from './views/report.js?v=0.3.140';
-import { initDebug } from './views/debug.js?v=0.3.140';
-import { initTCD } from './views/tcd.js?v=0.3.140';
-import { initEPC } from './views/epc.js?v=0.3.140';
+import { initDashboard } from './views/dashboard.js?v=0.3.142';
+import { initLiveChromatogram } from './views/live.js?v=0.3.142';
+import { initMethod } from './views/method.js?v=0.3.142';
+import { initSettings } from './views/settings.js?v=0.3.142';
+import { initProcess } from './views/process.js?v=0.3.142';
+import { initReport } from './views/report.js?v=0.3.142';
+import { initDebug } from './views/debug.js?v=0.3.142';
+import { initTCD } from './views/tcd.js?v=0.3.142';
+import { initEPC } from './views/epc.js?v=0.3.142';
+import { initAudit } from './views/audit.js?v=0.3.142';
 
 document.addEventListener('DOMContentLoaded', () => {
     const navItems = document.querySelectorAll('.nav-item');
@@ -26,6 +27,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initDebug();
     initTCD();
     initEPC();
+    initAudit();
 
     navItems.forEach(item => {
         item.addEventListener('click', () => {
