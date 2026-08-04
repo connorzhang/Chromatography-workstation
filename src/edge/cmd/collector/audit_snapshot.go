@@ -110,64 +110,74 @@ func restartAuditRoutine(states *sync.Map) {
 	auditRoutineDone = make(chan bool)
 
 	go func() {
-		for {
-			select {
-			case <-auditRoutineDone:
-				return
-			case <-auditRoutineTicker.C:
-				takeAuditSnapshot(states)
-			}
-		}
-	}()
+takeAuditSnapshot(states)
+for {
+select {
+case <-auditRoutineDone:
+return
+case <-auditRoutineTicker.C:
+takeAuditSnapshot(states)
+}
+}
+}()
 }
 
 func takeAuditSnapshot(states *sync.Map) {
-	var te *telemetryEvent
+log.Println("[Audit] takeAuditSnapshot triggered")
+var te *telemetryEvent
+devCount := 0
+nonNilCount := 0
 
-	states.Range(func(key, value interface{}) bool {
-		st := value.(*deviceState)
-		st.mu.Lock()
-		if st.LastTelemetry != nil {
-			te = st.LastTelemetry
-		}
-		st.mu.Unlock()
-		return te == nil // if found one, stop ranging
-	})
+states.Range(func(key, value interface{}) bool {
+devCount++
+st := value.(*deviceState)
+st.mu.Lock()
+if st.LastTelemetry != nil {
+nonNilCount++
+te = st.LastTelemetry
+}
+log.Printf("[Audit] Evaluated device %v, LastTelemetry is nil? %v\n", key, st.LastTelemetry == nil)
+st.mu.Unlock()
+return te == nil // if found one, stop ranging
+})
 
-	if te == nil {
-		return
-	}
+log.Printf("[Audit] Evaluated %d devices, %d had non-nil LastTelemetry\n", devCount, nonNilCount)
 
-	snap := AuditSnapshot{
-		Timestamp:   time.Now(),
-		TempCol:     te.TempCol,
-		TempInj1:    te.TempInj1,
-		TempInj2:    te.TempInj2,
-		TempDet1:    te.TempDet1,
-		TempDet2:    te.TempDet2,
-		TempDet3:    te.TempDet3,
-		CarrierPsi:  te.CarrierPsi,
-		CarrierSccm: te.CarrierSccm,
-		H2Psi:       te.H2Psi,
-		H2Sccm:      te.H2Sccm,
-		AirPsi:      te.AirPsi,
-		AirSccm:     te.AirSccm,
-	}
+if te == nil {
+log.Println("[Audit] te is nil, no snapshot taken")
+return
+}
 
-	if globalTCDCtrl != nil {
-		tcdState := globalTCDCtrl.GetState()
-		snap.BridgeCurrent = tcdState.BridgeCurrent
-	}
+snap := AuditSnapshot{
+Timestamp:   time.Now(),
+TempCol:     te.TempCol,
+TempInj1:    te.TempInj1,
+TempInj2:    te.TempInj2,
+TempDet1:    te.TempDet1,
+TempDet2:    te.TempDet2,
+TempDet3:    te.TempDet3,
+CarrierPsi:  te.CarrierPsi,
+CarrierSccm: te.CarrierSccm,
+H2Psi:       te.H2Psi,
+H2Sccm:      te.H2Sccm,
+AirPsi:      te.AirPsi,
+AirSccm:     te.AirSccm,
+}
 
-	auditHistoryMutex.Lock()
-	auditHistory = append(auditHistory, snap)
-	if len(auditHistory) > 10000 {
-		auditHistory = auditHistory[len(auditHistory)-10000:]
-	}
-	saveAuditHistory()
-	auditHistoryMutex.Unlock()
+if globalTCDCtrl != nil {
+tcdState := globalTCDCtrl.GetState()
+snap.BridgeCurrent = tcdState.BridgeCurrent
+}
 
-	log.Println("[Audit] Snapshot taken at", snap.Timestamp)
+auditHistoryMutex.Lock()
+auditHistory = append(auditHistory, snap)
+if len(auditHistory) > 10000 {
+auditHistory = auditHistory[len(auditHistory)-10000:]
+}
+saveAuditHistory()
+auditHistoryMutex.Unlock()
+
+log.Println("[Audit] Snapshot taken successfully at", snap.Timestamp)
 }
 
 func handleAuditAPI(states *sync.Map) http.HandlerFunc {

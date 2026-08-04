@@ -66,7 +66,7 @@ var staticFS embed.FS
 
 
 
-const AppVersion = "v0.3.143"
+const AppVersion = "v0.3.144"
 
 
 
@@ -143,7 +143,7 @@ type runSession struct {
 
 	lastSample    float64
 
-	lastEventMask int // 涓婃涓嬪彂鐨勪簨浠舵帺鐮侊紝鐢ㄤ簬妫€娴嬪彉鍖栨椂鎵嶄笅鍙?IO 鎸囦护
+	lastEventMask int // 涓婃涓嬪彂鐨勪簨浠舵帺鐮侊紝鐢ㄤ簬妫€娴嬪彉鍖栨椂鎵嶄笅鍙?IO 鎸囦�?
 
 	auditRemark   string
 }
@@ -554,7 +554,7 @@ func extractNMHC(res v1.Result) (thc, ch4, nmhc float64, ok bool) {
 
 
 
-	// 浠?Groups 涓彁鍙栬绠楀ソ鐨?NMHC
+	// �?Groups 涓彁鍙栬绠楀ソ鐨?NMHC
 
 	var nmhcOK bool
 
@@ -712,7 +712,7 @@ type telemetryEvent struct {
 
 
 
-	// 6璺俯搴﹁瀹氬€?(閫氳繃瀹氭椂涓嬪彂Cmd 0鏌ヨ寰楀埌)
+	// 6璺俯搴﹁瀹氬�?(閫氳繃瀹氭椂涓嬪彂Cmd 0鏌ヨ寰楀�?
 
 	SetTempInj1 *float64 `json:"setTempInj1,omitempty"`
 
@@ -728,7 +728,7 @@ type telemetryEvent struct {
 
 
 
-	// 6璺俯搴︿繚鎶ゅ€?
+	// 6璺俯搴︿繚鎶ゅ�?
 
 	ProtTempInj1 *float64 `json:"protTempInj1,omitempty"`
 
@@ -744,7 +744,7 @@ type telemetryEvent struct {
 
 
 
-	// 缁崵绮洪悩鑸碘偓?
+	// 缁崵绮洪悩鑸碘�?
 
 	Heating *bool `json:"heating,omitempty"`
 
@@ -1046,7 +1046,7 @@ func parseTemps143(payload []byte) (telemetryEvent, bool) {
 
 
 
-	// 鐟欙絾鐎?Cmd 143/128 閻ㄥ嫮濮搁幀浣哥摟閼哄偊绱橭ffset 12閿?
+	// 鐟欙絾鐎?Cmd 143/128 閻ㄥ嫮濮搁幀浣哥摟閼哄偊绱橭ffset 12�?
 
 	if len(payload) > 12 {
 
@@ -1176,7 +1176,7 @@ func main() {
 
 	httpPort := 8080
 
-	allowControl := true // 寮哄埗鏀惧紑鎺у埗鏉冮檺
+	allowControl := true // 寮哄埗鏀惧紑鎺у埗鏉冮�?
 
 
 
@@ -1256,7 +1256,7 @@ func main() {
 
 
 
-		// 鍚姩 MQTT 瀹㈡埛绔?
+		// 鍚�?MQTT 瀹㈡埛绔?
 
 		sysCfg := ps.LoadSysConfig()
 
@@ -1542,7 +1542,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 
 		if r.Method == http.MethodGet {
 
-			// 濡傛灉鎻愪緵浜?auth 鍙傛暟锛岄獙璇佸瘑鐮?
+			// 濡傛灉鎻愪緵�?auth 鍙傛暟锛岄獙璇佸瘑鐮?
 
 			authPass := r.URL.Query().Get("auth")
 
@@ -1560,7 +1560,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 
 			safeCfg := cfg
 
-			// safeCfg.AdminPass = "***" // 鍙互涓嶉殣钘忥紝鍥犱负宸茬粡閫氳繃瀵嗙爜杩涙潵浜?
+			// safeCfg.AdminPass = "***" // 鍙互涓嶉殣钘忥紝鍥犱负宸茬粡閫氳繃瀵嗙爜杩涙潵�?
 
 			writeJSON(w, http.StatusOK, safeCfg)
 
@@ -1602,7 +1602,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 
 
 
-			// 濡傛灉淇敼浜嗗瘑鐮侊紝灏卞簲鐢ㄦ柊瀵嗙爜
+			// 濡傛灉淇敼浜嗗瘑鐮侊紝灏卞簲鐢ㄦ柊瀵嗙�?
 
 			if input.AdminPass != "" {
 
@@ -1664,7 +1664,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 
 
 
-			// 閲嶅惎 MQTT (绠€鍗曞鐞嗭紝鍙噸鏂板疄渚嬪寲锛岀湡姝ｇ殑鏂紑鏃ц繛鎺ュ彲浠ユ殏鏃跺拷鐣ユ垨鑰呭湪 telemetry 閲屽仛)
+			// 閲嶅�?MQTT (绠€鍗曞鐞嗭紝鍙噸鏂板疄渚嬪寲锛岀湡姝ｇ殑鏂紑鏃ц繛鎺ュ彲浠ユ殏鏃跺拷鐣ユ垨鑰呭湪 telemetry 閲屽�?
 
 			if mqttClient != nil {
 
@@ -1702,11 +1702,11 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 
 
 
-	// --- 鏂扮増 API_DESIGN 绾﹀畾鐨?RESTful 鎺ュ彛 ---
+	// --- 鏂扮�?API_DESIGN 绾﹀畾鐨?RESTful 鎺ュ�?---
 
 
 
-	// 1. 閸掑棙鐎介弬瑙勭《娑撳孩鐗庨崙?
+	// 1. 閸掑棙鐎介弬瑙勭《娑撳孩鐗庨�?
 
 	mux.HandleFunc("/api/method", func(w http.ResponseWriter, r *http.Request) {
 
@@ -1794,7 +1794,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 
 			Amount float64 `json:"amount"` // 濮濄倖顐奸弽鍥ㄧ毜濞夈劌鍙嗛惃鍕杽闂勫懏绁挎惔?
 
-			RunID  string  `json:"run_id"` // 娴ｈ法鏁ら崫顏冮嚋鏉╂稒鐗遍幍瑙勵偧閻ㄥ嫮绮ㄩ弸婊勬降閺嶅洤鐣?
+			RunID  string  `json:"run_id"` // 娴ｈ法鏁ら崫顏冮嚋鏉╂稒鐗遍幍瑙勵偧閻ㄥ嫮绮ㄩ弸婊勬降閺嶅洤�?
 
 		}
 
@@ -1818,7 +1818,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 
 
 
-		// 1. 閼惧嘲褰囪ぐ鎾冲閺傝纭?
+		// 1. 閼惧嘲褰囪ぐ鎾冲閺傝�?
 
 		method, ok := pstore.LoadMethod("default")
 
@@ -1832,7 +1832,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 
 
 
-		// 2. 娴?nmhcStore 閼惧嘲褰囬張鈧弬鏉垮瀻閺嬫劗绮ㄩ弸?
+		// 2. �?nmhcStore 閼惧嘲褰囬張鈧弬鏉垮瀻閺嬫劗绮ㄩ�?
 
 		mockResponses := map[string]float64{}
 
@@ -1858,13 +1858,13 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 
 
 
-		// 3. 鐏忓棗顕惔鏃傜矋閸掑棛娈戦崫宥呯安閸婄厧鐡ㄩ崗?Method 閻?Level 娑?
+		// 3. 鐏忓棗顕惔鏃傜矋閸掑棛娈戦崫宥呯安閸婄厧鐡ㄩ崗?Method �?Level �?
 
 		for i, cmpd := range method.Compounds {
 
 			if resp, ok := mockResponses[cmpd.Name]; ok {
 
-				// 閺屻儲澹橀弰顖氭儊瀹告彃鐡ㄩ崷銊嚉缁狙冨焼
+				// 閺屻儲澹橀弰顖氭儊瀹告彃鐡ㄩ崷銊嚉缁狙冨�?
 
 				found := false
 
@@ -1924,7 +1924,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 
 
 
-	// 2. 绾兛娆㈤崣宥嗗付
+	// 2. 绾兛娆㈤崣宥嗗�?
 
 	mux.HandleFunc("/api/control/temp", func(w http.ResponseWriter, r *http.Request) {
 
@@ -2060,7 +2060,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 
 				"Det1": true,
 
-			} // 榛樿寮€鍚繖3璺?
+			} // 榛樿寮€鍚繖3�?
 
 		}
 
@@ -2442,7 +2442,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 
 
 
-		// 鏇存柊骞舵寔涔呭寲 EPC 閰嶇疆
+		// 鏇存柊骞舵寔涔呭�?EPC 閰嶇�?
 
 		hw, _ := pstore.LoadHardwareConfig(deviceID)
 
@@ -2502,7 +2502,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 
 		deviceID := uiLastDevice
 
-		// 浣跨敤 getState 纭繚璁惧鐘舵€佸瓨鍦紙Modular 妯″紡涓嬪彲鑳芥湭閫氳繃 TCP 娉ㄥ唽锛?
+		// 浣跨�?getState 纭繚璁惧鐘舵€佸瓨鍦紙Modular 妯″紡涓嬪彲鑳芥湭閫氳�?TCP 娉ㄥ唽锛?
 
 		st := getState(states, deviceID)
 
@@ -2612,7 +2612,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 
 
 
-	// 3. 閸樺棗褰剁拋鏉跨秿 (閸╄桨绨?SQLite)
+	// 3. 閸樺棗褰剁拋鏉跨�?(閸╄桨绨?SQLite)
 
 	mux.HandleFunc("/api/history/results", func(w http.ResponseWriter, r *http.Request) {
 
@@ -2634,7 +2634,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 
 		if err != nil || from == nil {
 
-			// 濡傛灉鍓嶇娌℃湁浼?from锛屼负浜嗚兘鎹炲埌鏈€鏂扮殑璁板綍锛堥槻姝㈡柇鐢电郴缁熸椂闂撮敊璇級锛屾垜浠粯璁ゆ斁寮€ from 闄愬埗
+			// 濡傛灉鍓嶇娌℃湁浼?from锛屼负浜嗚兘鎹炲埌鏈€鏂扮殑璁板綍锛堥槻姝㈡柇鐢电郴缁熸椂闂撮敊璇級锛屾垜浠粯璁ゆ斁寮€ from 闄愬�?
 
 			fromVal := time.Time{}
 
@@ -2646,7 +2646,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 
 		if err != nil || to == nil {
 
-			// 濡傛灉娌℃湁浼?to锛岄粯璁ゆ斁寮€鍒版湭鏉?
+			// 濡傛灉娌℃湁�?to锛岄粯璁ゆ斁寮€鍒版湭鏉?
 
 			toVal := time.Now().Add(365 * 24 * time.Hour)
 
@@ -2937,7 +2937,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 
 
 
-	// --- 鍘熸湁 API 缁х画淇濈暀 ---
+	// --- 鍘熸�?API 缁х画淇濈暀 ---
 
 	mux.HandleFunc("/api/v1/method", func(w http.ResponseWriter, r *http.Request) {
 
@@ -3801,7 +3801,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 
 				}
 
-				// 鐎电厧鍤懕姘値缂佸嫬鍨?
+				// 鐎电厧鍤懕姘値缂佸嫬�?
 
 				for _, g := range res.Groups {
 
@@ -3819,7 +3819,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 
 
 
-	// 閸樼喐婀侀惃?nmhc csv 鐎电厧鍤穱婵囧瘮閸忕厧顔?(闁插秴鐣鹃崥鎴濆煂閺傜増甯撮崣?
+	// 閸樼喐婀侀�?nmhc csv 鐎电厧鍤穱婵囧瘮閸忕厧�?(闁插秴鐣鹃崥鎴濆煂閺傜増甯撮�?
 
 	mux.HandleFunc("/api/v1/results/nmhc/export.csv", func(w http.ResponseWriter, r *http.Request) {
 
@@ -4357,7 +4357,7 @@ func handleConn(c net.Conn, hub *realtime.Hub, states *sync.Map, cfg chromsend14
 
 
 
-	// 鍚姩涓€涓畾鏃跺櫒锛屾瘡 10 绉掑彂閫佷竴娆?Cmd 0 浠ユ煡璇㈣瀹氭俯搴?
+	// 鍚姩涓€涓畾鏃跺櫒锛屾瘡 10 绉掑彂閫佷竴�?Cmd 0 浠ユ煡璇㈣瀹氭俯搴?
 
 	done := make(chan struct{})
 
@@ -4379,13 +4379,13 @@ func handleConn(c net.Conn, hub *realtime.Hub, states *sync.Map, cfg chromsend14
 
 			case <-ticker.C:
 
-				// 鍙戦€?Cmd 0 (鎺ф俯鍙傛暟鏌ヨ)
+				// 鍙戦�?Cmd 0 (鎺ф俯鍙傛暟鏌ヨ)
 
-				// DeviceID 鎴戜滑杩欓噷鎷夸笉鍒扮‘鍒囩殑锛堝湪绗竴鍖呮墠瑙ｆ瀽鍑烘潵锛夛紝浣嗛€氬父鍏?0 鎴栧崰浣嶇涔熻
+				// DeviceID 鎴戜滑杩欓噷鎷夸笉鍒扮‘鍒囩殑锛堝湪绗竴鍖呮墠瑙ｆ瀽鍑烘潵锛夛紝浣嗛€氬父�?0 鎴栧崰浣嶇涔熻�?
 
-				// 鏈€濂芥槸浠?states 閲屾嬁鍒帮紝涓嶈繃鎴戜滑鍙互鍦?processFrame 鏀跺埌鍖呯‘璁?ID 鍚庡啀鍙?
+				// 鏈€濂芥槸浠?states 閲屾嬁鍒帮紝涓嶈繃鎴戜滑鍙互鍦?processFrame 鏀跺埌鍖呯‘璁?ID 鍚庡啀�?
 
-				// 绠€渚胯捣瑙侊紝鐩存帴鍙戜竴涓┖ DeviceID 鐨勫寘锛屼富鏉块€氬父鍙湅 Cmd 涓嶇湅 DeviceID
+				// 绠€渚胯捣瑙侊紝鐩存帴鍙戜竴涓�?DeviceID 鐨勫寘锛屼富鏉块€氬父鍙湅 Cmd 涓嶇�?DeviceID
 
 				frame, _ := gckc.Encode(gckc.Frame{
 
@@ -4399,7 +4399,7 @@ func handleConn(c net.Conn, hub *realtime.Hub, states *sync.Map, cfg chromsend14
 
 				})
 
-				// 涓嶈璁剧疆 WriteDeadline锛屽惁鍒欎細褰卞搷鍏ㄥ眬 TCP 杩炴帴鐨勮鍐?
+				// 涓嶈璁剧疆 WriteDeadline锛屽惁鍒欎細褰卞搷鍏ㄥ眬 TCP 杩炴帴鐨勮�?
 
 				// _ = c.SetWriteDeadline(time.Now().Add(2 * time.Second))
 
@@ -4582,11 +4582,21 @@ func processFrame(c net.Conn, f gckc.Frame, hub *realtime.Hub, states *sync.Map,
 	case 128:
 
 		if te, ok := parseSetTemps128(f.Payload); ok {
+te.DeviceID = f.DeviceID
 
-			te.DeviceID = f.DeviceID
+st.mu.Lock()
+if st.LastTelemetry == nil {
+st.LastTelemetry = &telemetryEvent{Type: "telemetry", DeviceID: f.DeviceID}
+}
+st.LastTelemetry.SetTempCol = te.SetTempCol
+st.LastTelemetry.SetTempInj1 = te.SetTempInj1
+st.LastTelemetry.SetTempInj2 = te.SetTempInj2
+st.LastTelemetry.SetTempDet1 = te.SetTempDet1
+st.LastTelemetry.SetTempDet2 = te.SetTempDet2
+st.LastTelemetry.SetTempDet3 = te.SetTempDet3
+st.mu.Unlock()
 
-			st.LastTelemetry = &te
-			hub.Publish(f.DeviceID, te)
+hub.Publish(f.DeviceID, te)
 
 
 
@@ -4704,7 +4714,7 @@ func processFrame(c net.Conn, f gckc.Frame, hub *realtime.Hub, states *sync.Map,
 
 	case 130, 138:
 
-		// 瑙ｆ瀽澶栭儴浜嬩欢鏃堕棿绋嬪簭 Table0 (浜嬩欢 1~4)
+		// 瑙ｆ瀽澶栭儴浜嬩欢鏃堕棿绋嬪�?Table0 (浜嬩�?1~4)
 
 		m := parseEventTable(f.Payload)
 
@@ -4728,7 +4738,7 @@ func processFrame(c net.Conn, f gckc.Frame, hub *realtime.Hub, states *sync.Map,
 
 	case 228, 229:
 
-		// 瑙ｆ瀽澶栭儴浜嬩欢鏃堕棿绋嬪簭 Table1 (浜嬩欢 5~8)
+		// 瑙ｆ瀽澶栭儴浜嬩欢鏃堕棿绋嬪�?Table1 (浜嬩�?5~8)
 
 		m := parseEventTable(f.Payload)
 
@@ -4752,7 +4762,7 @@ func processFrame(c net.Conn, f gckc.Frame, hub *realtime.Hub, states *sync.Map,
 
 	case 159:
 
-		// 璋冭瘯杈撳嚭159鎶ユ枃鍏ㄩ儴鍐呭
+		// 璋冭瘯杈撳嚭159鎶ユ枃鍏ㄩ儴鍐呭�?
 
 		LogDebugf("Cmd 159 Payload: %X", f.Payload)
 
@@ -4778,7 +4788,7 @@ func processFrame(c net.Conn, f gckc.Frame, hub *realtime.Hub, states *sync.Map,
 
 			}
 
-			// 杞芥皵1=EPC 1, 姘㈡皵1=EPC 10(index 9), 绌烘皵1=EPC 11(index 10)
+			// 杞芥�?=EPC 1, 姘㈡�?=EPC 10(index 9), 绌烘�?=EPC 11(index 10)
 
 			if len(items) > 9 {
 
@@ -4793,10 +4803,23 @@ func processFrame(c net.Conn, f gckc.Frame, hub *realtime.Hub, states *sync.Map,
 				e.AirPsi = f64p(items[10].ActualPsi)
 
 				e.AirSccm = f64p(items[10].ActualSccm)
+}
 
-			}
+st.mu.Lock()
+if st.LastTelemetry == nil {
+st.LastTelemetry = &telemetryEvent{Type: "telemetry", DeviceID: f.DeviceID}
+}
+st.LastTelemetry.At = time.Now().UTC()
+st.LastTelemetry.CarrierPsi = e.CarrierPsi
+st.LastTelemetry.CarrierSccm = e.CarrierSccm
+st.LastTelemetry.H2Psi = e.H2Psi
+st.LastTelemetry.H2Sccm = e.H2Sccm
+st.LastTelemetry.AirPsi = e.AirPsi
+st.LastTelemetry.AirSccm = e.AirSccm
+st.LastTelemetry.Epc = e.Epc
+st.mu.Unlock()
 
-			hub.Publish(f.DeviceID, e)
+hub.Publish(f.DeviceID, e)
 
 
 
@@ -4891,11 +4914,26 @@ func processFrame(c net.Conn, f gckc.Frame, hub *realtime.Hub, states *sync.Map,
 	}
 
 	if te, ok := parseTemps143(f.Payload); ok {
+te.DeviceID = f.DeviceID
 
-		te.DeviceID = f.DeviceID
+st.mu.Lock()
+if st.LastTelemetry == nil {
+st.LastTelemetry = &telemetryEvent{Type: "telemetry", DeviceID: f.DeviceID}
+}
+st.LastTelemetry.At = time.Now().UTC()
+st.LastTelemetry.TempCol = te.TempCol
+st.LastTelemetry.TempInj1 = te.TempInj1
+st.LastTelemetry.TempInj2 = te.TempInj2
+st.LastTelemetry.TempDet1 = te.TempDet1
+st.LastTelemetry.TempDet2 = te.TempDet2
+st.LastTelemetry.TempDet3 = te.TempDet3
+st.LastTelemetry.Heating = te.Heating
+st.LastTelemetry.Ready = te.Ready
 
-		st.LastTelemetry = &te
-			hub.Publish(f.DeviceID, te)
+mergedTe := *st.LastTelemetry
+st.mu.Unlock()
+
+hub.Publish(f.DeviceID, mergedTe)
 
 
 
@@ -4953,13 +4991,13 @@ func processFrame(c net.Conn, f gckc.Frame, hub *realtime.Hub, states *sync.Map,
 
 	for _, parsed := range parsedAll {
 
-		// 鎭㈠鏈€鍘熷鐨勩€佸畬鍏ㄦ纭殑閫昏緫锛?
+		// 鎭㈠鏈€鍘熷鐨勩€佸畬鍏ㄦ纭殑閫昏緫�?
 
-		// 瀹為檯涓婏紝纭欢鍗忚閲岀殑 freqByte 鏄?(閲囨牱鐜?/ 10)銆?
+		// 瀹為檯涓婏紝纭欢鍗忚閲岀�?freqByte �?(閲囨牱鐜?/ 10)�?
 
-		// 姣斿 50Hz 鐨勯噰鏍风巼锛宖reqByte 灏辨槸 5銆傛墍浠?parsed.Freq10 (freqByte * 10) 灏辨槸鐪熷疄鐨?50Hz锛?
+		// 姣斿�?50Hz 鐨勯噰鏍风巼锛宖reqByte 灏辨�?5銆傛墍浠?parsed.Freq10 (freqByte * 10) 灏辨槸鐪熷疄�?50Hz�?
 
-		// 閭ｄ箞姣忎釜鐐圭殑鏃堕棿闂撮殧灏辨槸 dtS = 1.0 / 50.0 = 0.02 绉掋€?
+		// 閭ｄ箞姣忎釜鐐圭殑鏃堕棿闂撮殧灏辨槸 dtS = 1.0 / 50.0 = 0.02 绉掋�?
 
 		dtS := 1.0 / float64(parsed.Freq10)
 
@@ -5054,7 +5092,7 @@ func appendSessionSamplesLocked(st *deviceState, ch int, dtS float64, t0 float64
 
 	if !ok || s == nil {
 
-		s = newRunSession(false) // 榛樿涓嶅浜庡垎鏋愮姸鎬侊紝闄ら潪涓诲姩鏀跺埌寮€濮嬪垎鏋愭寚浠?
+		s = newRunSession(false) // 榛樿涓嶅浜庡垎鏋愮姸鎬侊紝闄ら潪涓诲姩鏀跺埌寮€濮嬪垎鏋愭寚�?
 
 		st.sessions[ch] = s
 
@@ -5219,9 +5257,9 @@ func finalizeSession(hub *realtime.Hub, st *deviceState, deviceID string, ch int
 
 		}
 
-		// 杩欓噷鍙栨秷浠呭綋 thc 鍜?ch4 鍚屾椂瀛樺湪鐨勯檺鍒讹紝鍏佽浠讳綍缁撴灉淇濆瓨鍒?nmhcStore
+		// 杩欓噷鍙栨秷浠呭�?thc �?ch4 鍚屾椂瀛樺湪鐨勯檺鍒讹紝鍏佽浠讳綍缁撴灉淇濆瓨鍒?nmhcStore
 
-		// 浠ヤ繚璇?TCD 杩欑涓嶅寘鍚?THC/CH4 鐨勫垎鏋愯褰曚篃鑳芥樉绀哄湪鍥捐〃鍜屾姤琛ㄤ笂
+		// 浠ヤ繚璇?TCD 杩欑涓嶅寘�?THC/CH4 鐨勫垎鏋愯褰曚篃鑳芥樉绀哄湪鍥捐〃鍜屾姤琛ㄤ�?
 
 		if thc, ch4, nmhc, _ := extractNMHC(res); true {
 
@@ -5249,17 +5287,17 @@ func finalizeSession(hub *realtime.Hub, st *deviceState, deviceID string, ch int
 
 				mbSlave.UpdateFullResult(res)
 
-				mbSlave.SetUint16(101, 0) // 0: 绌洪棽
+				mbSlave.SetUint16(101, 0) // 0: 绌洪�?
 
-				// 鍋囪鎴戜滑杩欓噷绠€鍗曞湴灏嗗綋鍓嶆娴嬬殑 Unix 鏃堕棿鎴充綔涓哄敮涓€鏍囩ず鎴栧彧鏇存柊鐘舵€?
+				// 鍋囪鎴戜滑杩欓噷绠€鍗曞湴灏嗗綋鍓嶆娴嬬�?Unix 鏃堕棿鎴充綔涓哄敮涓€鏍囩ず鎴栧彧鏇存柊鐘舵�?
 
-				// 杩欓噷鏆傛椂涓嶇疮鍔犺繍琛屾鏁帮紝闄ら潪涓氬姟鏈夌‖鎬ц姹傘€備篃鍙互鍦ㄨ繖鑷 143銆?
+				// 杩欓噷鏆傛椂涓嶇疮鍔犺繍琛屾鏁帮紝闄ら潪涓氬姟鏈夌‖鎬ц姹傘€備篃鍙互鍦ㄨ繖鑷�?143�?
 
 			}
 
 
 
-			// 婢х偤鍣烘稉濠冨Г MQTT
+			// 婢х偤鍣烘稉濠冨�?MQTT
 
 			if mqttClient != nil {
 
@@ -5406,9 +5444,9 @@ func publishSessionResultSnapshot(hub *realtime.Hub, st *deviceState, deviceID s
 
 		}
 
-		// 杩欓噷鍙栨秷浠呭綋 thc 鍜?ch4 鍚屾椂瀛樺湪鐨勯檺鍒讹紝鍏佽浠讳綍缁撴灉淇濆瓨鍒?nmhcStore
+		// 杩欓噷鍙栨秷浠呭�?thc �?ch4 鍚屾椂瀛樺湪鐨勯檺鍒讹紝鍏佽浠讳綍缁撴灉淇濆瓨鍒?nmhcStore
 
-		// 浠ヤ繚璇?TCD 杩欑涓嶅寘鍚?THC/CH4 鐨勫垎鏋愯褰曚篃鑳芥樉绀哄湪鍥捐〃鍜屾姤琛ㄤ笂
+		// 浠ヤ繚璇?TCD 杩欑涓嶅寘�?THC/CH4 鐨勫垎鏋愯褰曚篃鑳芥樉绀哄湪鍥捐〃鍜屾姤琛ㄤ�?
 
 		if thc, ch4, nmhc, _ := extractNMHC(res); true {
 
@@ -5436,7 +5474,7 @@ func publishSessionResultSnapshot(hub *realtime.Hub, st *deviceState, deviceID s
 
 				mbSlave.UpdateFullResult(res)
 
-				mbSlave.SetUint16(101, 0) // 0: 绌洪棽
+				mbSlave.SetUint16(101, 0) // 0: 绌洪�?
 
 			}
 
@@ -5524,7 +5562,7 @@ func getActiveMethod() v1.Method {
 
 			for _, c := range m.Compounds {
 
-				// 杞崲 levels
+				// 杞�?levels
 
 				var v1Levels []v1.Level
 
@@ -5628,9 +5666,9 @@ func getActiveMethod() v1.Method {
 
 		Pollutants: []v1.PollutantSpec{
 
-			{Code: "THC", Name: "鎬荤儍", StartS: 0, EndS: 20, PaddingS: 2, Threshold: 0},
+			{Code: "THC", Name: "鎬荤�?, StartS: 0, EndS: 20, PaddingS: 2, Threshold: 0},
 
-			{Code: "CH4", Name: "鐢茬兎", StartS: 20, EndS: 80, PaddingS: 2, Threshold: 0},
+			{Code: "CH4", Name: "鐢茬�?, StartS: 20, EndS: 80, PaddingS: 2, Threshold: 0},
 
 		},
 
@@ -5800,9 +5838,9 @@ func buildCmd(name string, channel int) (byte, []byte, error) {
 
 
 
-// 鏉堝懎濮弬瑙勭《閿涙艾鐨?0~399 閻ㄥ嫭淇惔锕€鈧壈娴嗛幑顫礋 2 鐎涙濡?BCD 閻?
+// 鏉堝懎濮弬瑙勭《閿涙艾�?0~399 閻ㄥ嫭淇惔锕€鈧壈娴嗛幑顫�?2 鐎涙濡?BCD �?
 
-// 灏?float * 100锛屾彁鍙?6 浣?BCD 鏁板瓧锛屾嫾瑁呮垚 3 瀛楄妭 (Cmd 10 闇€瑕?
+// �?float * 100锛屾彁鍙?6 �?BCD 鏁板瓧锛屾嫾瑁呮�?3 瀛楄�?(Cmd 10 闇€�?
 
 func floatToBcd3B(val float64) []byte {
 
@@ -5848,7 +5886,7 @@ func floatToBcd3B(val float64) []byte {
 
 
 
-// 瑙ｆ瀽 3 瀛楄妭 BCD 涓?float64
+// 瑙ｆ�?3 瀛楄�?BCD �?float64
 
 func bcd3BToFloat(b []byte) float64 {
 
@@ -6218,17 +6256,17 @@ var indexHTML = `<!doctype html>
 
       <nav class="tabs" id="tabs">
 
-        <button class="tab active" data-tab="overview"><span class="tabIcon">濮?/span><span class="tabText">濮掑倽顫?/span></button>
+        <button class="tab active" data-tab="overview"><span class="tabIcon">�?/span><span class="tabText">濮掑倽顫?/span></button>
 
-        <button class="tab" data-tab="curve"><span class="tabIcon">閺?/span><span class="tabText">閺囪尙鍤?/span></button>
+        <button class="tab" data-tab="curve"><span class="tabIcon">�?/span><span class="tabText">閺囪尙鍤?/span></button>
 
-        <button class="tab" data-tab="result"><span class="tabIcon">閺?/span><span class="tabText">缂佹挻鐏?/span></button>
+        <button class="tab" data-tab="result"><span class="tabIcon">�?/span><span class="tabText">缂佹挻鐏?/span></button>
 
-        <button class="tab" data-tab="events"><span class="tabIcon">娴?/span><span class="tabText">娴滃娆?/span></button>
+        <button class="tab" data-tab="events"><span class="tabIcon">�?/span><span class="tabText">娴滃娆?/span></button>
 
-        <button class="tab" data-tab="logs"><span class="tabIcon">韫?/span><span class="tabText">閺冦儱绻?/span></button>
+        <button class="tab" data-tab="logs"><span class="tabIcon">�?/span><span class="tabText">閺冦儱绻?/span></button>
 
-        <button class="tab" data-tab="settings"><span class="tabIcon">鐠?/span><span class="tabText">鐠佸墽鐤?/span></button>
+        <button class="tab" data-tab="settings"><span class="tabIcon">�?/span><span class="tabText">鐠佸墽鐤?/span></button>
 
       </nav>
 
@@ -6266,17 +6304,17 @@ var indexHTML = `<!doctype html>
 
             <div>
 
-              <div class="statusStrip mono" id="home-status">閺冨爼妫? 0.000 min   娣団€冲娇: 0.000 pA</div>
+              <div class="statusStrip mono" id="home-status">閺冨爼妫? 0.000 min   娣団€冲�? 0.000 pA</div>
 
               <div style="margin-top:10px" class="ctrlStrip">
 
-                <button class="ctrlBtn">鏉╂劘顢戝▎鈩冩殶</button>
+                <button class="ctrlBtn">鏉╂劘顢戝▎鈩冩�?/button>
 
                 <div class="ctrlVal mono" id="home-runCountVal">1720</div>
 
                 <button class="ctrlBtn">閸楁洑缍?/button>
 
-                <div class="ctrlVal mono" id="home-unitVal">mg/m椴?/div>
+                <div class="ctrlVal mono" id="home-unitVal">mg/m�?/div>
 
                 <button class="ctrlAction" id="home-inject">鏉╂稒鐗?/button>
 
@@ -6294,7 +6332,7 @@ var indexHTML = `<!doctype html>
 
         <div class="card cardPad" style="max-width:980px;margin-top:12px">
 
-          <div id="tblTitle">鐠佹儳顦崚妤勩€?/div>
+          <div id="tblTitle">鐠佹儳顦崚妤勩�?/div>
 
           <table>
 
@@ -6318,11 +6356,11 @@ var indexHTML = `<!doctype html>
 
             <button class="btn dark">闁岸浜?缂佹挻娼?/button>
 
-            <label class="modeItem"><span class="dot" style="background:var(--ok)"></span><input type="radio" name="mode" checked /> 濮濓絽鐖舵潻娑欑壉</label>
+            <label class="modeItem"><span class="dot" style="background:var(--ok)"></span><input type="radio" name="mode" checked /> 濮濓絽鐖舵潻娑欑�?/label>
 
-            <label class="modeItem"><span class="dot" style="background:#B7C0CF"></span><input type="radio" name="mode" /> 闂嗚埖鐨甸崣宥嗙垼</label>
+            <label class="modeItem"><span class="dot" style="background:#B7C0CF"></span><input type="radio" name="mode" /> 闂嗚埖鐨甸崣宥嗙�?/label>
 
-            <label class="modeItem"><span class="dot" style="background:#B7C0CF"></span><input type="radio" name="mode" /> 閺嶅洦鐨甸崣宥嗙垼</label>
+            <label class="modeItem"><span class="dot" style="background:#B7C0CF"></span><input type="radio" name="mode" /> 閺嶅洦鐨甸崣宥嗙�?/label>
 
             <div class="spacer"></div>
 
@@ -6330,13 +6368,13 @@ var indexHTML = `<!doctype html>
 
             <span class="label">娑撳﹪妾?</span><input id="yhigh" class="input mono" style="width:90px" value="40" />
 
-            <span class="label">闁插洭娉﹂弮鍫曟？:</span><input id="acqmin" class="input mono" style="width:50px" value="2" />
+            <span class="label">闁插洭娉﹂弮鍫曟�?</span><input id="acqmin" class="input mono" style="width:50px" value="2" />
 
-            <span class="label">濠娾€崇潌閺冨爼妫?</span><input id="fullmin" class="input mono" style="width:50px" value="2" />
+            <span class="label">濠娾€崇潌閺冨爼�?</span><input id="fullmin" class="input mono" style="width:50px" value="2" />
 
-            <span class="label">瀵邦亞骞嗛崨銊︽埂:</span><input id="cyclemin" class="input mono" style="width:50px" value="2" title="娑撳绔撮柦鍫ｅ殰閸斻劏绻橀弽椋庢畱闂傛挳娈ч弮鍫曟？" />
+            <span class="label">瀵邦亞骞嗛崨銊︽�?</span><input id="cyclemin" class="input mono" style="width:50px" value="2" title="娑撳绔撮柦鍫ｅ殰閸斻劏绻橀弽椋庢畱闂傛挳娈ч弮鍫曟？" />
 
-            <span class="label">瀵邦亞骞嗗▎鈩冩殶:</span><input id="cyclemax" class="input mono" style="width:50px" value="9999" title="閺堚偓婢堆冩儕閻滎垵绻橀弽閿嬵偧閺? />
+            <span class="label">瀵邦亞骞嗗▎鈩冩�?</span><input id="cyclemax" class="input mono" style="width:50px" value="9999" title="閺堚偓婢堆冩儕閻滎垵绻橀弽閿嬵偧�? />
 
           </div>
 
@@ -6344,13 +6382,13 @@ var indexHTML = `<!doctype html>
 
           <div class="row" style="margin-bottom:10px">
 
-            <div id="stat" class="mono">闁岸浜?: 0.000 min  0.000 pA  娣団€冲娇1:</div>
+            <div id="stat" class="mono">闁岸浜?: 0.000 min  0.000 pA  娣団€冲�?:</div>
 
-            <label class="modeItem"><input id="autoy" type="checkbox" checked /> 瀹勪即鐝懛顏堚偓鍌氱安</label>
+            <label class="modeItem"><input id="autoy" type="checkbox" checked /> 瀹勪即鐝懛顏堚偓鍌氱�?/label>
 
-            <label class="modeItem"><input id="loop" type="checkbox" checked /> 鏉╃偟鐢婚崚鍡樼€?/label>
+            <label class="modeItem"><input id="loop" type="checkbox" checked /> 鏉╃偟鐢婚崚鍡樼�?/label>
 
-            <input id="name" class="input" placeholder="鐠嬪崬娴橀崥宥囆? style="width:200px" />
+            <input id="name" class="input" placeholder="鐠嬪崬娴橀崥宥�? style="width:200px" />
 
             <div class="spacer"></div>
 
@@ -6382,11 +6420,11 @@ var indexHTML = `<!doctype html>
 
               <div id="right">
 
-                <div id="tblTitle">閸氬秶袨 | 閸氼偊鍣?mg/m椴?</div>
+                <div id="tblTitle">閸氬秶袨 | 閸氼偊鍣?mg/m�?</div>
 
                 <table>
 
-                  <thead><tr><th>閸氬秶袨</th><th>閸氼偊鍣?mg/m椴?</th></tr></thead>
+                  <thead><tr><th>閸氬秶袨</th><th>閸氼偊鍣?mg/m�?</th></tr></thead>
 
                   <tbody id="tbody">
 
@@ -6468,7 +6506,7 @@ var indexHTML = `<!doctype html>
 
           <div class="row" style="margin-bottom:10px">
 
-            <div class="label">NMHC 缂佹挻鐏夐崢鍡楀蕉閿涘牊鈧崵鍎?閻㈣尙鍏?闂堢偟鏁抽悜閿嬧偓鑽ゅ剭閿?/div>
+            <div class="label">NMHC 缂佹挻鐏夐崢鍡楀蕉閿涘牊鈧崵鍎?閻㈣尙鍏?闂堢偟鏁抽悜閿嬧偓鑽ゅ剭�?/div>
 
             <div class="spacer"></div>
 
@@ -6478,19 +6516,19 @@ var indexHTML = `<!doctype html>
 
             <button class="btn dark" id="res-export">鐎电厧鍤瑿SV</button>
 
-            <button class="btn dark" id="res-delete">閸掔娀娅庨弮鍫曟？濞?/button>
+            <button class="btn dark" id="res-delete">閸掔娀娅庨弮鍫曟？�?/button>
 
           </div>
 
           <div class="card" style="border-radius:10px;overflow:hidden">
 
-            <div id="tblTitle">鐠佹澘缍嶉幎銉ㄣ€?/div>
+            <div id="tblTitle">鐠佹澘缍嶉幎銉ㄣ�?/div>
 
             <table>
 
               <thead><tr><th>閺冨爼妫?/th><th>閹崵鍎?/th><th>閻㈣尙鍏?/th><th>闂堢偟鏁抽悜閿嬧偓鑽ゅ剭</th></tr></thead>
 
-              <tbody id="res-tbody"><tr><td class="mono" colspan="4" style="color:var(--muted)">閺嗗倹妫ら弫鐗堝祦</td></tr></tbody>
+              <tbody id="res-tbody"><tr><td class="mono" colspan="4" style="color:var(--muted)">閺嗗倹妫ら弫鐗堝�?/td></tr></tbody>
 
             </table>
 
@@ -6518,13 +6556,13 @@ var indexHTML = `<!doctype html>
 
           <div class="card" style="border-radius:10px;overflow:hidden">
 
-            <div id="tblTitle">娴滃娆㈠ù?/div>
+            <div id="tblTitle">娴滃娆㈠�?/div>
 
             <table>
 
               <thead><tr><th>閺冨爼妫?/th><th>鐠佹儳顦?/th><th>缁鐎?/th><th>閹芥顩?/th></tr></thead>
 
-              <tbody id="evt-tbody"><tr><td class="mono" colspan="4" style="color:var(--muted)">閺嗗倹妫ら弫鐗堝祦</td></tr></tbody>
+              <tbody id="evt-tbody"><tr><td class="mono" colspan="4" style="color:var(--muted)">閺嗗倹妫ら弫鐗堝�?/td></tr></tbody>
 
             </table>
 
@@ -6540,7 +6578,7 @@ var indexHTML = `<!doctype html>
 
         <div class="card cardPad" style="max-width:1240px">
 
-          <div id="tblTitle">鐠嬪啳鐦弮銉ョ箶</div>
+          <div id="tblTitle">鐠嬪啳鐦弮銉ョ�?/div>
 
           <pre id="logs-pre" class="mono" style="margin:0;padding:12px;white-space:pre-wrap"></pre>
 
@@ -6558,15 +6596,15 @@ var indexHTML = `<!doctype html>
 
           <div class="row" style="margin-top:12px">
 
-            <div><div class="label">姒涙顓诲鈥崇潌閺冨爼妫?min)</div><input id="set-fullmin" class="input mono" style="width:120px" value="2" /></div>
+            <div><div class="label">姒涙顓诲鈥崇潌閺冨爼�?min)</div><input id="set-fullmin" class="input mono" style="width:120px" value="2" /></div>
 
-            <div><div class="label">姒涙顓绘稉瀣</div><input id="set-ylow" class="input mono" style="width:120px" value="0" /></div>
+            <div><div class="label">姒涙顓绘稉瀣�?/div><input id="set-ylow" class="input mono" style="width:120px" value="0" /></div>
 
-            <div><div class="label">姒涙顓绘稉濠囨</div><input id="set-yhigh" class="input mono" style="width:120px" value="40" /></div>
+            <div><div class="label">姒涙顓绘稉濠囨�?/div><input id="set-yhigh" class="input mono" style="width:120px" value="40" /></div>
 
             <div><div class="label">姒涙顓诲畡浼寸彯閼奉亪鈧倸绨?/div><label class="modeItem"><input id="set-autoy" type="checkbox" checked /> 閸氼垳鏁?/label></div>
 
-            <div><div class="label">姒涙顓婚柌鍥肠閺冨爼妫?min)</div><input id="set-acqmin" class="input mono" style="width:120px" value="2" /></div>
+            <div><div class="label">姒涙顓婚柌鍥肠閺冨爼�?min)</div><input id="set-acqmin" class="input mono" style="width:120px" value="2" /></div>
 
             <div class="spacer"></div>
 
@@ -6584,7 +6622,7 @@ var indexHTML = `<!doctype html>
 
             <div class="spacer"></div>
 
-            <div class="label">閹绘劗銇氶敍姝ヾx 閺夈儴鍤?Cmd=159 EPC 娑撳﹥濮ら惃鍕蒋閻╊喖绨崣鍑ょ礄娴?0 瀵偓婵绱?/div>
+            <div class="label">閹绘劗銇氶敍姝ヾx 閺夈儴鍤?Cmd=159 EPC 娑撳﹥濮ら惃鍕蒋閻╊喖绨崣鍑ょ礄�?0 瀵偓婵�?/div>
 
           </div>
 
@@ -6592,13 +6630,13 @@ var indexHTML = `<!doctype html>
 
             <button class="btn dark" id="set-open-method">閺傝纭?/button>
 
-            <button class="btn dark" id="set-open-processing">鐠嬪崬娴樻径鍕倞</button>
+            <button class="btn dark" id="set-open-processing">鐠嬪崬娴樻径鍕�?/button>
 
-            <button class="btn dark" id="set-open-reports">妤傛楠囬幎銉ㄣ€?/button>
+            <button class="btn dark" id="set-open-reports">妤傛楠囬幎銉ㄣ�?/button>
 
             <div class="spacer"></div>
 
-            <div class="label" style="color:var(--muted)">娴滃瞼楠囬崗銉ュ經閸楃姳缍呴敍姘瑝閸楃姷鏁ゆい鑸电埉閺嶅洨顒?/div>
+            <div class="label" style="color:var(--muted)">娴滃瞼楠囬崗銉ュ經閸楃姳缍呴敍姘瑝閸楃姷鏁ゆい鑸电埉閺嶅洨�?/div>
 
           </div>
 
@@ -7346,7 +7384,7 @@ var indexHTML = `<!doctype html>
 
       if(!sel){
 
-        resTbodyEl.innerHTML = '<tr><td class="mono" colspan="4" style="color:var(--muted)">閺堫亪鈧瀚ㄧ拋鎯ь槵</td></tr>';
+        resTbodyEl.innerHTML = '<tr><td class="mono" colspan="4" style="color:var(--muted)">閺堫亪鈧瀚ㄧ拋鎯ь�?/td></tr>';
 
         return;
 
@@ -7396,7 +7434,7 @@ var indexHTML = `<!doctype html>
 
       if(items.length === 0){
 
-        resTbodyEl.innerHTML = '<tr><td class="mono" colspan="4" style="color:var(--muted)">閺嗗倹妫ら弫鐗堝祦</td></tr>';
+        resTbodyEl.innerHTML = '<tr><td class="mono" colspan="4" style="color:var(--muted)">閺嗗倹妫ら弫鐗堝�?/td></tr>';
 
         return;
 
@@ -7438,7 +7476,7 @@ var indexHTML = `<!doctype html>
 
       if(items.length === 0){
 
-        evtTbodyEl.innerHTML = '<tr><td class="mono" colspan="4" style="color:var(--muted)">閺嗗倹妫ら弫鐗堝祦</td></tr>';
+        evtTbodyEl.innerHTML = '<tr><td class="mono" colspan="4" style="color:var(--muted)">閺嗗倹妫ら弫鐗堝�?/td></tr>';
 
         return;
 
@@ -7650,7 +7688,7 @@ var indexHTML = `<!doctype html>
 
       }
 
-      if(!confirm('绾喛顓婚崚鐘绘珟鐠囥儲妞傞梻瀛橆唽閸愬懐娈戠拋鏉跨秿閿?)) return;
+      if(!confirm('绾喛顓婚崚鐘绘珟鐠囥儲妞傞梻瀛橆唽閸愬懐娈戠拋鏉跨秿�?)) return;
 
       const qs = new URLSearchParams();
 
@@ -7666,7 +7704,7 @@ var indexHTML = `<!doctype html>
 
       if(!res.ok){
 
-        alert(j && j.error ? String(j.error) : '閸掔娀娅庢径杈Е');
+        alert(j && j.error ? String(j.error) : '閸掔娀娅庢径杈�?);
 
         return;
 
@@ -7788,7 +7826,7 @@ var indexHTML = `<!doctype html>
 
       ctx.font = '14px system-ui';
 
-      ctx.fillText('娣団€冲娇(pA)', -28, 0);
+      ctx.fillText('娣団€冲�?pA)', -28, 0);
 
       ctx.restore();
 
@@ -7992,7 +8030,7 @@ var indexHTML = `<!doctype html>
 
         ctx.font = '14px system-ui';
 
-        ctx.fillText('缁涘绶熼柅澶嬪鐠佹儳顦?, 12, 22);
+        ctx.fillText('缁涘绶熼柅澶嬪鐠佹儳�?, 12, 22);
 
         return;
 
@@ -8008,7 +8046,7 @@ var indexHTML = `<!doctype html>
 
         ctx.font = '14px system-ui';
 
-        ctx.fillText('閺嗗倹妫ょ€圭偞妞傞弫鐗堝祦閿涘牏鐡戝鍛瘜閺夊灝褰傞柅?143 閺佺増宓佸ù渚婄礆', 12, 22);
+        ctx.fillText('閺嗗倹妫ょ€圭偞妞傞弫鐗堝祦閿涘牏鐡戝鍛瘜閺夊灝褰傞�?143 閺佺増宓佸ù渚婄礆', 12, 22);
 
         return;
 
@@ -8260,7 +8298,7 @@ var indexHTML = `<!doctype html>
 
       ctx.font = '700 14px system-ui';
 
-      ctx.fillText('娣団€冲娇(pA)', -32, 0);
+      ctx.fillText('娣団€冲�?pA)', -32, 0);
 
       ctx.restore();
 
@@ -8570,7 +8608,7 @@ var indexHTML = `<!doctype html>
 
       if(!sel){
 
-        alert('鐠囩兘鈧瀚ㄧ拋鎯ь槵');
+        alert('鐠囩兘鈧瀚ㄧ拋鎯ь�?);
 
         return;
 
@@ -8586,7 +8624,7 @@ var indexHTML = `<!doctype html>
 
       if(!res.ok){
 
-        alert(j.error || '閸欐垿鈧礁銇戠拹?);
+        alert(j.error || '閸欐垿鈧礁銇戠�?);
 
         return;
 
@@ -8948,7 +8986,7 @@ var indexHTML = `<!doctype html>
 
           if(String(msg.deviceId).startsWith('GC')){
 
-            statusEl.textContent = '閸︺劎鍤? ' + msg.deviceId + '閿涘牐鍤滈崝顭掔礆';
+            statusEl.textContent = '閸︺劎鍤? ' + msg.deviceId + '閿涘牐鍤滈崝顭掔�?;
 
           }
 
@@ -9060,7 +9098,7 @@ var indexHTML = `<!doctype html>
 
       statEl.textContent = '闁岸浜? + (Number(chnEl.value||'0')+1) + ': ' + minText + ' min   ' + vText + ' pA';
 
-      homeStatusEl.textContent = '閺冨爼妫? ' + minText + ' min   娣団€冲娇: ' + vText + ' pA';
+      homeStatusEl.textContent = '閺冨爼妫? ' + minText + ' min   娣団€冲�? ' + vText + ' pA';
 
       draw();
 
@@ -9104,15 +9142,15 @@ var indexHTML = `<!doctype html>
 
       if(sel){
 
-        statusEl.textContent = '鏉╃偞甯撮弬顓炵磻: ' + sel;
+        statusEl.textContent = '鏉╃偞甯撮弬顓炵�? ' + sel;
 
       } else if(lastActiveDevice){
 
-        statusEl.textContent = '鏉╃偞甯撮弬顓炵磻: ' + lastActiveDevice;
+        statusEl.textContent = '鏉╃偞甯撮弬顓炵�? ' + lastActiveDevice;
 
       } else {
 
-        statusEl.textContent = '鏉╃偞甯撮弬顓炵磻';
+        statusEl.textContent = '鏉╃偞甯撮弬顓炵�?;
 
       }
 
@@ -9428,7 +9466,7 @@ var indexHTML = `<!doctype html>
 
       statEl.textContent = '闁岸浜? + (Number(chnEl.value||'0')+1) + ': ' + minText + ' min   ' + vText + ' pA';
 
-      homeStatusEl.textContent = '閺冨爼妫? ' + minText + ' min   娣団€冲娇: ' + vText + ' pA';
+      homeStatusEl.textContent = '閺冨爼妫? ' + minText + ' min   娣団€冲�? ' + vText + ' pA';
 
     }
 
@@ -9692,15 +9730,15 @@ var indexHTML = `<!doctype html>
 
     const openPlaceholder = (title)=>{
 
-      alert(title + '閿涙艾绶熺€圭偟骞?);
+      alert(title + '閿涙艾绶熺€圭偟�?);
 
     };
 
     if(setOpenMethodEl) setOpenMethodEl.addEventListener('click', ()=>openPlaceholder('閺傝纭?));
 
-    if(setOpenProcessingEl) setOpenProcessingEl.addEventListener('click', ()=>openPlaceholder('鐠嬪崬娴樻径鍕倞'));
+    if(setOpenProcessingEl) setOpenProcessingEl.addEventListener('click', ()=>openPlaceholder('鐠嬪崬娴樻径鍕�?));
 
-    if(setOpenReportsEl) setOpenReportsEl.addEventListener('click', ()=>openPlaceholder('妤傛楠囬幎銉ㄣ€?));
+    if(setOpenReportsEl) setOpenReportsEl.addEventListener('click', ()=>openPlaceholder('妤傛楠囬幎銉ㄣ�?));
 
   </script>
 
