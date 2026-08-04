@@ -1,13 +1,13 @@
-import { initDashboard } from './views/dashboard.js?v=0.3.142';
-import { initLiveChromatogram } from './views/live.js?v=0.3.142';
-import { initMethod } from './views/method.js?v=0.3.142';
-import { initSettings } from './views/settings.js?v=0.3.142';
-import { initProcess } from './views/process.js?v=0.3.142';
-import { initReport } from './views/report.js?v=0.3.142';
-import { initDebug } from './views/debug.js?v=0.3.142';
-import { initTCD } from './views/tcd.js?v=0.3.142';
-import { initEPC } from './views/epc.js?v=0.3.142';
-import { initAudit } from './views/audit.js?v=0.3.142';
+import { initDashboard } from './views/dashboard.js?v=0.3.143';
+import { initLiveChromatogram } from './views/live.js?v=0.3.143';
+import { initMethod } from './views/method.js?v=0.3.143';
+import { initSettings } from './views/settings.js?v=0.3.143';
+import { initProcess } from './views/process.js?v=0.3.143';
+import { initReport } from './views/report.js?v=0.3.143';
+import { initDebug } from './views/debug.js?v=0.3.143';
+import { initTCD } from './views/tcd.js?v=0.3.143';
+import { initEPC } from './views/epc.js?v=0.3.143';
+import { initAudit } from './views/audit.js?v=0.3.143';
 
 document.addEventListener('DOMContentLoaded', () => {
     const navItems = document.querySelectorAll('.nav-item');

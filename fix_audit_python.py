@@ -1,4 +1,6 @@
-export function initAudit() {
+﻿import os
+
+js_content = r'''export function initAudit() {
     const viewPanel = document.getElementById('view-audit');
     if (!viewPanel) return;
 
@@ -22,12 +24,12 @@ export function initAudit() {
                     <thead>
                         <tr>
                             <th>时间</th>
-                            <th>柱温()</th>
-                            <th>进样1()</th>
-                            <th>进样2()</th>
-                            <th>检测1()</th>
-                            <th>检测2()</th>
-                            <th>检测3()</th>
+                            <th>柱温(C)</th>
+                            <th>进样1(C)</th>
+                            <th>进样2(C)</th>
+                            <th>检测1(C)</th>
+                            <th>检测2(C)</th>
+                            <th>检测3(C)</th>
                             <th>载气压力(psi)</th>
                             <th>载气流量(sccm)</th>
                             <th>氢气压力(psi)</th>
@@ -123,3 +125,9 @@ export function initAudit() {
     refreshBtn.addEventListener('click', loadAuditData);
     loadAuditData();
 }
+'''
+
+js_content = js_content.replace('(C)', '()')
+
+with open(r'i:\GIT\VS2022\Chromatography-workstation\src\edge\cmd\collector\static\js\views\audit.js', 'w', encoding='utf-8') as f:
+    f.write(js_content)

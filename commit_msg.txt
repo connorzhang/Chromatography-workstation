@@ -1,6 +1,4 @@
 [default][clusterhmi][IChanged]-[]
 
-- 修复 audit.js 中的语法错误和导入错误（移除了不存在的 utils.js 导入）
-- 修复 audit.js 导致整个噍端 ES Module 崨溃，进而导致主页面空��的问阘
-- 修改 index.html 添加审计功能的入口，并将版本号卄级至 v0.3.142 以强制刷新浏览器缓存
-- 同步修改 Makefile 和 bump.py 中的版本号
+- 修复 audit.js 中的 JS 樱板字符串语法随患(直接使用 Python 写时 PowerShell 寁致反德号被抴掝/郁连)
+- 同步将所有版本号(index.html, app.js, bump.py, Makefile, main.go)全面升级至 v0.3.143 以强刷刷新浏览器缓存

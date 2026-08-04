@@ -9,5 +9,5 @@ def replace_in_file(filepath, old, new):
             f.write(content.replace(old, new))
         print(f'Replaced in {filepath}')
 
-replace_in_file('../../../../buildver.txt', '0.3.140', '0.3.142')
-replace_in_file('../../../../Makefile', '0.3.140', '0.3.142')
+replace_in_file('../../../../buildver.txt', '0.3.143', '0.3.143')
+replace_in_file('../../../../Makefile', '0.3.143', '0.3.143')
