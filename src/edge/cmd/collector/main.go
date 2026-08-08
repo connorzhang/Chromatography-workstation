@@ -66,7 +66,7 @@ var staticFS embed.FS
 
 
 
-const AppVersion = "v0.3.146"
+const AppVersion = "v0.3.147"
 
 
 
@@ -5167,7 +5167,9 @@ func finalizeSession(hub *realtime.Hub, st *deviceState, deviceID string, ch int
 	}
 	tok := s.token
 	auditRem := s.auditRemark
-	s.active = false
+	// 不再强制设置 s.active = false，允许在达到采集时间后继续在前端图表中渲染数据
+	// s.active = false
+	s.snapshotDone = true // 设置 snapshotDone，防止重复出峰计算
 	st.mu.Unlock()
 
 

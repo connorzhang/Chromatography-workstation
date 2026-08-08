@@ -106,12 +106,12 @@ func schedulerTick(hub *realtime.Hub, states *sync.Map, method v1.Method) {
 			if isActive && !snapshotDone && timeSinceStart >= acqDur {
 				// AcqMin reached: perform snapshot and result calculation
 				finalizeSession(hub, st, deviceID, ch, method)
-				hw, _ := pstore.LoadHardwareConfig(deviceID)
-						isLooping := ui.Loop || hw.CycleCount > 1
-						if !isLooping {
-							// Send Stop command to hardware ONLY if not looping
-					_ = sendCmd(st, deviceID, 23, []byte{byte(ch)})
-				}
+				// hw, _ := pstore.LoadHardwareConfig(deviceID)
+				// isLooping := ui.Loop || hw.CycleCount > 1
+				// if !isLooping {
+				// 	// Send Stop command to hardware ONLY if not looping
+				// 	// _ = sendCmd(st, deviceID, 23, []byte{byte(ch)})
+				// }
 			}
 
 			// 2. We removed the local Start (Cmd 22) for the next cycle
