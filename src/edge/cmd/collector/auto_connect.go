@@ -287,20 +287,21 @@ func startAutoConnect(states *sync.Map, hub *realtime.Hub) {
 				t0 := st.lastTS[1]
 				st.lastTS[1] = t0 + float64(len(pts))*dtS
 				st.last143 = time.Now()
-				tok, active := appendSessionSamplesLocked(st, 1, dtS, t0, pts)
+				tok, _ := appendSessionSamplesLocked(st, 1, dtS, t0, pts)
 								st.mu.Unlock()
-								if active {
-									hub.Publish(currentDevID, event{
-										Type:         "samples",
-										DeviceID:     currentDevID,
-										At:           time.Now(),
-										Channel:      1,
-										SessionToken: tok,
-										DTs:          dtS,
-										T0s:          t0,
-										Values:       pts,
-									})
-								}
+								
+								// 无论 session 是否 active（即使处于停止分析状态），都始终将采样数据推送给前端
+								// 以保证图表能一直连续刷新
+								hub.Publish(currentDevID, event{
+									Type:         "samples",
+									DeviceID:     currentDevID,
+									At:           time.Now(),
+									Channel:      1,
+									SessionToken: tok,
+									DTs:          dtS,
+									T0s:          t0,
+									Values:       pts,
+								})
 			}
 				tcdCtrlMu.Unlock()
 

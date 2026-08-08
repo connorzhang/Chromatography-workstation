@@ -66,7 +66,7 @@ var staticFS embed.FS
 
 
 
-const AppVersion = "v0.3.148"
+const AppVersion = "v0.3.149"
 
 
 
@@ -4980,13 +4980,12 @@ func processFrame(c net.Conn, f gckc.Frame, hub *realtime.Hub, states *sync.Map,
 
 		st.last143 = time.Now()
 
-		tok, active := appendSessionSamplesLocked(st, parsed.Channel, dtS, t0, parsed.Values)
+		tok, _ := appendSessionSamplesLocked(st, parsed.Channel, dtS, t0, parsed.Values)
 		st.mu.Unlock()
 
-		if active {
-			hub.Publish(f.DeviceID, event{Type: "samples", DeviceID: f.DeviceID, At: time.Now(), Channel: parsed.Channel, SessionToken: tok, DTs: dtS, T0s: t0, Values: parsed.Values})
-
-			}
+		// 无论 session 是否 active（即使处于停止分析状态），都始终将采样数据推送给前端
+		// 以保证图表能一直连续刷新
+		hub.Publish(f.DeviceID, event{Type: "samples", DeviceID: f.DeviceID, At: time.Now(), Channel: parsed.Channel, SessionToken: tok, DTs: dtS, T0s: t0, Values: parsed.Values})
 	}
 
 }
