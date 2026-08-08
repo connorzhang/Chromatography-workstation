@@ -206,32 +206,25 @@ func (c *TCDController) parseFrame(frame []byte) {
 	for i := 0; i < 20; i++ {
 		idx := dataOffset + (i * 4)
 
-		// BCD编码：4字节 → 8个BCD数字
-		// 示例：0x12 0x34 0x56 0x78 → BCD: 1 2 3 4 5 6 7 8
-		//   第一个数字 1 → 负数，剩余 2345678 → -2345678 µV = -2345.678 mV
-		nibbles := [8]int{
-			int(frame[idx] >> 4),
-			int(frame[idx] & 0x0F),
-			int(frame[idx+1] >> 4),
-			int(frame[idx+1] & 0x0F),
-			int(frame[idx+2] >> 4),
-			int(frame[idx+2] & 0x0F),
-			int(frame[idx+3] >> 4),
-			int(frame[idx+3] & 0x0F),
-		}
-
+		// 根据文档：直接大端转10进制，但首个十六进制字符为符号位
+		// 最高半字节为 0x10 -> 负数
+		// 最高半字节为 0x00 -> 正数
+		// 剩余 28 位为绝对值
+		
+		val32 := binary.BigEndian.Uint32(frame[idx : idx+4])
+		
+		// 提取最高 4 bit
+		signNibble := val32 >> 28
+		// 提取剩下 28 bit 的绝对值
+		absVal := val32 & 0x0FFFFFFF
+		
 		sign := 1.0
-		if nibbles[0] == 1 {
+		if signNibble == 1 {
 			sign = -1.0
 		}
 
-		var uvValue int64
-		for j := 1; j < 8; j++ {
-			uvValue = uvValue*10 + int64(nibbles[j])
-		}
-
-		// µV → mV，保留小数点后3位精度。刚才逆序反而加剧了锯齿，说明原先0就是最老数据，这里恢复顺序存放。
-		c.state.Values[i] = sign * float64(uvValue) / 1000.0
+		// 假设单位仍为 µV，转换为 mV
+		c.state.Values[i] = sign * float64(absVal) / 1000.0
 	}
 	c.state.FrameCount++
 	c.state.LastUpdate = time.Now()
