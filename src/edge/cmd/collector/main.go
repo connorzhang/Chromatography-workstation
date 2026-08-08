@@ -66,7 +66,7 @@ var staticFS embed.FS
 
 
 
-const AppVersion = "v0.3.147"
+const AppVersion = "v0.3.148"
 
 
 
@@ -4082,6 +4082,8 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 
 				err = driver.SendRawCmd(mappedCmd, payload)
 
+				releaseExternalEvents(st)
+
 			case "startAll":
 
 				err = driver.StartAnalysis(0xFF) // 0xFF denotes start all
@@ -4094,6 +4096,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 				err = driver.StopAnalysis() // Cmd 246? Wait, buildCmd says 19.
 
 				mappedCmd = 19
+				releaseExternalEvents(st)
 
 			case "tempOn":
 
@@ -4989,6 +4992,32 @@ func processFrame(c net.Conn, f gckc.Frame, hub *realtime.Hub, states *sync.Map,
 }
 
 
+
+func releaseExternalEvents(st *deviceState) {
+	// 在收到停止命令时，主动重置/释放所有外部事件 (IO CH5-8) 的输出状态
+	modbusTempCtrlMu.Lock()
+	ctrl := globalModbusTempCtrl
+	modbusTempCtrlMu.Unlock()
+	
+	if ctrl != nil {
+		for ioChannel := 5; ioChannel <= 8; ioChannel++ {
+			if err := ctrl.SetIO(ioChannel, false); err != nil {
+				LogErrorf("手动停止分析时释放 IO CH%d 失败: %v", ioChannel, err)
+			} else {
+				LogInfof("手动停止分析，成功释放 IO CH%d 外部事件", ioChannel)
+			}
+		}
+	}
+	
+	// 重置内存中记录的 event mask 状态
+	st.mu.Lock()
+	for _, s := range st.sessions {
+		if s != nil {
+			s.lastEventMask = 0
+		}
+	}
+	st.mu.Unlock()
+}
 
 func resetAllSessions(st *deviceState) {
 st.mu.Lock()
