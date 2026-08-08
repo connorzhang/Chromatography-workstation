@@ -66,7 +66,7 @@ var staticFS embed.FS
 
 
 
-const AppVersion = "v0.3.150"
+const AppVersion = "v0.3.151"
 
 
 
@@ -4082,7 +4082,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 
 				err = driver.SendRawCmd(mappedCmd, payload)
 
-				releaseExternalEvents(st)
+				releaseExternalEvents(st, deviceID)
 
 			case "startAll":
 
@@ -4096,7 +4096,7 @@ func serveHTTP(port int, hub *realtime.Hub, states *sync.Map, allowControl bool,
 				err = driver.StopAnalysis() // Cmd 246? Wait, buildCmd says 19.
 
 				mappedCmd = 19
-				releaseExternalEvents(st)
+				releaseExternalEvents(st, deviceID)
 
 			case "tempOn":
 
@@ -4992,18 +4992,37 @@ func processFrame(c net.Conn, f gckc.Frame, hub *realtime.Hub, states *sync.Map,
 
 
 
-func releaseExternalEvents(st *deviceState) {
+func releaseExternalEvents(st *deviceState, deviceID string) {
 	// 在收到停止命令时，主动重置/释放所有外部事件 (IO CH5-8) 的输出状态
+	// 仅释放那些在硬件事件表中配置过的数据（如果事件配置中从未用到该位，即一直为0，则不干预该路）
+	
+	configuredBits := make([]bool, 4)
+	if pstore != nil {
+		hw, ok := pstore.LoadHardwareConfig(deviceID)
+		if ok {
+			for _, evt := range hw.Events {
+				for bit := 0; bit < 4; bit++ {
+					if (evt.EventMask & (1 << bit)) != 0 {
+						configuredBits[bit] = true
+					}
+				}
+			}
+		}
+	}
+
 	modbusTempCtrlMu.Lock()
 	ctrl := globalModbusTempCtrl
 	modbusTempCtrlMu.Unlock()
 	
 	if ctrl != nil {
-		for ioChannel := 5; ioChannel <= 8; ioChannel++ {
-			if err := ctrl.SetIO(ioChannel, false); err != nil {
-				LogErrorf("手动停止分析时释放 IO CH%d 失败: %v", ioChannel, err)
-			} else {
-				LogInfof("手动停止分析，成功释放 IO CH%d 外部事件", ioChannel)
+		for bit := 0; bit < 4; bit++ {
+			if configuredBits[bit] {
+				ioChannel := bit + 5
+				if err := ctrl.SetIO(ioChannel, false); err != nil {
+					LogErrorf("手动停止分析时释放 IO CH%d 失败: %v", ioChannel, err)
+				} else {
+					LogInfof("手动停止分析，成功释放 IO CH%d 外部事件 (因事件表中配置了该路数据)", ioChannel)
+				}
 			}
 		}
 	}

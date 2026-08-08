@@ -50,7 +50,8 @@ func schedulerTick(hub *realtime.Hub, states *sync.Map, method v1.Method) {
 
 			// 0. 外部事件时间程序调度 (Modular 模式下通过温控模块 IO CH5-8 下发开关量)
 			// 事件1-4 对应 IO CH5-8
-			if pstore != nil && pstore.LoadSysConfig().DriverMode == "modular" {
+			// 只有在 isActive (未停止分析) 的情况下才处理基于时间轴的事件序列
+			if isActive && pstore != nil && pstore.LoadSysConfig().DriverMode == "modular" {
 				hw, _ := pstore.LoadHardwareConfig(deviceID)
 				if len(hw.Events) > 0 {
 					elapsedMin := timeSinceStart.Minutes()
