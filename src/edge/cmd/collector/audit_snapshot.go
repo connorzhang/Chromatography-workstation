@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
-		"net/http"
+	"math"
+	"net/http"
 	"sync"
 	"time"
+
+	"chromatography-workstation/edge/internal/publisher"
 )
 
 const auditConfigFile = "audit_config.json"
@@ -19,20 +22,24 @@ type AuditConfig struct {
 }
 
 type AuditSnapshot struct {
-Timestamp     time.Time `json:"timestamp"`
-TempCol       *float64  `json:"tempCol,omitempty"`
-TempInj1      *float64  `json:"tempInj1,omitempty"`
-TempInj2      *float64  `json:"tempInj2,omitempty"`
-TempDet1      *float64  `json:"tempDet1,omitempty"`
-TempDet2      *float64  `json:"tempDet2,omitempty"`
-TempDet3      *float64  `json:"tempDet3,omitempty"`
-CarrierPsi    *float64  `json:"carrierPsi,omitempty"`
-CarrierSccm   *float64  `json:"carrierSccm,omitempty"`
-H2Psi         *float64  `json:"h2Psi,omitempty"`
-H2Sccm        *float64  `json:"h2Sccm,omitempty"`
-AirPsi        *float64  `json:"airPsi,omitempty"`
-AirSccm       *float64  `json:"airSccm,omitempty"`
-BridgeCurrent uint8     `json:"bridgeCurrent"`
+	Timestamp     time.Time `json:"timestamp"`
+	TempCol       *float64  `json:"tempCol,omitempty"`
+	TempInj1      *float64  `json:"tempInj1,omitempty"`
+	TempInj2      *float64  `json:"tempInj2,omitempty"`
+	TempDet1      *float64  `json:"tempDet1,omitempty"`
+	TempDet2      *float64  `json:"tempDet2,omitempty"`
+	TempDet3      *float64  `json:"tempDet3,omitempty"`
+	CarrierPsi    *float64  `json:"carrierPsi,omitempty"`
+	CarrierSccm   *float64  `json:"carrierSccm,omitempty"`
+	H2Psi         *float64  `json:"h2Psi,omitempty"`
+	H2Sccm        *float64  `json:"h2Sccm,omitempty"`
+	AirPsi        *float64  `json:"airPsi,omitempty"`
+	AirSccm       *float64  `json:"airSccm,omitempty"`
+	BridgeCurrent uint8     `json:"bridgeCurrent"`
+	BaselineMax   *float64  `json:"baselineMax,omitempty"`
+	BaselineMin   *float64  `json:"baselineMin,omitempty"`
+	BaselineDrift *float64  `json:"baselineDrift,omitempty"`
+	BaselineNoise *float64  `json:"baselineNoise,omitempty"`
 }
 
 var (
@@ -123,61 +130,129 @@ takeAuditSnapshot(states)
 }
 
 func takeAuditSnapshot(states *sync.Map) {
-log.Println("[Audit] takeAuditSnapshot triggered")
-var te *telemetryEvent
-devCount := 0
-nonNilCount := 0
+	log.Println("[Audit] takeAuditSnapshot triggered")
+	var te *telemetryEvent
+	var baselineMax, baselineMin, baselineDrift, baselineNoise *float64
+	devCount := 0
+	nonNilCount := 0
 
+	states.Range(func(key, value interface{}) bool {
+		devCount++
+		st := value.(*deviceState)
+		st.mu.Lock()
+		if st.LastTelemetry != nil {
+			nonNilCount++
+			te = st.LastTelemetry
+			
+			// Calculate baseline drift & noise from channel 1 session
+			if st.sessions != nil {
+				if sess, ok := st.sessions[1]; ok {
+					auditConfigMutex.Lock()
+					intervalMins := auditConfig.IntervalMins
+					auditConfigMutex.Unlock()
+					
+					intervalSecs := float64(intervalMins) * 60.0
+					if sess.dtS > 0 && len(sess.values) > 0 {
+						pointsToConsider := int(intervalSecs / sess.dtS)
+						if pointsToConsider > len(sess.values) {
+							pointsToConsider = len(sess.values)
+						}
+						if pointsToConsider > 0 {
+							startIdx := len(sess.values) - pointsToConsider
+							subVals := sess.values[startIdx:]
+							
+							maxVal := subVals[0]
+							minVal := subVals[0]
+							for _, v := range subVals {
+								if v > maxVal { maxVal = v }
+								if v < minVal { minVal = v }
+							}
+							drift := maxVal - minVal
+							
+							var sum, sumSq float64
+							for _, v := range subVals {
+								sum += v
+								sumSq += v * v
+							}
+							mean := sum / float64(len(subVals))
+							variance := (sumSq / float64(len(subVals))) - (mean * mean)
+							noise := 0.0
+							if variance > 0 {
+								noise = math.Sqrt(variance)
+							}
+							
+							baselineMax = &maxVal
+							baselineMin = &minVal
+							baselineDrift = &drift
+							baselineNoise = &noise
+						}
+					}
+				}
+			}
+		}
+		log.Printf("[Audit] Evaluated device %v, LastTelemetry is nil? %v\n", key, st.LastTelemetry == nil)
+		st.mu.Unlock()
+		return te == nil // if found one, stop ranging
+	})
+
+	log.Printf("[Audit] Evaluated %d devices, %d had non-nil LastTelemetry\n", devCount, nonNilCount)
+
+	if te == nil {
+		log.Println("[Audit] te is nil, no snapshot taken")
+		return
+	}
+
+	snap := AuditSnapshot{
+		Timestamp:     time.Now(),
+		TempCol:       te.TempCol,
+		TempInj1:      te.TempInj1,
+		TempInj2:      te.TempInj2,
+		TempDet1:      te.TempDet1,
+		TempDet2:      te.TempDet2,
+		TempDet3:      te.TempDet3,
+		CarrierPsi:    te.CarrierPsi,
+		CarrierSccm:   te.CarrierSccm,
+		H2Psi:         te.H2Psi,
+		H2Sccm:        te.H2Sccm,
+		AirPsi:        te.AirPsi,
+		AirSccm:       te.AirSccm,
+		BaselineMax:   baselineMax,
+		BaselineMin:   baselineMin,
+		BaselineDrift: baselineDrift,
+		BaselineNoise: baselineNoise,
+	}
+
+	if globalTCDCtrl != nil {
+		tcdState := globalTCDCtrl.GetState()
+		snap.BridgeCurrent = tcdState.BridgeCurrent
+	}
+
+	auditHistoryMutex.Lock()
+	auditHistory = append(auditHistory, snap)
+	if len(auditHistory) > 10000 {
+		auditHistory = auditHistory[len(auditHistory)-10000:]
+	}
+	saveAuditHistory()
+	auditHistoryMutex.Unlock()
+
+	log.Println("[Audit] Snapshot taken successfully at", snap.Timestamp)
+
+// Send to MQTT via publisher
+var devID string = "SYSTEM"
 states.Range(func(key, value interface{}) bool {
-devCount++
-st := value.(*deviceState)
-st.mu.Lock()
-if st.LastTelemetry != nil {
-nonNilCount++
-te = st.LastTelemetry
-}
-log.Printf("[Audit] Evaluated device %v, LastTelemetry is nil? %v\n", key, st.LastTelemetry == nil)
-st.mu.Unlock()
-return te == nil // if found one, stop ranging
+devID = fmt.Sprintf("%v", key)
+return false
 })
 
-log.Printf("[Audit] Evaluated %d devices, %d had non-nil LastTelemetry\n", devCount, nonNilCount)
-
-if te == nil {
-log.Println("[Audit] te is nil, no snapshot taken")
-return
-}
-
-snap := AuditSnapshot{
-Timestamp:   time.Now(),
-TempCol:     te.TempCol,
-TempInj1:    te.TempInj1,
-TempInj2:    te.TempInj2,
-TempDet1:    te.TempDet1,
-TempDet2:    te.TempDet2,
-TempDet3:    te.TempDet3,
-CarrierPsi:  te.CarrierPsi,
-CarrierSccm: te.CarrierSccm,
-H2Psi:       te.H2Psi,
-H2Sccm:      te.H2Sccm,
-AirPsi:      te.AirPsi,
-AirSccm:     te.AirSccm,
-}
-
-if globalTCDCtrl != nil {
-tcdState := globalTCDCtrl.GetState()
-snap.BridgeCurrent = tcdState.BridgeCurrent
-}
-
-auditHistoryMutex.Lock()
-auditHistory = append(auditHistory, snap)
-if len(auditHistory) > 10000 {
-auditHistory = auditHistory[len(auditHistory)-10000:]
-}
-saveAuditHistory()
-auditHistoryMutex.Unlock()
-
-log.Println("[Audit] Snapshot taken successfully at", snap.Timestamp)
+publisher.GlobalPublisher.PublishResult(publisher.ResultPayload{
+DeviceID: devID,
+DeviceNo: devID,
+Time:     snap.Timestamp.Unix(),
+Result: map[string]interface{}{
+"event":    "audit_snapshot",
+"snapshot": snap,
+},
+})
 }
 
 func handleAuditAPI(states *sync.Map) http.HandlerFunc {
