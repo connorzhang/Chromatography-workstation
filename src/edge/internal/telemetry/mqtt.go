@@ -82,7 +82,13 @@ func (m *MqttClient) getTopic(mn string, flow string, eventType string) string {
 	} else {
 		base = strings.TrimSuffix(base, "/")
 	}
-	return fmt.Sprintf("%s/%s/%s/%s", base, mn, flow, eventType)
+	
+	deviceIdentifier := mn
+	if m.cfg.MqttClientID != "" {
+		deviceIdentifier = m.cfg.MqttClientID
+	}
+	
+	return fmt.Sprintf("%s/%s/%s/%s", base, deviceIdentifier, flow, eventType)
 }
 
 func (m *MqttClient) TestPublish(extNo string) error {
@@ -113,6 +119,13 @@ func (m *MqttClient) PublishInfo(mn string, payload map[string]any) {
 if m == nil || !m.client.IsConnected() {
 return
 }
+	deviceIdentifier := mn
+	if m.cfg.MqttClientID != "" {
+		deviceIdentifier = m.cfg.MqttClientID
+	}
+	if _, ok := payload["device_id"]; !ok {
+		payload["device_id"] = deviceIdentifier
+	}
 topic := m.getTopic(mn, "telemetry", "info")
 b, _ := json.Marshal(payload)
 m.client.Publish(topic, 1, false, b)
@@ -122,6 +135,13 @@ func (m *MqttClient) PublishStatus(mn string, payload map[string]any) {
 if m == nil || !m.client.IsConnected() || !m.cfg.MqttUploadStatus {
 return
 }
+	deviceIdentifier := mn
+	if m.cfg.MqttClientID != "" {
+		deviceIdentifier = m.cfg.MqttClientID
+	}
+	if _, ok := payload["device_id"]; !ok {
+		payload["device_id"] = deviceIdentifier
+	}
 topic := m.getTopic(mn, "telemetry", "status")
 b, _ := json.Marshal(payload)
 m.client.Publish(topic, 1, false, b)
@@ -131,6 +151,13 @@ func (m *MqttClient) PublishResult(mn string, payload map[string]any) {
 if m == nil || !m.client.IsConnected() || !m.cfg.MqttUploadResult {
 return
 }
+	deviceIdentifier := mn
+	if m.cfg.MqttClientID != "" {
+		deviceIdentifier = m.cfg.MqttClientID
+	}
+	if _, ok := payload["device_id"]; !ok {
+		payload["device_id"] = deviceIdentifier
+	}
 topic := m.getTopic(mn, "telemetry", "result")
 b, _ := json.Marshal(payload)
 m.client.Publish(topic, 1, false, b)
@@ -145,6 +172,13 @@ level, _ := payload["level"].(string)
 if level == "" {
 level = "info"
 }
+	deviceIdentifier := mn
+	if m.cfg.MqttClientID != "" {
+		deviceIdentifier = m.cfg.MqttClientID
+	}
+	if _, ok := payload["device_id"]; !ok {
+		payload["device_id"] = deviceIdentifier
+	}
 topic := m.getTopic(mn, "telemetry", "log/"+level)
 b, _ := json.Marshal(payload)
 m.client.Publish(topic, 1, false, b)
@@ -154,6 +188,13 @@ func (m *MqttClient) PublishAudit(mn string, payload map[string]any) {
 if m == nil || !m.client.IsConnected() {
 return
 }
+	deviceIdentifier := mn
+	if m.cfg.MqttClientID != "" {
+		deviceIdentifier = m.cfg.MqttClientID
+	}
+	if _, ok := payload["device_id"]; !ok {
+		payload["device_id"] = deviceIdentifier
+	}
 topic := m.getTopic(mn, "telemetry", "audit_snapshot")
 b, _ := json.Marshal(payload)
 m.client.Publish(topic, 1, false, b)
