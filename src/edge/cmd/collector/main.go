@@ -66,7 +66,7 @@ var staticFS embed.FS
 
 
 
-const AppVersion = "v0.3.158"
+const AppVersion = "v0.3.160"
 
 
 
@@ -5231,13 +5231,13 @@ func finalizeSession(hub *realtime.Hub, st *deviceState, deviceID string, ch int
 
 	if err != nil {
 
-		LogErrorf("鍒嗘瀽寮傚父: %v", err)
+		LogErrorf("分析异常: %v", err)
 
 		e.Error = err.Error()
 
 	} else {
 
-		LogInfof("鍒嗘瀽缁撴潫, 鏁版嵁宸插瓨鍏ユ暟鎹簱")
+		LogInfof("分析结束, 数据已存入数据库")
 
 		e.Result = res
 
@@ -5418,13 +5418,13 @@ func publishSessionResultSnapshot(hub *realtime.Hub, st *deviceState, deviceID s
 
 	if err != nil {
 
-		LogErrorf("鍒嗘瀽寮傚父: %v", err)
+		LogErrorf("分析异常: %v", err)
 
 		e.Error = err.Error()
 
 	} else {
 
-		LogInfof("鍒嗘瀽缁撴潫, 鏁版嵁宸插瓨鍏ユ暟鎹簱")
+		LogInfof("分析结束, 数据已存入数据库")
 
 		e.Result = res
 

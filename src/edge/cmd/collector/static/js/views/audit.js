@@ -21,7 +21,7 @@ export function initAudit() {
                 <table class="data-table" id="audit-table">
                     <thead>
                         <tr>
-                                                        <th>时间</th>
+                                                                                    <th>时间</th>
                             <th>柱温(℃)</th>
                             <th>进样1(℃)</th>
                             <th>载气压力(psi)</th>
@@ -78,7 +78,7 @@ export function initAudit() {
             const intVal = (v) => v !== null && v !== undefined ? v : '-';
 
             tr.innerHTML = `
-                                <td>${timeStr}</td>
+                                                <td>${timeStr}</td>
                 <td>${val(snap.tempCol)}</td>
                 <td>${val(snap.tempInj1)}</td>
                 <td>${val(snap.carrierPsi)}</td>
