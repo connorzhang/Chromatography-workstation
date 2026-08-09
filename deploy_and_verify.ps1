@@ -10,7 +10,7 @@ while ($RetryCount -lt $MaxRetries) {
         $env:GOARCH="amd64"
         $env:GOTOOLCHAIN="local"
         $env:GOMODCACHE="i:\GIT\VS2022\go_cache\pkg\mod"
-        if (-not (Test-Path $env:GOMODCACHE)) { New-Item -ItemType Directory -Force -Path $env:GOMODCACHE | Out-Null }
+        if (-not (Test-Path $env:GOMODCACHE)) { New-Item -ItemType Directory -Force -Path $env:GOMODCACHE  }
         D:\GOPATH\go1.26.2\bin\go.exe build -o collector.exe .
         if ($LASTEXITCODE -ne 0) { throw "Compile failed!" }
         Start-Sleep -Seconds 2
@@ -19,7 +19,8 @@ while ($RetryCount -lt $MaxRetries) {
         Write-Host "[Step 2] Zipping deployment files..." -ForegroundColor Cyan
         if (Test-Path "deploy_new.zip") { Remove-Item "deploy_new.zip" -Force }
         Copy-Item "..\..\..\..\.env" ".\.env" -Force
-        Compress-Archive -Path "collector.exe", "static", ".env", "..\..\..\..\collector-service.exe", "..\..\..\..\collector-service.xml" -DestinationPath "deploy_new.zip" -Force
+        python zip_deploy.py
+        #Compress-Archive -Path "collector.exe", "static", ".env", "..\..\..\..\collector-service.exe", "..\..\..\..\collector-service.xml" -DestinationPath "deploy_new.zip" -Force
 
         $remoteHost = "10.8.5.23"
         $remoteUser = "trae"
@@ -27,20 +28,20 @@ while ($RetryCount -lt $MaxRetries) {
         $env:SSH_PASSWORD = "a1234567A"
 
         Write-Host "[Step 3] Creating remote directory & Stopping remote process..." -ForegroundColor Cyan
-        sshx "-h=$remoteHost" "-u=$remoteUser" --password-only --timeout=15s "New-Item -ItemType Directory -Force -Path $remoteDir" | Out-Null
+        sshx "-h=$remoteHost" "-u=$remoteUser" --password-only --timeout=15s "New-Item -ItemType Directory -Force -Path $remoteDir" 
         
         # 尝试使用 WinSW 停止并卸载旧服务
-        sshx "-h=$remoteHost" "-u=$remoteUser" --password-only --timeout=15s "if (Test-Path $remoteDir\collector-service.exe) { cd $remoteDir; .\collector-service.exe stop; .\collector-service.exe uninstall }" | Out-Null
+        sshx "-h=$remoteHost" "-u=$remoteUser" --password-only --timeout=15s "if (Test-Path $remoteDir\collector-service.exe) { cd $remoteDir; .\collector-service.exe stop; .\collector-service.exe uninstall }" 
         
         # 强制防自愈重置：先重命名可执行文件，防止守护进程秒级拉起
-        sshx "-h=$remoteHost" "-u=$remoteUser" --password-only --timeout=15s "if (Test-Path $remoteDir\collector.exe) { Rename-Item $remoteDir\collector.exe collector_hide.exe -Force -ErrorAction SilentlyContinue }" | Out-Null
+        sshx "-h=$remoteHost" "-u=$remoteUser" --password-only --timeout=15s "if (Test-Path $remoteDir\collector.exe) { Rename-Item $remoteDir\collector.exe collector_hide.exe -Force -ErrorAction SilentlyContinue }" 
         
         # 使用 SYSTEM 权限的计划任务来强杀进程，防止普通账户无权 Kill
-        sshx "-h=$remoteHost" "-u=$remoteUser" --password-only --timeout=15s "schtasks /Create /TN KillCollector /TR 'taskkill /F /IM collector.exe' /SC ONCE /ST 00:00 /RU SYSTEM /F 2> `$null" | Out-Null
-        sshx "-h=$remoteHost" "-u=$remoteUser" --password-only --timeout=15s "schtasks /Run /TN KillCollector 2> `$null" | Out-Null
+        sshx "-h=$remoteHost" "-u=$remoteUser" --password-only --timeout=15s "schtasks /Create /TN KillCollector /TR 'taskkill /F /IM collector.exe' /SC ONCE /ST 00:00 /RU SYSTEM /F 2> `$null" 
+        sshx "-h=$remoteHost" "-u=$remoteUser" --password-only --timeout=15s "schtasks /Run /TN KillCollector 2> `$null" 
         Start-Sleep -Seconds 2
         # 清除“午夜定时炸弹”，防止凌晨 00:00 再次执行误杀
-        sshx "-h=$remoteHost" "-u=$remoteUser" --password-only --timeout=15s "schtasks /Delete /TN KillCollector /F 2> `$null" | Out-Null
+        sshx "-h=$remoteHost" "-u=$remoteUser" --password-only --timeout=15s "schtasks /Delete /TN KillCollector /F 2> `$null" 
         
         sshx "-h=$remoteHost" "-u=$remoteUser" --password-only --timeout=15s "if (Test-Path $remoteDir\collector.old) { Remove-Item $remoteDir\collector.old -Force -ErrorAction SilentlyContinue }"
         sshx "-h=$remoteHost" "-u=$remoteUser" --password-only --timeout=15s "if (Test-Path $remoteDir\collector_hide.exe) { Rename-Item $remoteDir\collector_hide.exe collector.old -Force -ErrorAction SilentlyContinue }"
