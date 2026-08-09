@@ -26,6 +26,18 @@ func (m *MqttAdapter) Stop() {
 	}
 }
 
+func (m *MqttAdapter) PublishInfo(deviceID string, deviceNo string, payload map[string]interface{}) error {
+if m.Client == nil {
+return nil
+}
+targetID := deviceID
+if deviceNo != "" {
+targetID = deviceNo
+}
+m.Client.PublishInfo(targetID, payload)
+return nil
+}
+
 func (m *MqttAdapter) PublishState(deviceID string, deviceNo string, state models.TwinState) error {
 	if m.Client == nil {
 		return nil

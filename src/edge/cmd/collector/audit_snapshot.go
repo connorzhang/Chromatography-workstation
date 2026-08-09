@@ -244,14 +244,10 @@ devID = fmt.Sprintf("%v", key)
 return false
 })
 
-publisher.GlobalPublisher.PublishResult(publisher.ResultPayload{
-DeviceID: devID,
-DeviceNo: devID,
-Time:     snap.Timestamp.Unix(),
-Result: map[string]interface{}{
+publisher.GlobalPublisher.PublishInfo(devID, devID, map[string]interface{}{
 "event":    "audit_snapshot",
+"time":     snap.Timestamp.Unix(),
 "snapshot": snap,
-},
 })
 }
 
