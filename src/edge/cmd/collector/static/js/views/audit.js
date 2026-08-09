@@ -22,8 +22,7 @@ export function initAudit() {
                     <thead>
                         <tr>
                                                                                     <th>时间</th>
-                            <th>柱温(℃)</th>
-                            <th>进样1(℃)</th>
+                            <th>保温箱(℃)</th>
                             <th>载气压力(psi)</th>
                             <th>载气流量(sccm)</th>
                             <th>桥流(mA)</th>
@@ -74,13 +73,12 @@ export function initAudit() {
                 String(d.getMinutes()).padStart(2, '0') + ':' + 
                 String(d.getSeconds()).padStart(2, '0');
 
-            const val = (v) => v !== null && v !== undefined ? parseFloat(v).toFixed(2) : '-';
-            const intVal = (v) => v !== null && v !== undefined ? v : '-';
+            const val = (v) => v !== null && v !== undefined ? parseFloat(v).toFixed(4) : '0.0000';
+            const intVal = (v) => v !== null && v !== undefined ? v : '0';
 
             tr.innerHTML = `
                                                 <td>${timeStr}</td>
-                <td>${val(snap.tempCol)}</td>
-                <td>${val(snap.tempInj1)}</td>
+                <td>${val(snap.tempBox)}</td>
                 <td>${val(snap.carrierPsi)}</td>
                 <td>${val(snap.carrierSccm)}</td>
                 <td>${intVal(snap.bridgeCurrent)}</td>

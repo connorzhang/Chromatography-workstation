@@ -21,24 +21,26 @@ type AuditConfig struct {
 }
 
 type AuditSnapshot struct {
-	Timestamp     time.Time `json:"timestamp"`
-	TempCol       *float64  `json:"tempCol,omitempty"`
-	TempInj1      *float64  `json:"tempInj1,omitempty"`
-	TempInj2      *float64  `json:"tempInj2,omitempty"`
-	TempDet1      *float64  `json:"tempDet1,omitempty"`
-	TempDet2      *float64  `json:"tempDet2,omitempty"`
-	TempDet3      *float64  `json:"tempDet3,omitempty"`
-	CarrierPsi    *float64  `json:"carrierPsi,omitempty"`
-	CarrierSccm   *float64  `json:"carrierSccm,omitempty"`
-	H2Psi         *float64  `json:"h2Psi,omitempty"`
-	H2Sccm        *float64  `json:"h2Sccm,omitempty"`
-	AirPsi        *float64  `json:"airPsi,omitempty"`
-	AirSccm       *float64  `json:"airSccm,omitempty"`
-	BridgeCurrent uint8     `json:"bridgeCurrent"`
-	BaselineMax   *float64  `json:"baselineMax,omitempty"`
-	BaselineMin   *float64  `json:"baselineMin,omitempty"`
-	BaselineDrift *float64  `json:"baselineDrift,omitempty"`
-	BaselineNoise *float64  `json:"baselineNoise,omitempty"`
+Timestamp     time.Time `json:"timestamp"`
+TempBox       float64   `json:"tempBox"`
+CarrierPsi    float64   `json:"carrierPsi"`
+CarrierSccm   float64   `json:"carrierSccm"`
+BridgeCurrent uint8     `json:"bridgeCurrent"`
+BaselineMax   float64   `json:"baselineMax"`
+BaselineMin   float64   `json:"baselineMin"`
+BaselineDrift float64   `json:"baselineDrift"`
+BaselineNoise float64   `json:"baselineNoise"`
+}
+
+func round4(v float64) float64 {
+return math.Round(v*10000) / 10000
+}
+
+func roundPtr(v *float64) float64 {
+if v == nil {
+return 0.0
+}
+return round4(*v)
 }
 
 var (
@@ -131,7 +133,7 @@ takeAuditSnapshot(states)
 func takeAuditSnapshot(states *sync.Map) {
 	log.Println("[Audit] takeAuditSnapshot triggered")
 	var te *telemetryEvent
-	var baselineMax, baselineMin, baselineDrift, baselineNoise *float64
+	var baselineMax, baselineMin, baselineDrift, baselineNoise float64
 	devCount := 0
 	nonNilCount := 0
 
@@ -180,10 +182,10 @@ func takeAuditSnapshot(states *sync.Map) {
 								noise = math.Sqrt(variance)
 							}
 							
-							baselineMax = &maxVal
-							baselineMin = &minVal
-							baselineDrift = &drift
-							baselineNoise = &noise
+							baselineMax = maxVal
+							baselineMin = minVal
+							baselineDrift = drift
+							baselineNoise = noise
 						}
 					}
 				}
@@ -202,24 +204,15 @@ func takeAuditSnapshot(states *sync.Map) {
 	}
 
 	snap := AuditSnapshot{
-		Timestamp:     time.Now(),
-		TempCol:       te.TempCol,
-		TempInj1:      te.TempInj1,
-		TempInj2:      te.TempInj2,
-		TempDet1:      te.TempDet1,
-		TempDet2:      te.TempDet2,
-		TempDet3:      te.TempDet3,
-		CarrierPsi:    te.CarrierPsi,
-		CarrierSccm:   te.CarrierSccm,
-		H2Psi:         te.H2Psi,
-		H2Sccm:        te.H2Sccm,
-		AirPsi:        te.AirPsi,
-		AirSccm:       te.AirSccm,
-		BaselineMax:   baselineMax,
-		BaselineMin:   baselineMin,
-		BaselineDrift: baselineDrift,
-		BaselineNoise: baselineNoise,
-	}
+Timestamp:     time.Now(),
+TempBox:       roundPtr(te.TempInj1),
+CarrierPsi:    roundPtr(te.CarrierPsi),
+CarrierSccm:   roundPtr(te.CarrierSccm),
+BaselineMax:   round4(baselineMax),
+BaselineMin:   round4(baselineMin),
+BaselineDrift: round4(baselineDrift),
+BaselineNoise: round4(baselineNoise),
+}
 
 	if globalTCDCtrl != nil {
 		tcdState := globalTCDCtrl.GetState()
