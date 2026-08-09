@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"chromatography-workstation/edge/internal/publisher"
 )
 
 const auditConfigFile = "audit_config.json"
@@ -244,11 +243,16 @@ devID = fmt.Sprintf("%v", key)
 return false
 })
 
-publisher.GlobalPublisher.PublishInfo(devID, devID, map[string]interface{}{
-"event":    "audit_snapshot",
-"time":     snap.Timestamp.Unix(),
-"snapshot": snap,
-})
+	if mqttClient != nil {
+		mqttClient.PublishInfo(devID, map[string]any{
+			"event":    "audit_snapshot",
+			"time":     snap.Timestamp.Unix(),
+			"snapshot": snap,
+		})
+		log.Println("[Audit] Published audit snapshot to MQTT Info topic")
+	} else {
+		log.Println("[Audit] mqttClient is nil, cannot publish audit snapshot")
+	}
 }
 
 func handleAuditAPI(states *sync.Map) http.HandlerFunc {
