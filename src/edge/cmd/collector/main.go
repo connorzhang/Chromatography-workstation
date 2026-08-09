@@ -66,7 +66,7 @@ var staticFS embed.FS
 
 
 
-const AppVersion = "v0.3.161"
+const AppVersion = "v0.3.164"
 
 
 

@@ -23,6 +23,7 @@ type AuditConfig struct {
 type AuditSnapshot struct {
 Timestamp     time.Time `json:"timestamp"`
 TempBox       float64   `json:"tempBox"`
+TempInj1      float64   `json:"tempInj1,omitempty"` // For backward compatibility
 CarrierPsi    float64   `json:"carrierPsi"`
 CarrierSccm   float64   `json:"carrierSccm"`
 BridgeCurrent uint8     `json:"bridgeCurrent"`
@@ -79,14 +80,20 @@ func saveAuditConfig() {
 }
 
 func loadAuditHistory() {
-	auditHistoryMutex.Lock()
-	defer auditHistoryMutex.Unlock()
+auditHistoryMutex.Lock()
+defer auditHistoryMutex.Unlock()
 
-	auditHistory = []AuditSnapshot{}
-	data, err := ioutil.ReadFile(auditHistoryFile)
-	if err == nil {
-		json.Unmarshal(data, &auditHistory)
-	}
+auditHistory = []AuditSnapshot{}
+data, err := ioutil.ReadFile(auditHistoryFile)
+if err == nil {
+json.Unmarshal(data, &auditHistory)
+for i := range auditHistory {
+if auditHistory[i].TempBox == 0 && auditHistory[i].TempInj1 != 0 {
+auditHistory[i].TempBox = auditHistory[i].TempInj1
+}
+auditHistory[i].TempInj1 = 0
+}
+}
 }
 
 func saveAuditHistory() {
@@ -237,7 +244,7 @@ return false
 })
 
 	if mqttClient != nil {
-		mqttClient.PublishInfo(devID, map[string]any{
+		mqttClient.PublishAudit(devID, map[string]any{
 			"event":    "audit_snapshot",
 			"time":     snap.Timestamp.Unix(),
 			"snapshot": snap,

@@ -1,4 +1,4 @@
-﻿package telemetry
+package telemetry
 
 import (
 "encoding/json"
@@ -75,14 +75,14 @@ m.client.Disconnect(250)
 }
 }
 
-func (m *MqttClient) getTopic(mn string, sub string) string {
-base := strings.TrimSpace(m.cfg.MqttTopic)
-if base == "" {
-base = "vocs/device"
-} else {
-base = strings.TrimSuffix(base, "/")
-}
-return fmt.Sprintf("%s/%s/%s", base, mn, sub)
+func (m *MqttClient) getTopic(mn string, flow string, eventType string) string {
+	base := strings.TrimSpace(m.cfg.MqttTopic)
+	if base == "" {
+		base = "chromatograph/tcd"
+	} else {
+		base = strings.TrimSuffix(base, "/")
+	}
+	return fmt.Sprintf("%s/%s/%s/%s", base, mn, flow, eventType)
 }
 
 func (m *MqttClient) TestPublish(extNo string) error {
@@ -101,7 +101,7 @@ payload := map[string]any{
 "time":      time.Now().Unix(),
 }
 b, _ := json.Marshal(payload)
-topic := m.getTopic(extNo, "test")
+topic := m.getTopic(extNo, "telemetry", "test")
 token := m.client.Publish(topic, 1, false, b)
 if !token.WaitTimeout(3 * time.Second) {
 return fmt.Errorf("发布超时")
@@ -113,7 +113,7 @@ func (m *MqttClient) PublishInfo(mn string, payload map[string]any) {
 if m == nil || !m.client.IsConnected() {
 return
 }
-topic := m.getTopic(mn, "info")
+topic := m.getTopic(mn, "telemetry", "info")
 b, _ := json.Marshal(payload)
 m.client.Publish(topic, 1, false, b)
 }
@@ -122,7 +122,7 @@ func (m *MqttClient) PublishStatus(mn string, payload map[string]any) {
 if m == nil || !m.client.IsConnected() || !m.cfg.MqttUploadStatus {
 return
 }
-topic := m.getTopic(mn, "status")
+topic := m.getTopic(mn, "telemetry", "status")
 b, _ := json.Marshal(payload)
 m.client.Publish(topic, 1, false, b)
 }
@@ -131,7 +131,7 @@ func (m *MqttClient) PublishResult(mn string, payload map[string]any) {
 if m == nil || !m.client.IsConnected() || !m.cfg.MqttUploadResult {
 return
 }
-topic := m.getTopic(mn, "result")
+topic := m.getTopic(mn, "telemetry", "result")
 b, _ := json.Marshal(payload)
 m.client.Publish(topic, 1, false, b)
 }
@@ -145,7 +145,7 @@ level, _ := payload["level"].(string)
 if level == "" {
 level = "info"
 }
-topic := m.getTopic(mn, "log/"+level)
+topic := m.getTopic(mn, "telemetry", "log/"+level)
 b, _ := json.Marshal(payload)
 m.client.Publish(topic, 1, false, b)
 }
@@ -154,7 +154,7 @@ func (m *MqttClient) PublishAudit(mn string, payload map[string]any) {
 if m == nil || !m.client.IsConnected() {
 return
 }
-topic := m.getTopic(mn, "audit")
+topic := m.getTopic(mn, "telemetry", "audit_snapshot")
 b, _ := json.Marshal(payload)
 m.client.Publish(topic, 1, false, b)
 }
